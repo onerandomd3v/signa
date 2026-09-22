@@ -574,12 +574,44 @@ into a structured payload such as:
 
 ```json
 {
-  "event_type": "possible_gunfire",
-  "location_text": "Market Junction",
-  "time_reference": "approximately_5_minutes_ago",
-  "source_claim": "auditory_observation",
-  "language": "Nigerian Pidgin",
-  "severity_candidate": "critical"
+  "contract_version": "signa.ai.report-extraction.v0",
+  "taxonomy_version": "signa.event-taxonomy.v0",
+  "event_type": {
+    "status": "identified",
+    "value": "possible_gunfire",
+    "candidates": [],
+    "evidence_quotes": ["shots"]
+  },
+  "location_reference": {
+    "status": "identified",
+    "value": "market junction",
+    "candidates": [],
+    "evidence_quotes": ["market junction"]
+  },
+  "time_reference": {
+    "status": "identified",
+    "value": "like 5 mins ago",
+    "candidates": [],
+    "evidence_quotes": ["like 5 mins ago"]
+  },
+  "source_claim": {
+    "status": "identified",
+    "value": "first_hand",
+    "candidates": [],
+    "evidence_quotes": ["I hear shots"]
+  },
+  "language": {
+    "status": "identified",
+    "value": "en-pcm",
+    "candidates": [],
+    "evidence_quotes": ["Abeg avoid market junction, I hear shots"]
+  },
+  "severity_candidate": {
+    "status": "identified",
+    "value": "CRITICAL",
+    "candidates": [],
+    "evidence_quotes": ["shots"]
+  }
 }
 ```
 

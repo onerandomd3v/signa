@@ -41,6 +41,8 @@ If the report gives no provenance clue, use `unknown`, not `unclear`. Multiple A
 
 `severity_candidate` uses the architecture's conceptual `LOW`, `MODERATE`, `HIGH`, and `CRITICAL` vocabulary. It is only the interpretation: “If this reported event were occurring as described, what seriousness class does the report appear to suggest?” It is not final incident severity, confidence, truth, or user priority.
 
+Do not use source/provenance or claim-certainty wording as severity evidence: uncertainty about whether an event occurred is distinct from how serious it would be if occurring as described. Base any severity candidate on the described event and consequences; leave it unknown when those details are insufficient.
+
 AI extraction is evidence interpretation, not verification. AI output alone cannot:
 
 - mark an incident true or transition its lifecycle;

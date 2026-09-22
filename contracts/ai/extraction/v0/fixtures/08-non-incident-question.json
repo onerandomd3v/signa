@@ -5,7 +5,7 @@
     "contract_version": "signa.ai.report-extraction.v0",
     "taxonomy_version": "signa.event-taxonomy.v0",
     "event_type": {"status": "unknown", "value": null, "candidates": [], "evidence_quotes": []},
-    "location_reference": {"status": "unknown", "value": null, "candidates": [], "evidence_quotes": []},
+    "location_reference": {"status": "identified", "value": "the market", "candidates": [], "evidence_quotes": ["the market"]},
     "time_reference": {"status": "identified", "value": "today", "candidates": [], "evidence_quotes": ["today"]},
     "source_claim": {"status": "unknown", "value": null, "candidates": [], "evidence_quotes": []},
     "language": {"status": "identified", "value": "en", "candidates": [], "evidence_quotes": ["Does anyone know"]},
