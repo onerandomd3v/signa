@@ -1292,7 +1292,7 @@ This slice directly tests the central Signa hypothesis:
 
 # 36. Decisions Still to Lock Before Coding
 
-The architecture direction and foundation decisions above are established. Several provider and product-policy details remain to be made through explicit ADRs or implementation-level decisions before their respective features are built:
+The architecture direction and foundation decisions above are established. Several provider and product-policy details remain open and must be resolved through explicit ADRs before their respective features are built:
 
 1. PostgreSQL hosting provider.
 2. Redis hosting provider.
@@ -1308,7 +1308,7 @@ The architecture direction and foundation decisions above are established. Sever
 12. Error monitoring provider.
 13. CI/CD provider and environment strategy.
 
-These choices should be made through explicit ADRs rather than silently embedded in code.
+These choices must not be silently embedded in implementation code.
 
 ---
 
