@@ -4,7 +4,6 @@ on:
   pull_request:
     branches:
       - main
-      - dev
 
 permissions:
   contents: read
@@ -17,15 +16,9 @@ jobs:
       - name: Validate pull request source branch
         env:
           HEAD_REF: ${{ github.head_ref }}
-          BASE_REF: ${{ github.base_ref }}
           ACTOR: ${{ github.actor }}
           REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
-          if [ "$BASE_REF" = "dev" ]; then
-            echo "Pull request targets the dev integration branch."
-            exit 0
-          fi
-
           if [ "$HEAD_REF" = "dev" ]; then
             echo "Promotion PR source is dev."
             exit 0
