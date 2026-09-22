@@ -29,4 +29,18 @@ Direct commits to `main` and `dev` are not part of the normal workflow. The repo
 
 Keep changes focused, use Conventional Commit-style prefixes where practical, explain how changes were tested, update documentation when needed, and never commit secrets or sensitive local configuration. Collaborators must request owner review and must not merge protected-branch PRs. The owner merges after required checks pass; for owner-authored PRs, the owner may use the PR-only bypass without another person's approval, even if GitHub still displays “Review required.”
 
-The application stack has not yet been initialized, so installation and runtime instructions will be added later.
+## Frontend development
+
+The Next.js application lives in [`apps/web`](apps/web). It requires Node.js 22.22.2 or newer in the supported 22.x line, Node.js 24.15 or newer in the 24.x line, or Node.js 26 or newer, plus npm.
+
+From a fresh clone, install its dependencies and start the development server:
+
+```sh
+cd apps/web
+npm ci
+npm run dev
+```
+
+Open <http://localhost:3000>. From `apps/web`, run `npm run lint`, `npm run typecheck`, `npm test`, `npm run format:check`, and `npm run build` for the frontend checks and production build.
+
+Local frontend settings belong in `apps/web/.env.local`, which is ignored by the root `.gitignore`; never commit local environment files or secrets. No environment variables are needed yet, so there is no `.env.example`. When a feature introduces configuration, document its variable names and safe placeholders in `.env.example`. Variables exposed to browser code must use Next.js's `NEXT_PUBLIC_` prefix and must never contain secrets.
