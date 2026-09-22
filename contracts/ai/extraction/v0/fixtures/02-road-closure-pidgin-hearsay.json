@@ -1,0 +1,14 @@
+{
+  "fixture_id": "v0-road-closure-pidgin-hearsay",
+  "raw_report_text": "My guy talk say dem block Third Mainland Bridge since morning.",
+  "expected_extraction": {
+    "contract_version": "signa.ai.report-extraction.v0",
+    "taxonomy_version": "signa.event-taxonomy.v0",
+    "event_type": {"status": "identified", "value": "road_closure", "candidates": [], "evidence_quotes": ["dem block Third Mainland Bridge"]},
+    "location_reference": {"status": "identified", "value": "Third Mainland Bridge", "candidates": [], "evidence_quotes": ["Third Mainland Bridge"]},
+    "time_reference": {"status": "identified", "value": "since morning", "candidates": [], "evidence_quotes": ["since morning"]},
+    "source_claim": {"status": "identified", "value": "second_hand", "candidates": [], "evidence_quotes": ["My guy talk say"]},
+    "language": {"status": "identified", "value": "pcm", "candidates": [], "evidence_quotes": ["My guy talk say dem block"]},
+    "severity_candidate": {"status": "identified", "value": "HIGH", "candidates": [], "evidence_quotes": ["block Third Mainland Bridge"]}
+  }
+}

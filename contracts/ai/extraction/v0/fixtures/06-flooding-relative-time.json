@@ -1,0 +1,14 @@
+{
+  "fixture_id": "v0-flooding-relative-time",
+  "raw_report_text": "Since yesterday, water has covered the road around Creek Road.",
+  "expected_extraction": {
+    "contract_version": "signa.ai.report-extraction.v0",
+    "taxonomy_version": "signa.event-taxonomy.v0",
+    "event_type": {"status": "identified", "value": "flooding", "candidates": [], "evidence_quotes": ["water has covered the road"]},
+    "location_reference": {"status": "identified", "value": "around Creek Road", "candidates": [], "evidence_quotes": ["around Creek Road"]},
+    "time_reference": {"status": "identified", "value": "Since yesterday", "candidates": [], "evidence_quotes": ["Since yesterday"]},
+    "source_claim": {"status": "unknown", "value": null, "candidates": [], "evidence_quotes": []},
+    "language": {"status": "identified", "value": "en", "candidates": [], "evidence_quotes": ["water has covered the road"]},
+    "severity_candidate": {"status": "identified", "value": "HIGH", "candidates": [], "evidence_quotes": ["water has covered the road"]}
+  }
+}

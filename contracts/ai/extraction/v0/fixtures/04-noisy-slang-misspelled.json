@@ -1,0 +1,14 @@
+{
+  "fixture_id": "v0-noisy-slang-misspelled",
+  "raw_report_text": "Abeg dem say one motar don crash for Ojuelegba; three people get hurt, no be sure sha.",
+  "expected_extraction": {
+    "contract_version": "signa.ai.report-extraction.v0",
+    "taxonomy_version": "signa.event-taxonomy.v0",
+    "event_type": {"status": "identified", "value": "traffic_collision", "candidates": [], "evidence_quotes": ["one motar don crash"]},
+    "location_reference": {"status": "identified", "value": "Ojuelegba", "candidates": [], "evidence_quotes": ["for Ojuelegba"]},
+    "time_reference": {"status": "unknown", "value": null, "candidates": [], "evidence_quotes": []},
+    "source_claim": {"status": "identified", "value": "second_hand", "candidates": [], "evidence_quotes": ["dem say"]},
+    "language": {"status": "identified", "value": "en-pcm", "candidates": [], "evidence_quotes": ["Abeg dem say one motar don crash for Ojuelegba; three people get hurt"]},
+    "severity_candidate": {"status": "identified", "value": "HIGH", "candidates": [], "evidence_quotes": ["three people get hurt"]}
+  }
+}

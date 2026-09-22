@@ -94,6 +94,8 @@ Collaborators must not merge protected-branch pull requests. Submit PRs into `de
 
 The GitHub repository owner, `onerandomd3v`, performs final merges for collaborator and owner-authored pull requests. Required automated checks must pass before merge. The owner may merge owner-authored PRs without self-review using the configured owner ruleset permissions. Only the repository owner may use the configured bypass; collaborators must not bypass protected-branch rules.
 
+GitHub's PR-only bypass is an explicit merge-time action, not an automatic review exemption. An owner-authored PR may still display “Review required” until the owner chooses the bypass when merging; this does not require another person's approval. Collaborator PRs still require owner review.
+
 All normal implementation PRs target `dev`.
 
 Promotion to `main` happens separately through the protected release workflow.

@@ -1,0 +1,14 @@
+{
+  "fixture_id": "v0-forwarded-unknown-origin",
+  "raw_report_text": "Forwarded many times; nobody knows who first saw the small fire behind the shops earlier.",
+  "expected_extraction": {
+    "contract_version": "signa.ai.report-extraction.v0",
+    "taxonomy_version": "signa.event-taxonomy.v0",
+    "event_type": {"status": "identified", "value": "fire", "candidates": [], "evidence_quotes": ["small fire"]},
+    "location_reference": {"status": "identified", "value": "behind the shops", "candidates": [], "evidence_quotes": ["behind the shops"]},
+    "time_reference": {"status": "identified", "value": "earlier", "candidates": [], "evidence_quotes": ["earlier"]},
+    "source_claim": {"status": "identified", "value": "forwarded", "candidates": [], "evidence_quotes": ["Forwarded many times"]},
+    "language": {"status": "identified", "value": "en", "candidates": [], "evidence_quotes": ["Forwarded many times"]},
+    "severity_candidate": {"status": "identified", "value": "MODERATE", "candidates": [], "evidence_quotes": ["small fire"]}
+  }
+}
