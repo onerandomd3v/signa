@@ -29,4 +29,27 @@ Direct commits to `main` and `dev` are not part of the normal workflow. The repo
 
 Keep changes focused, use Conventional Commit-style prefixes where practical, explain how changes were tested, update documentation when needed, and never commit secrets or sensitive local configuration. Collaborators must request owner review and must not merge protected-branch PRs. The owner merges after required checks pass; for owner-authored PRs, the owner may use the PR-only bypass without another person's approval, even if GitHub still displays “Review required.”
 
-The application stack has not yet been initialized, so installation and runtime instructions will be added later.
+## Go foundation
+
+Requires Go 1.25 or later.
+
+Run the API:
+
+```text
+go run ./cmd/api
+```
+
+The API listens on `:8080` by default. Check its health with `GET http://localhost:8080/healthz`.
+
+Run the worker in another terminal:
+
+```text
+go run ./cmd/worker
+```
+
+Run tests and static checks:
+
+```text
+go test ./...
+go vet ./...
+```
