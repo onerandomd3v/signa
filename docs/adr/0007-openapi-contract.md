@@ -9,10 +9,10 @@ The Go backend and Next.js/TypeScript frontend need a stable boundary for endpoi
 
 ## Decision
 
-Signa will define its HTTP API with OpenAPI. The contract is the source for request and response schemas, error shapes, enums, and authentication requirements. TypeScript client types should be generated from the contract where practical, and implementation changes must keep the contract aligned.
+Signa will define its canonical HTTP API contract at `contracts/openapi.yaml`. The Go backend and TypeScript frontend align to this contract for request and response schemas, error shapes, enums, and authentication requirements. Generated TypeScript types and clients should be used where practical; conflicting manually maintained frontend API types should be avoided. Implementation changes must keep the contract aligned.
 
 ## Consequences
 
 - Public HTTP behavior is reviewed as a versioned contract rather than inferred from handlers.
 - Contract validation belongs in the relevant quality gates once the API is initialized.
-- Frontend code must not hand-maintain conflicting API types when generated contract types are available.
+- COD-184 owns creation of the contract pipeline; this ADR does not create `contracts/openapi.yaml`.

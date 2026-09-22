@@ -1302,11 +1302,12 @@ The architecture direction and foundation decisions above are established. Sever
 6. Exact MVP incident state machine.
 7. Initial confidence transition rules.
 8. Exact P1/P2/P3 thresholds.
-9. Media size/type limits.
-10. Initial alert delivery SLO.
-11. Pilot scale assumptions.
-12. Error monitoring provider.
-13. CI/CD provider and environment strategy.
+9. Exact location-retention precision and duration.
+10. Media size/type limits.
+11. Initial alert delivery SLO.
+12. Pilot scale assumptions.
+13. Error monitoring provider.
+14. CI/CD provider and environment strategy.
 
 These choices must not be silently embedded in implementation code.
 
