@@ -51,12 +51,7 @@ The platform must never equate "AI output" with "truth." AI helps interpret evid
 
 ## Signa
 
-**Signa** is the current working name.
-
-The name reflects two important product ideas:
-
-- **Near** — proximity, route relevance, hyperlocal awareness.
-- **Signal** — useful information extracted from noise.
+**Signa** is the current working name and the only product name used by this architecture.
 
 The name is intentionally broader than "security," "emergency," or "crime" so the system can later support other high-value local intelligence use cases without changing its identity.
 
@@ -226,7 +221,7 @@ Modules may later be extracted into services if real operational or scaling pres
 |---|---|---|
 | Web client | Next.js + React + TypeScript | Responsive web application, map-heavy UI, forms, dashboards, PWA path |
 | Core backend | Go | Concurrency, predictable network services, workers, SSE, fan-out, operational simplicity |
-| API routing | Go standard library or thin router such as Chi | Keep HTTP layer small; final router can be locked during implementation |
+| API routing | Chi v5 (`github.com/go-chi/chi/v5`) | Lightweight routing with standard `net/http` compatibility and composable middleware |
 | API contract | OpenAPI | Stable boundary between Go backend and TypeScript frontend |
 | Primary database | PostgreSQL | Transactional source of truth |
 | Geospatial database | PostGIS | Radius, intersection, proximity, zones, route-related queries |
@@ -1250,21 +1245,18 @@ The exact monorepo tooling for the TypeScript application can be selected when r
 
 # 34. Architecture Decision Records
 
-Before implementation, create short ADRs for the decisions that matter most.
-
-Suggested first ADRs:
+The following decisions are accepted and recorded in `docs/adr/`:
 
 ```text
-ADR-001: Go as the core backend language
-ADR-002: PostgreSQL + PostGIS as the system of record
-ADR-003: Redis Streams as the MVP event backbone
-ADR-004: Transactional outbox for durable event publication
-ADR-005: SSE for foreground realtime updates
-ADR-006: Web Push for initial background browser alerts
-ADR-007: Modular monolith before microservices
-ADR-008: OpenAPI contract between Go and TypeScript
-ADR-009: AI interpretation separated from deterministic decisions
-ADR-010: Location minimization and approximate public geography
+ADR-0001: Go as the core backend language
+ADR-0002: Chi v5 as the Go HTTP router
+ADR-0003: PostgreSQL + PostGIS as the system of record
+ADR-0004: Redis Streams as the MVP event backbone
+ADR-0005: Transactional outbox for durable event publication
+ADR-0006: SSE for foreground realtime updates
+ADR-0007: OpenAPI contract between Go and TypeScript
+ADR-0008: AI interpretation separated from deterministic decisions
+ADR-0009: Location minimization and approximate public geography
 ```
 
 ---
@@ -1300,23 +1292,21 @@ This slice directly tests the central Signa hypothesis:
 
 # 36. Decisions Still to Lock Before Coding
 
-The architecture direction is established, but several lower-level decisions should be made before implementation tickets are created:
+The architecture direction and foundation decisions above are established. Several provider and product-policy details remain to be made through explicit ADRs or implementation-level decisions before their respective features are built:
 
-1. Go HTTP router: standard `net/http` vs Chi.
-2. PostgreSQL hosting provider.
-3. Redis hosting provider.
-4. Authentication provider vs in-house session implementation.
-5. Initial routing provider.
-6. R2 vs another S3-compatible storage provider.
-7. Exact MVP incident state machine.
-8. Initial confidence transition rules.
-9. Exact P1/P2/P3 thresholds.
-10. Location-retention precision and duration.
-11. Media size/type limits.
-12. Initial alert delivery SLO.
-13. Pilot scale assumptions.
-14. Error monitoring provider.
-15. CI/CD provider and environment strategy.
+1. PostgreSQL hosting provider.
+2. Redis hosting provider.
+3. Authentication provider vs in-house session implementation.
+4. Initial routing provider.
+5. R2 vs another S3-compatible storage provider.
+6. Exact MVP incident state machine.
+7. Initial confidence transition rules.
+8. Exact P1/P2/P3 thresholds.
+9. Media size/type limits.
+10. Initial alert delivery SLO.
+11. Pilot scale assumptions.
+12. Error monitoring provider.
+13. CI/CD provider and environment strategy.
 
 These choices should be made through explicit ADRs rather than silently embedded in code.
 
