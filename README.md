@@ -41,6 +41,11 @@ go run ./cmd/api
 
 The API listens on `:8080` by default. Check its health with `GET http://localhost:8080/healthz`.
 
+Optional local configuration can be copied from `.env.example`:
+
+- `SIGNA_API_ADDR` sets the API listen address.
+- `SIGNA_SHUTDOWN_TIMEOUT` and `SIGNA_WORKER_INTERVAL` use Go duration values such as `10s` or `500ms`.
+
 Run the worker in another terminal:
 
 ```text

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -18,8 +19,10 @@ func NewHandler(logger *slog.Logger) http.Handler {
 // NewServer creates the API server with its foundation routes.
 func NewServer(addr string, logger *slog.Logger) *http.Server {
 	return &http.Server{
-		Addr:    addr,
-		Handler: NewHandler(logger),
+		Addr:              addr,
+		Handler:           NewHandler(logger),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 }
 
