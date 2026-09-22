@@ -90,9 +90,9 @@ chore/COD-245-repository-baseline
 
 Do not bundle unrelated Linear issues into one PR.
 
-Do not merge your own PR.
+Collaborators must not merge protected-branch pull requests. Submit PRs into `dev` and request review from the repository owner.
 
-The GitHub repository owner, `onerandomd3v`, is the final merge authority. The Linear issue names `onerandomdev` as repository owner, but live GitHub metadata identifies `onerandomd3v` as owner and shows `onerandomdev` has no repository permission. Until this discrepancy is reconciled, use live GitHub ownership and rulesets for merge authority.
+The GitHub repository owner, `onerandomd3v`, performs final merges for collaborator and owner-authored pull requests. Required automated checks must pass before merge. The owner may merge owner-authored PRs without self-review using the configured owner ruleset permissions. Only the repository owner may use the configured bypass; collaborators must not bypass protected-branch rules.
 
 All normal implementation PRs target `dev`.
 
@@ -176,7 +176,7 @@ Create a canonical directory when the Linear issue that owns that implementation
 Primary engineering ownership is:
 ```text
 Backend / platform / infrastructure
-onerandomdev
+onerandomd3v (onerandomdev)
 
 Frontend
 Thundey
