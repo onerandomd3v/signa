@@ -1,0 +1,34 @@
+name: Branch policy
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  main-source-policy:
+    name: Require dev as the normal main promotion source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate pull request source branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          ACTOR: ${{ github.actor }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          if [ "$HEAD_REF" = "dev" ]; then
+            echo "Promotion PR source is dev."
+            exit 0
+          fi
+
+          if [ "$ACTOR" = "$REPOSITORY_OWNER" ]; then
+            echo "Repository owner is handling an emergency or administrative exception."
+            exit 0
+          fi
+
+          echo "This pull request targets main from '$HEAD_REF'."
+          echo "Normal application changes must first be integrated into dev."
+          exit 1
