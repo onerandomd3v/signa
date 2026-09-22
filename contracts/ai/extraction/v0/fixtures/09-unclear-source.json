@@ -1,0 +1,14 @@
+{
+  "fixture_id": "v0-unclear-source",
+  "raw_report_text": "There was a small fire behind the shops earlier; the original source is unknown.",
+  "expected_extraction": {
+    "contract_version": "signa.ai.report-extraction.v0",
+    "taxonomy_version": "signa.event-taxonomy.v0",
+    "event_type": {"status": "identified", "value": "fire", "candidates": [], "evidence_quotes": ["small fire"]},
+    "location_reference": {"status": "identified", "value": "behind the shops", "candidates": [], "evidence_quotes": ["behind the shops"]},
+    "time_reference": {"status": "identified", "value": "earlier", "candidates": [], "evidence_quotes": ["earlier"]},
+    "source_claim": {"status": "identified", "value": "unclear", "candidates": [], "evidence_quotes": ["the original source is unknown"]},
+    "language": {"status": "identified", "value": "en", "candidates": [], "evidence_quotes": ["There was a small fire"]},
+    "severity_candidate": {"status": "identified", "value": "MODERATE", "candidates": [], "evidence_quotes": ["small fire"]}
+  }
+}

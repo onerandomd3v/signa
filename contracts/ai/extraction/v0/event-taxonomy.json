@@ -1,0 +1,41 @@
+{
+  "taxonomy_version": "signa.event-taxonomy.v0",
+  "status_semantics": {
+    "identified": "One supported category is the extraction candidate; this does not verify that the event occurred.",
+    "ambiguous": "Two or more plausible supported categories remain; preserve them as candidates and leave value null.",
+    "unknown": "The report does not support a category; leave value null and candidates empty.",
+    "other": "The report supports an event claim, but the category is outside this deliberately small v0 list. Other is not a catch-all for uncertainty."
+  },
+  "event_types": [
+    {
+      "id": "possible_gunfire",
+      "meaning": "A report claims hearing or observing sounds/events described as gunfire or shots.",
+      "boundary": "This label does not establish that a weapon was fired, identify a shooter, or distinguish gunfire from another loud sound when the report is ambiguous."
+    },
+    {
+      "id": "road_closure",
+      "meaning": "A report says a road or route is closed, blocked, or not passable.",
+      "boundary": "Do not use for ordinary congestion without a claim that passage is blocked or closed. Preserve the stated cause separately as report text; do not infer one."
+    },
+    {
+      "id": "traffic_collision",
+      "meaning": "A report claims a vehicle collision or road accident.",
+      "boundary": "Do not infer injury, fault, vehicle count, or a resulting road closure unless the report states it."
+    },
+    {
+      "id": "fire",
+      "meaning": "A report claims a fire is present or has occurred.",
+      "boundary": "Do not infer its cause, extent, or whether it was deliberate."
+    },
+    {
+      "id": "flooding",
+      "meaning": "A report claims water accumulation or flooding affecting a place or route.",
+      "boundary": "Do not infer water depth, cause, or affected area beyond the report."
+    },
+    {
+      "id": "other",
+      "meaning": "A discernible event claim not represented by another v0 category.",
+      "boundary": "Keep the supporting excerpt. Do not invent a narrower category; use unknown when no event claim can be identified."
+    }
+  ]
+}
