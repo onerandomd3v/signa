@@ -28,3 +28,7 @@ Direct commits to `main` and `dev` are not part of the normal workflow. The repo
 Keep changes focused, use Conventional Commit-style prefixes where practical, explain how changes were tested, update documentation when needed, and never commit secrets or sensitive local configuration. Contributors should request owner review before merging protected-branch changes.
 
 The application stack has not yet been initialized, so installation and runtime instructions will be added later.
+
+## Governance note
+
+GitHub rulesets require the repository owner as the code owner for protected-branch changes and allow the owner to bypass review requirements on the owner's own pull requests. GitHub does not provide a repository-level setting that independently restricts the final merge button to one collaborator when that collaborator already has write access; owner review and the protected-branch ruleset are therefore the enforceable controls here.
