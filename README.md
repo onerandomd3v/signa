@@ -87,6 +87,8 @@ go test ./...
 go vet ./...
 ```
 
+Pull requests targeting `dev` or `main` enforce the Go quality checks and the web/OpenAPI checks through GitHub Actions.
+
 ## Local data infrastructure
 
 Start and stop the local PostgreSQL/PostGIS and Redis services with:
