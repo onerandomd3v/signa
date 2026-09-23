@@ -6,7 +6,17 @@ import { Textarea } from "../../components/ui/textarea";
 import type {
   CreateReportRequest,
   DeviceLocation,
+  ReportAcknowledgement,
 } from "../../lib/api/generated";
+import {
+  createIdempotencyKey,
+  SecureKeyUnavailableError,
+} from "../../lib/api/idempotency";
+import {
+  ApiConfigurationError,
+  submitReport as submitReportToApi,
+  type ReportSubmissionResult,
+} from "../../lib/api/reports";
 import {
   DeviceLocationError,
   requestDeviceLocation,
@@ -14,7 +24,10 @@ import {
 } from "./device-location";
 
 type ReportFormProps = {
-  onSubmit?: (request: CreateReportRequest) => Promise<void>;
+  submitReport?: (
+    request: CreateReportRequest,
+    idempotencyKey: string,
+  ) => Promise<ReportSubmissionResult>;
   requestLocation?: () => Promise<DeviceLocation>;
 };
 
@@ -32,10 +45,39 @@ const locationMessages: Record<LocationFailure, string> = {
   unknown: "Couldn’t get location. Try again or continue without it.",
 };
 
-const unavailableMessage = "Not sent — report submission isn’t available yet.";
+function retryDelayMessage(retryAfter?: string | null): string | undefined {
+  if (!retryAfter) return undefined;
+
+  const seconds = Number(retryAfter);
+  const retryAt = Number.isFinite(seconds)
+    ? Date.now() + seconds * 1_000
+    : Date.parse(retryAfter);
+  if (!Number.isFinite(retryAt)) return undefined;
+
+  const delay = Math.max(1, Math.ceil((retryAt - Date.now()) / 1_000));
+  return ` Try again in about ${delay} ${delay === 1 ? "second" : "seconds"}.`;
+}
+
+function submissionErrorMessage(
+  status: number,
+  retryAfter?: string | null,
+): string {
+  switch (status) {
+    case 400:
+      return "Please check the report text and try again.";
+    case 409:
+      return "This request conflicted with an earlier submission. Try again.";
+    case 429:
+      return `Too many reports were sent.${retryDelayMessage(retryAfter) ?? " Try again shortly."}`;
+    case 500:
+      return "Signa couldn’t accept the report just now. Try again.";
+    default:
+      return "Could not submit the report. Try again.";
+  }
+}
 
 export function ReportForm({
-  onSubmit,
+  submitReport = submitReportToApi,
   requestLocation = requestDeviceLocation,
 }: ReportFormProps) {
   const [reportText, setReportText] = useState("");
@@ -45,9 +87,12 @@ export function ReportForm({
   const [locationState, setLocationState] = useState<LocationState>("idle");
   const [submissionState, setSubmissionState] =
     useState<SubmissionState>("idle");
+  const [acknowledgement, setAcknowledgement] =
+    useState<ReportAcknowledgement | null>(null);
   const [message, setMessage] = useState("");
   const [hasValidationError, setHasValidationError] = useState(false);
   const locationRequestId = useRef(0);
+  const idempotencyKey = useRef<string | null>(null);
 
   async function handleRequestLocation() {
     const requestId = ++locationRequestId.current;
@@ -57,6 +102,7 @@ export function ReportForm({
     try {
       const location = await requestLocation();
       if (requestId !== locationRequestId.current) return;
+      idempotencyKey.current = null;
       setDeviceLocation(location);
       setLocationState("ready");
     } catch (error) {
@@ -70,6 +116,7 @@ export function ReportForm({
 
   function handleContinueWithoutLocation() {
     locationRequestId.current += 1;
+    if (deviceLocation) idempotencyKey.current = null;
     setDeviceLocation(null);
     setLocationState("idle");
   }
@@ -90,26 +137,39 @@ export function ReportForm({
     setSubmissionState("submitting");
     setMessage("Submitting report…");
 
-    if (!onSubmit) {
-      setSubmissionState("error");
-      setMessage(unavailableMessage);
-      return;
-    }
-
+    const request: CreateReportRequest = {
+      raw_text: rawText,
+      ...(deviceLocation ? { device_location: deviceLocation } : {}),
+    };
     try {
-      await onSubmit({
-        raw_text: rawText,
-        ...(deviceLocation ? { device_location: deviceLocation } : {}),
-      });
+      const requestKey = idempotencyKey.current ?? createIdempotencyKey();
+      idempotencyKey.current = requestKey;
+      const result = await submitReport(request, requestKey);
+      if (!result.ok) {
+        if (result.status === 409) idempotencyKey.current = null;
+        setSubmissionState("error");
+        setMessage(submissionErrorMessage(result.status, result.retryAfter));
+        return;
+      }
+
+      setAcknowledgement(result.acknowledgement);
+      idempotencyKey.current = null;
       setSubmissionState("success");
-      setMessage("Report submitted.");
-    } catch {
+      setMessage("");
+    } catch (error) {
       setSubmissionState("error");
-      setMessage("Could not submit. Try again.");
+      setMessage(
+        error instanceof ApiConfigurationError
+          ? "Report service isn’t configured. Please try again later."
+          : error instanceof SecureKeyUnavailableError
+            ? "A secure submission key isn’t available. Update your browser and try again."
+          : "Couldn’t reach Signa. Check your connection and try again.",
+      );
     }
   }
 
   function handleChange(value: string) {
+    if (value.trim() !== reportText.trim()) idempotencyKey.current = null;
     setReportText(value);
     if (submissionState === "error") {
       setHasValidationError(false);
@@ -120,9 +180,11 @@ export function ReportForm({
 
   function handleReset() {
     setReportText("");
+    setAcknowledgement(null);
     setSubmissionState("idle");
     setMessage("");
     setHasValidationError(false);
+    idempotencyKey.current = null;
     handleContinueWithoutLocation();
   }
 
@@ -133,7 +195,14 @@ export function ReportForm({
     <form className="space-y-6" onSubmit={handleSubmit}>
       {isSuccess ? (
         <div className="space-y-5" role="status" aria-live="polite">
-          <p className="font-medium text-foreground">{message}</p>
+          <p className="font-medium text-foreground">
+            Report accepted for processing.
+          </p>
+          {acknowledgement && (
+            <p className="text-sm leading-6 text-muted-foreground">
+              Reference: <span className="font-mono">{acknowledgement.report_id}</span>
+            </p>
+          )}
           <p className="text-sm leading-6 text-muted-foreground">
             Thanks for sharing.
           </p>
@@ -162,6 +231,7 @@ export function ReportForm({
               className="min-h-40 resize-y bg-background px-3 py-3 text-base leading-6 text-foreground shadow-xs"
               disabled={isSubmitting}
               id="report-text"
+              maxLength={10_000}
               onChange={(event) => handleChange(event.target.value)}
               placeholder="What did you see or hear?"
               value={reportText}
@@ -289,7 +359,11 @@ export function ReportForm({
 
           <Button
             className="h-12 w-full px-5 text-base font-semibold sm:w-auto"
-            disabled={isSubmitting || locationState === "requesting"}
+            disabled={
+              isSubmitting ||
+              locationState === "requesting" ||
+              !reportText.trim()
+            }
             size="lg"
             type="submit"
           >

@@ -27,7 +27,7 @@ export default function HomePage() {
           </section>
 
           <p className="mt-5 text-sm leading-6 text-muted-foreground">
-            Preview only — reports aren’t sent or saved yet.
+            Reports are sent to Signa for processing.
           </p>
         </div>
       </div>
