@@ -194,33 +194,56 @@ func TestIncidentDomainMigration(t *testing.T) {
 			t.Fatalf("report count = %d, want 2", reportCount)
 		}
 
-		if _, err := connection.Exec(ctx, `DELETE FROM incidents WHERE id = $1`, incidentID); err != nil {
-			t.Fatalf("delete incident: %v", err)
+		if _, err := connection.Exec(ctx, `DELETE FROM incidents WHERE id = $1`, incidentID); err == nil {
+			t.Fatal("incident with audit history was deleted")
 		}
 		var nullableIncidentID *string
 		if err := connection.QueryRow(ctx, `SELECT incident_id FROM reports WHERE id = $1`, secondReportID).Scan(&nullableIncidentID); err != nil {
-			t.Fatalf("read nullable report incident: %v", err)
+			t.Fatalf("read report incident after rejected deletion: %v", err)
+		}
+		if nullableIncidentID == nil || *nullableIncidentID != incidentID {
+			t.Fatalf("report incident_id after rejected deletion = %v, want %q", nullableIncidentID, incidentID)
+		}
+		if err := connection.QueryRow(ctx, `SELECT count(*) FROM incident_state_history WHERE incident_id = $1`, incidentID).Scan(&historyCount); err != nil {
+			t.Fatalf("count history after rejected deletion: %v", err)
+		}
+		if historyCount != 2 {
+			t.Fatalf("state history after rejected deletion = %d, want 2", historyCount)
+		}
+
+		var cleanupIncidentID, cleanupReportID string
+		if err := connection.QueryRow(ctx, `INSERT INTO incidents (status, confidence_state) VALUES ('UNDECIDED', 'UNDECIDED') RETURNING id`).Scan(&cleanupIncidentID); err != nil {
+			t.Fatalf("insert cleanup incident: %v", err)
+		}
+		if err := connection.QueryRow(ctx, `INSERT INTO reports (raw_text) VALUES ('cleanup report') RETURNING id`).Scan(&cleanupReportID); err != nil {
+			t.Fatalf("insert cleanup report: %v", err)
+		}
+		if _, err := connection.Exec(ctx, `UPDATE reports SET incident_id = $1 WHERE id = $2`, cleanupIncidentID, cleanupReportID); err != nil {
+			t.Fatalf("attach cleanup report: %v", err)
+		}
+		if _, err := connection.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id) VALUES ($1, $2)`, cleanupIncidentID, cleanupReportID); err != nil {
+			t.Fatalf("insert cleanup incident link: %v", err)
+		}
+		if _, err := connection.Exec(ctx, `DELETE FROM incidents WHERE id = $1`, cleanupIncidentID); err != nil {
+			t.Fatalf("delete incident without history: %v", err)
+		}
+		if err := connection.QueryRow(ctx, `SELECT incident_id FROM reports WHERE id = $1`, cleanupReportID).Scan(&nullableIncidentID); err != nil {
+			t.Fatalf("read cleanup report incident: %v", err)
 		}
 		if nullableIncidentID != nil {
-			t.Fatalf("report incident_id = %q after incident deletion, want NULL", *nullableIncidentID)
+			t.Fatalf("cleanup report incident_id = %q after incident deletion, want NULL", *nullableIncidentID)
 		}
-		if err := connection.QueryRow(ctx, `SELECT count(*) FROM incident_reports`).Scan(&linkCount); err != nil {
-			t.Fatalf("count links after incident deletion: %v", err)
+		if err := connection.QueryRow(ctx, `SELECT count(*) FROM incident_reports WHERE incident_id = $1`, cleanupIncidentID).Scan(&linkCount); err != nil {
+			t.Fatalf("count cleanup links after incident deletion: %v", err)
 		}
 		if linkCount != 0 {
-			t.Fatalf("incident links after deletion = %d, want 0", linkCount)
-		}
-		if err := connection.QueryRow(ctx, `SELECT count(*) FROM incident_state_history`).Scan(&historyCount); err != nil {
-			t.Fatalf("count history after incident deletion: %v", err)
-		}
-		if historyCount != 0 {
-			t.Fatalf("state history after deletion = %d, want 0", historyCount)
+			t.Fatalf("cleanup incident links after deletion = %d, want 0", linkCount)
 		}
 		if err := connection.QueryRow(ctx, `SELECT count(*) FROM reports`).Scan(&reportCount); err != nil {
-			t.Fatalf("count reports after incident deletion: %v", err)
+			t.Fatalf("count reports after cleanup incident deletion: %v", err)
 		}
-		if reportCount != 2 {
-			t.Fatalf("reports after incident deletion = %d, want 2", reportCount)
+		if reportCount != 3 {
+			t.Fatalf("reports after cleanup incident deletion = %d, want 3", reportCount)
 		}
 	})
 

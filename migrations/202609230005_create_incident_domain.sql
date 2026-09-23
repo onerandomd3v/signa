@@ -36,7 +36,7 @@ CREATE INDEX incident_reports_report_id_idx ON incident_reports (report_id);
 
 CREATE TABLE incident_state_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    incident_id UUID NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+    incident_id UUID NOT NULL REFERENCES incidents(id) ON DELETE RESTRICT,
     changed_field TEXT NOT NULL,
     previous_value TEXT,
     new_value TEXT NOT NULL,
@@ -57,5 +57,9 @@ DROP TABLE IF EXISTS incident_reports;
 
 ALTER TABLE reports
     DROP CONSTRAINT IF EXISTS reports_incident_id_fkey;
+
+UPDATE reports
+SET incident_id = NULL
+WHERE incident_id IS NOT NULL;
 
 DROP TABLE IF EXISTS incidents;
