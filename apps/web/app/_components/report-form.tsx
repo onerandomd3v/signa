@@ -163,7 +163,7 @@ export function ReportForm({
           ? "Report service isn’t configured. Please try again later."
           : error instanceof SecureKeyUnavailableError
             ? "A secure submission key isn’t available. Update your browser and try again."
-          : "Couldn’t reach Signa. Check your connection and try again.",
+            : "Couldn’t reach Signa. Check your connection and try again.",
       );
     }
   }
@@ -200,7 +200,8 @@ export function ReportForm({
           </p>
           {acknowledgement && (
             <p className="text-sm leading-6 text-muted-foreground">
-              Reference: <span className="font-mono">{acknowledgement.report_id}</span>
+              Reference:{" "}
+              <span className="font-mono">{acknowledgement.report_id}</span>
             </p>
           )}
           <p className="text-sm leading-6 text-muted-foreground">

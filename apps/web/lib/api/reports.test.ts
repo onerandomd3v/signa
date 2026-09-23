@@ -11,27 +11,50 @@ describe("report API client", () => {
   });
 
   it("posts through the generated client with the idempotency key", async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      report_id: "report-123",
-      status: "accepted",
-      submitted_at: "2026-09-23T12:00:00Z",
-    }), { status: 202, headers: { "Content-Type": "application/json" } }));
-    const result = await submitReport({ raw_text: "Smoke near the station." }, "secure-key", fetcher);
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          report_id: "report-123",
+          status: "accepted",
+          submitted_at: "2026-09-23T12:00:00Z",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const result = await submitReport(
+      { raw_text: "Smoke near the station." },
+      "secure-key",
+      fetcher,
+    );
 
     expect(result.ok).toBe(true);
     expect(fetcher).toHaveBeenCalledOnce();
-    const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://localhost:8080/reports");
-    expect(init.method).toBe("POST");
-    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("secure-key");
-    expect(JSON.parse(String(init.body))).toEqual({ raw_text: "Smoke near the station." });
+    const [request] = fetcher.mock.calls[0] as [Request];
+    expect(request.url).toBe("http://localhost:8080/reports");
+    expect(request.method).toBe("POST");
+    expect(request.headers.get("Idempotency-Key")).toBe("secure-key");
+    expect(JSON.parse(await request.text())).toEqual({
+      raw_text: "Smoke near the station.",
+    });
   });
 
   it("returns typed HTTP failures and Retry-After", async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      error: { code: "rate_limited", message: "Try later" },
-    }), { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "12" } }));
-    const result = await submitReport({ raw_text: "Smoke." }, "secure-key", fetcher);
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { code: "rate_limited", message: "Try later" },
+        }),
+        {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "12" },
+        },
+      ),
+    );
+    const result = await submitReport(
+      { raw_text: "Smoke." },
+      "secure-key",
+      fetcher,
+    );
     expect(result).toMatchObject({ ok: false, status: 429, retryAfter: "12" });
   });
 });
