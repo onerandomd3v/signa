@@ -19,8 +19,8 @@ func TestFixturesValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	sort.Strings(paths)
-	if len(paths) != 11 {
-		t.Fatalf("fixture count = %d, want 11", len(paths))
+	if len(paths) != 13 {
+		t.Fatalf("fixture count = %d, want 13", len(paths))
 	}
 	for _, path := range paths {
 		t.Run(filepath.Base(path), func(t *testing.T) {
