@@ -17,6 +17,7 @@ describe("AppShell", () => {
     expect(screen.getByRole("banner")).toBeTruthy();
     expect(homeLink.getAttribute("href")).toBe("/");
     expect(skipLink.getAttribute("href")).toBe("#main-content");
+    expect(main.getAttribute("tabindex")).toBe("-1");
     expect(
       main.contains(
         screen.getByRole("heading", { name: "Local context matters." }),
