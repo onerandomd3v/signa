@@ -1,0 +1,175 @@
+package outbox
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	goRedis "github.com/redis/go-redis/v9"
+)
+
+const (
+	ReportEventsStream = "signa:report-events"
+	ReportCreatedV1    = "report.created.v1"
+	DefaultBatchSize   = 100
+	maxErrorLength     = 1000
+)
+
+type RedisStream interface {
+	XAdd(context.Context, *goRedis.XAddArgs) *goRedis.StringCmd
+}
+
+type Event struct {
+	ID            string
+	EventType     string
+	AggregateType string
+	AggregateID   string
+	Payload       json.RawMessage
+	CreatedAt     time.Time
+}
+
+type StreamEvent struct {
+	EventID       string
+	EventName     string
+	AggregateType string
+	AggregateID   string
+	OccurredAt    string
+	Payload       string
+}
+
+type Publisher struct {
+	pool      *pgxpool.Pool
+	redis     RedisStream
+	logger    *slog.Logger
+	stream    string
+	batchSize int
+}
+
+func NewPublisher(pool *pgxpool.Pool, redis RedisStream, logger *slog.Logger) *Publisher {
+	return &Publisher{pool: pool, redis: redis, logger: logger, stream: ReportEventsStream, batchSize: DefaultBatchSize}
+}
+
+func (p *Publisher) PublishCycle(ctx context.Context) error {
+	if p.pool == nil || p.redis == nil {
+		return fmt.Errorf("outbox publisher dependencies are required")
+	}
+	attempted := make(map[string]struct{}, p.batchSize)
+	var firstErr error
+	for len(attempted) < p.batchSize {
+		event, published, err := p.publishOne(ctx, attempted)
+		if event != nil {
+			attempted[event.ID] = struct{}{}
+		}
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if event == nil {
+				return firstErr
+			}
+			continue
+		}
+		if event == nil {
+			break
+		}
+		if published {
+			p.log("outbox event published", slog.String("event_id", event.ID), slog.String("event_name", eventName(event)), slog.String("aggregate_id", event.AggregateID))
+		}
+	}
+	return firstErr
+}
+
+func (p *Publisher) publishOne(ctx context.Context, attempted map[string]struct{}) (*Event, bool, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin outbox transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	query := `SELECT id::text, event_type, aggregate_type, aggregate_id::text, payload, created_at
+		FROM outbox_events WHERE published_at IS NULL`
+	args := make([]any, 0, len(attempted))
+	if len(attempted) > 0 {
+		placeholders := make([]string, 0, len(attempted))
+		for id := range attempted {
+			args = append(args, id)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		query += " AND id::text NOT IN (" + strings.Join(placeholders, ", ") + ")"
+	}
+	query += " ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED"
+	event := &Event{}
+	if err := tx.QueryRow(ctx, query, args...).Scan(&event.ID, &event.EventType, &event.AggregateType, &event.AggregateID, &event.Payload, &event.CreatedAt); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("claim outbox event: %w", err)
+	}
+
+	streamEvent, err := MapEvent(*event)
+	if err != nil {
+		return event, false, p.recordFailure(ctx, tx, event, err)
+	}
+	_, err = p.redis.XAdd(ctx, &goRedis.XAddArgs{Stream: p.stream, Values: map[string]any{
+		"event_id": streamEvent.EventID, "event_name": streamEvent.EventName, "aggregate_type": streamEvent.AggregateType,
+		"aggregate_id": streamEvent.AggregateID, "occurred_at": streamEvent.OccurredAt, "payload": streamEvent.Payload,
+	}}).Result()
+	if err != nil {
+		return event, false, p.recordFailure(ctx, tx, event, err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE outbox_events SET published_at = now(), last_error = NULL WHERE id = $1`, event.ID); err != nil {
+		return event, false, fmt.Errorf("acknowledge published outbox event %s: %w", event.ID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return event, false, fmt.Errorf("commit published outbox event %s: %w", event.ID, err)
+	}
+	return event, true, nil
+}
+
+func (p *Publisher) recordFailure(ctx context.Context, tx pgx.Tx, event *Event, publishErr error) error {
+	message := truncateError(publishErr.Error())
+	var retryAttempt int
+	if err := tx.QueryRow(ctx, `UPDATE outbox_events SET retry_attempts = retry_attempts + 1, last_error = $2 WHERE id = $1 RETURNING retry_attempts`, event.ID, message).Scan(&retryAttempt); err != nil {
+		return fmt.Errorf("record outbox failure %s: %w (original: %s)", event.ID, err, message)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit outbox failure %s: %w", event.ID, err)
+	}
+	p.log("outbox event publish failed", slog.String("event_id", event.ID), slog.String("event_name", eventName(event)), slog.String("aggregate_id", event.AggregateID), slog.Int("retry_attempt", retryAttempt), slog.String("error", message))
+	return fmt.Errorf("publish outbox event %s: %w", event.ID, publishErr)
+}
+
+func MapEvent(event Event) (StreamEvent, error) {
+	if event.EventType != "report.created" {
+		return StreamEvent{}, fmt.Errorf("unsupported outbox event type %q", event.EventType)
+	}
+	return StreamEvent{EventID: event.ID, EventName: ReportCreatedV1, AggregateType: event.AggregateType, AggregateID: event.AggregateID, OccurredAt: event.CreatedAt.UTC().Format(time.RFC3339Nano), Payload: string(event.Payload)}, nil
+}
+
+func eventName(event *Event) string {
+	if event.EventType == "report.created" {
+		return ReportCreatedV1
+	}
+	return event.EventType
+}
+
+func truncateError(message string) string {
+	if len(message) <= maxErrorLength {
+		return message
+	}
+	return message[:maxErrorLength]
+}
+
+func (p *Publisher) log(message string, args ...any) {
+	if p.logger != nil {
+		p.logger.Info(message, args...)
+	}
+}

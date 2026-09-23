@@ -74,7 +74,7 @@ Optional local configuration can be copied from `.env.example`:
 - `SIGNA_API_ADDR` sets the API listen address.
 - `SIGNA_DATABASE_URL` points to the local PostgreSQL/PostGIS service.
 - `SIGNA_REDIS_ADDR` points to the local Redis service.
-- `SIGNA_SHUTDOWN_TIMEOUT` and `SIGNA_WORKER_INTERVAL` use Go duration values such as `10s` or `500ms`.
+- `SIGNA_SHUTDOWN_TIMEOUT` and `SIGNA_WORKER_INTERVAL` use Go duration values; the worker polls every `500ms` by default.
 
 Run the worker in another terminal:
 
