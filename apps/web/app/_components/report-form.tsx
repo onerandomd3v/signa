@@ -1,24 +1,78 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Button } from "../../components/ui/button";
 import { Textarea } from "../../components/ui/textarea";
-import type { CreateReportRequest } from "../../lib/api/generated";
+import type {
+  CreateReportRequest,
+  DeviceLocation,
+} from "../../lib/api/generated";
+import {
+  DeviceLocationError,
+  requestDeviceLocation,
+  type LocationFailure,
+} from "./device-location";
 
 type ReportFormProps = {
   onSubmit?: (request: CreateReportRequest) => Promise<void>;
+  requestLocation?: () => Promise<DeviceLocation>;
 };
 
 type SubmissionState = "idle" | "submitting" | "success" | "error";
+type LocationState = "idle" | "requesting" | "ready" | LocationFailure;
+
+const locationMessages: Record<LocationFailure, string> = {
+  denied: "Permission denied. You can continue without location.",
+  unavailable: "Location unavailable. You can continue without it.",
+  timeout: "Location request timed out. Try again or continue without it.",
+  unsupported:
+    "Location isn’t available in this browser. You can continue without it.",
+  "low-accuracy":
+    "Location was too imprecise. Try again or continue without it.",
+  unknown: "Couldn’t get location. Try again or continue without it.",
+};
 
 const unavailableMessage = "Not sent — report submission isn’t available yet.";
 
-export function ReportForm({ onSubmit }: ReportFormProps) {
+export function ReportForm({
+  onSubmit,
+  requestLocation = requestDeviceLocation,
+}: ReportFormProps) {
   const [reportText, setReportText] = useState("");
+  const [deviceLocation, setDeviceLocation] = useState<DeviceLocation | null>(
+    null,
+  );
+  const [locationState, setLocationState] = useState<LocationState>("idle");
   const [submissionState, setSubmissionState] =
     useState<SubmissionState>("idle");
   const [message, setMessage] = useState("");
   const [hasValidationError, setHasValidationError] = useState(false);
+  const locationRequestId = useRef(0);
+
+  async function handleRequestLocation() {
+    const requestId = ++locationRequestId.current;
+    setDeviceLocation(null);
+    setLocationState("requesting");
+
+    try {
+      const location = await requestLocation();
+      if (requestId !== locationRequestId.current) return;
+      setDeviceLocation(location);
+      setLocationState("ready");
+    } catch (error) {
+      if (requestId !== locationRequestId.current) return;
+      setDeviceLocation(null);
+      setLocationState(
+        error instanceof DeviceLocationError ? error.reason : "unknown",
+      );
+    }
+  }
+
+  function handleContinueWithoutLocation() {
+    locationRequestId.current += 1;
+    setDeviceLocation(null);
+    setLocationState("idle");
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,7 +97,10 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
     }
 
     try {
-      await onSubmit({ raw_text: rawText });
+      await onSubmit({
+        raw_text: rawText,
+        ...(deviceLocation ? { device_location: deviceLocation } : {}),
+      });
       setSubmissionState("success");
       setMessage("Report submitted.");
     } catch {
@@ -66,6 +123,7 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
     setSubmissionState("idle");
     setMessage("");
     setHasValidationError(false);
+    handleContinueWithoutLocation();
   }
 
   const isSubmitting = submissionState === "submitting";
@@ -124,6 +182,86 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
             </p>
           </div>
 
+          <section
+            aria-labelledby="location-title"
+            className="border-t border-border pt-5"
+          >
+            <h3
+              className="text-sm font-medium text-foreground"
+              id="location-title"
+            >
+              Location{" "}
+              <span className="font-normal text-muted-foreground">
+                (optional)
+              </span>
+            </h3>
+            <p
+              className="mt-1 text-sm leading-6 text-muted-foreground"
+              id="location-help"
+            >
+              Choose to add your browser location to this report. Exact
+              coordinates won’t appear on screen.
+            </p>
+            {locationState === "ready" ? (
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <p className="text-sm leading-6 text-foreground" role="status">
+                  Approximate location ready. It will accompany this report if
+                  submitted.
+                </p>
+                <Button
+                  className="h-10 px-3 text-sm"
+                  disabled={submissionState === "submitting"}
+                  onClick={handleContinueWithoutLocation}
+                  size="lg"
+                  type="button"
+                  variant="outline"
+                >
+                  Remove location
+                </Button>
+              </div>
+            ) : locationState === "requesting" ? (
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <p
+                  className="text-sm leading-6 text-muted-foreground"
+                  role="status"
+                >
+                  Requesting location…
+                </p>
+                <Button
+                  className="h-10 px-3 text-sm"
+                  onClick={handleContinueWithoutLocation}
+                  size="lg"
+                  type="button"
+                  variant="outline"
+                >
+                  Continue without location
+                </Button>
+              </div>
+            ) : (
+              <div className="mt-3">
+                <Button
+                  aria-describedby="location-help"
+                  className="h-10 px-3 text-sm"
+                  disabled={submissionState === "submitting"}
+                  onClick={handleRequestLocation}
+                  size="lg"
+                  type="button"
+                  variant="outline"
+                >
+                  Share my location
+                </Button>
+                {locationState !== "idle" && (
+                  <p
+                    className="mt-2 text-sm leading-6 text-muted-foreground"
+                    role="status"
+                  >
+                    {locationMessages[locationState]}
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+
           <div className="border-t border-border pt-5">
             <p className="text-sm font-medium text-foreground">
               Add evidence
@@ -151,7 +289,7 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
 
           <Button
             className="h-12 w-full px-5 text-base font-semibold sm:w-auto"
-            disabled={isSubmitting}
+            disabled={isSubmitting || locationState === "requesting"}
             size="lg"
             type="submit"
           >
