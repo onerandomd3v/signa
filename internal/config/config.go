@@ -8,6 +8,8 @@ import (
 
 const (
 	defaultAPIAddr         = ":8080"
+	defaultDatabaseURL     = "postgres://signa:signa_local@localhost:5432/signa?sslmode=disable"
+	defaultRedisAddr       = "localhost:6379"
 	defaultShutdownTimeout = 10 * time.Second
 	defaultWorkerInterval  = 10 * time.Second
 )
@@ -15,6 +17,8 @@ const (
 // Config contains the runtime settings needed by the foundation processes.
 type Config struct {
 	APIAddr         string
+	DatabaseURL     string
+	RedisAddr       string
 	ShutdownTimeout time.Duration
 	WorkerInterval  time.Duration
 }
@@ -34,9 +38,19 @@ func Load() (Config, error) {
 	if apiAddr == "" {
 		apiAddr = defaultAPIAddr
 	}
+	databaseURL := os.Getenv("SIGNA_DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = defaultDatabaseURL
+	}
+	redisAddr := os.Getenv("SIGNA_REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = defaultRedisAddr
+	}
 
 	return Config{
 		APIAddr:         apiAddr,
+		DatabaseURL:     databaseURL,
+		RedisAddr:       redisAddr,
 		ShutdownTimeout: shutdownTimeout,
 		WorkerInterval:  workerInterval,
 	}, nil

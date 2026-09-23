@@ -44,6 +44,8 @@ The API listens on `:8080` by default. Check its health with `GET http://localho
 Optional local configuration can be copied from `.env.example`:
 
 - `SIGNA_API_ADDR` sets the API listen address.
+- `SIGNA_DATABASE_URL` points to the local PostgreSQL/PostGIS service.
+- `SIGNA_REDIS_ADDR` points to the local Redis service.
 - `SIGNA_SHUTDOWN_TIMEOUT` and `SIGNA_WORKER_INTERVAL` use Go duration values such as `10s` or `500ms`.
 
 Run the worker in another terminal:
@@ -58,3 +60,22 @@ Run tests and static checks:
 go test ./...
 go vet ./...
 ```
+
+## Local data infrastructure
+
+Start and stop the local PostgreSQL/PostGIS and Redis services with:
+
+```text
+make infra-up
+make infra-down
+```
+
+Apply the PostGIS baseline migration and verify connectivity with:
+
+```text
+make migrate-up
+make db-ping
+make redis-ping
+```
+
+The Compose file uses local-only credentials (`signa` / `signa_local`). Do not reuse them outside local development. The integration checks are explicit and are not included in the normal `go test ./...` run.
