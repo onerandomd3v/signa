@@ -3,6 +3,7 @@ package extraction
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -51,7 +52,7 @@ func TestConsumerLeavesFailedMessagePendingForRetry(t *testing.T) {
 
 func TestConsumerDoesNotRetryUnresolvedDestination(t *testing.T) {
 	message := StreamMessage{ID: "1740000000000-0", Values: reportCreatedFields()}
-	client := &blockedPendingStreamClient{message: message}
+	client := &blockedPendingStreamClient{message: message, newRead: make(chan struct{})}
 	provider := &fakeProvider{result: []byte(validExtractionJSON())}
 	acker := &fakeAcker{}
 	processor := NewProcessor(
@@ -65,10 +66,23 @@ func TestConsumerDoesNotRetryUnresolvedDestination(t *testing.T) {
 	)
 	consumer := NewConsumer(client, processor, "signa:report-events", "extractors", "worker-1", time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := consumer.Run(ctx); err != nil {
-		t.Fatalf("Run() error = %v", err)
+	runErr := make(chan error, 1)
+	go func() { runErr <- consumer.Run(ctx) }()
+	select {
+	case <-client.newRead:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("consumer did not continue to its new-message read after blocking the pending message")
+	}
+	select {
+	case err := <-runErr:
+		t.Fatalf("consumer stopped after unresolved destination: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	if err := <-runErr; err != nil {
+		t.Fatalf("Run() error after cancellation = %v", err)
 	}
 	if provider.calls != 1 {
 		t.Fatalf("provider calls = %d, want exactly one before the message becomes blocked", provider.calls)
@@ -94,7 +108,9 @@ type fakeStreamClient struct {
 }
 
 type blockedPendingStreamClient struct {
-	message StreamMessage
+	message     StreamMessage
+	newRead     chan struct{}
+	newReadOnce sync.Once
 }
 
 func (f *blockedPendingStreamClient) EnsureGroup(context.Context, string, string) error {
@@ -104,6 +120,9 @@ func (f *blockedPendingStreamClient) EnsureGroup(context.Context, string, string
 func (f *blockedPendingStreamClient) Read(ctx context.Context, _ string, _ string, _ string, pending bool, _ time.Duration) ([]StreamMessage, error) {
 	if pending {
 		return []StreamMessage{f.message}, nil
+	}
+	if f.newRead != nil {
+		f.newReadOnce.Do(func() { close(f.newRead) })
 	}
 	<-ctx.Done()
 	return nil, ctx.Err()
