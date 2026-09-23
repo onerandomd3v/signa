@@ -21,6 +21,49 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
               example:
                 status: ok
+  /reports:
+    post:
+      operationId: createReport
+      summary: Accept a text-first report
+      security: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReportRequest'
+      responses:
+        '202':
+          description: Report accepted for asynchronous processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportAcknowledgement'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Idempotency key conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     HealthResponse:
@@ -34,12 +77,12 @@ components:
           description: Health status returned by the API.
     Report:
       type: object
-      description: Architecture-level report shape reserved for future report APIs.
+      description: Report state returned by the backend; exact device coordinates are never returned here.
       properties:
         id:
           type: string
         reporter_id:
-          type: string
+          type: [string, 'null']
         incident_id:
           type: [string, 'null']
         raw_text:
@@ -47,11 +90,13 @@ components:
         normalized_text:
           type: [string, 'null']
         source_type:
-          type: string
+          type: [string, 'null']
         eyewitness_claim:
-          type: string
+          type: [string, 'null']
         claimed_location:
-          $ref: '#/components/schemas/ReportLocation'
+          anyOf:
+            - $ref: '#/components/schemas/ReportLocation'
+            - type: 'null'
         observed_at:
           type: [string, 'null']
           format: date-time
@@ -65,12 +110,74 @@ components:
         location_accuracy:
           type: [number, 'null']
         language:
-          type: string
+          type: [string, 'null']
         evidence_state:
-          type: string
+          type: [string, 'null']
         created_at:
           type: string
           format: date-time
+    CreateReportRequest:
+      type: object
+      required:
+        - raw_text
+      additionalProperties: false
+      properties:
+        raw_text:
+          type: string
+          minLength: 1
+          description: Text of the report; surrounding whitespace is ignored for validation.
+        device_location:
+          anyOf:
+            - $ref: '#/components/schemas/DeviceLocation'
+            - type: 'null'
+    DeviceLocation:
+      type: object
+      required:
+        - latitude
+        - longitude
+      additionalProperties: false
+      properties:
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        accuracy:
+          type: number
+          minimum: 0
+    ReportAcknowledgement:
+      type: object
+      required:
+        - report_id
+        - status
+        - submitted_at
+      properties:
+        report_id:
+          type: string
+        status:
+          type: string
+          const: accepted
+        submitted_at:
+          type: string
+          format: date-time
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
     ReportLocation:
       type: object
       description: Location associated with a report; exact retention and public precision remain policy decisions.

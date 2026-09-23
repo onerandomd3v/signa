@@ -9,9 +9,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/api"
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/logging"
+	"github.com/onerandomd3v/signa/internal/reports"
 )
 
 func main() {
@@ -31,7 +33,16 @@ func run(parent context.Context, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	server := api.NewServer(cfg.APIAddr, logger)
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := pool.Ping(ctx); err != nil {
+		return err
+	}
+
+	server := api.NewServer(cfg.APIAddr, logger, reports.NewStore(pool))
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("api starting", "addr", cfg.APIAddr)

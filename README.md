@@ -67,6 +67,8 @@ go run ./cmd/api
 
 The API listens on `:8080` by default. Check its health with `GET http://localhost:8080/healthz`.
 
+Text-first reports are accepted with `POST /reports` using an `Idempotency-Key` header and a JSON body containing non-empty `raw_text`. An optional `device_location` may include latitude, longitude, and non-negative accuracy. The API acknowledges accepted reports before downstream processing; exact device coordinates are not returned.
+
 Optional local configuration can be copied from `.env.example`:
 
 - `SIGNA_API_ADDR` sets the API listen address.
@@ -107,3 +109,11 @@ make redis-ping
 ```
 
 The Compose file uses local-only credentials (`signa` / `signa_local`). Do not reuse them outside local development. The integration checks are explicit and are not included in the normal `go test ./...` run.
+
+Run the isolated migration and report-ingestion integration tests with:
+
+```text
+go test -tags=integration ./...
+```
+
+These tests create and remove uniquely named temporary databases. They use `SIGNA_TEST_DATABASE_URL` when set, otherwise the local Compose connection, and never run rollback checks against the application database itself.

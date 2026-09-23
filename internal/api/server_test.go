@@ -12,7 +12,7 @@ func TestHealthz(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 
-	NewHandler(nil).ServeHTTP(recorder, request)
+	NewHandler(nil, nil).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -34,7 +34,7 @@ func TestHealthzMethodNotFound(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/healthz", nil)
 
-	NewHandler(nil).ServeHTTP(recorder, request)
+	NewHandler(nil, nil).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
@@ -42,7 +42,7 @@ func TestHealthzMethodNotFound(t *testing.T) {
 }
 
 func TestNewServerTimeouts(t *testing.T) {
-	server := NewServer(":8080", nil)
+	server := NewServer(":8080", nil, nil)
 
 	if server.ReadHeaderTimeout != 5*time.Second {
 		t.Fatalf("ReadHeaderTimeout = %s, want 5s", server.ReadHeaderTimeout)

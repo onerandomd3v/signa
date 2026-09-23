@@ -91,7 +91,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 			"id", "reporter_id", "incident_id", "raw_text", "normalized_text",
 			"source_type", "eyewitness_claim", "claimed_location", "observed_at",
 			"submitted_at", "device_location", "location_accuracy", "language",
-			"evidence_state", "created_at",
+			"evidence_state", "created_at", "idempotency_key", "request_fingerprint",
 		}
 		for _, name := range required {
 			if _, ok := columns[name]; !ok {
@@ -99,8 +99,10 @@ func TestReportAndOutboxMigration(t *testing.T) {
 			}
 		}
 		for _, name := range []string{
-			"incident_id", "normalized_text", "observed_at", "claimed_location",
-			"device_location", "location_accuracy",
+			"reporter_id", "incident_id", "normalized_text", "source_type",
+			"eyewitness_claim", "claimed_location", "observed_at", "device_location",
+			"location_accuracy", "language", "evidence_state", "idempotency_key",
+			"request_fingerprint",
 		} {
 			if columns[name].nullable != "YES" {
 				t.Errorf("%s nullable = %q, want YES", name, columns[name].nullable)
@@ -180,6 +182,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 			"reports_claimed_location_gist_idx",
 			"reports_device_location_gist_idx",
 			"reports_incident_id_idx",
+			"reports_idempotency_key_unique_idx",
 			"outbox_events_unpublished_idx",
 		} {
 			if _, ok := indexes[name]; !ok {
@@ -191,6 +194,9 @@ func TestReportAndOutboxMigration(t *testing.T) {
 		}
 		if !strings.Contains(strings.ToLower(indexes["reports_device_location_gist_idx"]), "gist") {
 			t.Error("device location index is not a GiST index")
+		}
+		if definition := strings.ToLower(indexes["reports_idempotency_key_unique_idx"]); !strings.Contains(definition, "unique") || !strings.Contains(definition, "idempotency_key is not null") {
+			t.Errorf("idempotency index definition = %q, want unique non-null index", definition)
 		}
 		if definition := strings.ToLower(indexes["outbox_events_unpublished_idx"]); !strings.Contains(definition, "created_at, id") || !strings.Contains(definition, "published_at is null") {
 			t.Errorf("unpublished outbox index definition = %q, want creation ordering and unpublished predicate", definition)
@@ -266,8 +272,10 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	})
 
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
+	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	assertTableMissing(t, ctx, connection, testSchema, "reports")
 	assertTableMissing(t, ctx, connection, testSchema, "outbox_events")
+	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	assertTableExists(t, ctx, connection, testSchema, "reports")
 	assertTableExists(t, ctx, connection, testSchema, "outbox_events")
