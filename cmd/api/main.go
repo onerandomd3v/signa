@@ -58,12 +58,12 @@ func run(parent context.Context, logger *slog.Logger) error {
 		}
 	}
 
-	server := api.NewServerWithMedia(cfg.APIAddr, logger, api.RateLimitConfig{
+	server := api.NewServerWithMediaAndCORS(cfg.APIAddr, logger, api.RateLimitConfig{
 		PerClientRatePerMinute: cfg.ReportRatePerMinute,
 		PerClientBurst:         cfg.ReportRateBurst,
 		GlobalRatePerMinute:    cfg.GlobalReportRatePerMinute,
 		GlobalBurst:            cfg.GlobalReportRateBurst,
-	}, pool, storage, reports.NewStore(pool))
+	}, cfg.WebAllowedOrigins, pool, storage, reports.NewStore(pool))
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("api starting", "addr", cfg.APIAddr)

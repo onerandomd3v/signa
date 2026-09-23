@@ -44,6 +44,7 @@ type Config struct {
 	AIConsumerGroup           string
 	AIConsumerName            string
 	AIPollInterval            time.Duration
+	WebAllowedOrigins         []string
 	ObjectStorageEndpoint     string
 	ObjectStorageRegion       string
 	ObjectStorageBucket       string
@@ -78,6 +79,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	aiPollInterval, err := durationFromEnv("SIGNA_AI_POLL_INTERVAL", defaultAIPollInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	webAllowedOrigins, err := webAllowedOriginsFromEnv()
 	if err != nil {
 		return Config{}, err
 	}
@@ -133,6 +138,7 @@ func Load() (Config, error) {
 		AIConsumerGroup:           aiConsumerGroup,
 		AIConsumerName:            os.Getenv("SIGNA_AI_CONSUMER_NAME"),
 		AIPollInterval:            aiPollInterval,
+		WebAllowedOrigins:         webAllowedOrigins,
 		ObjectStorageEndpoint:     os.Getenv("SIGNA_OBJECT_STORAGE_ENDPOINT"),
 		ObjectStorageRegion:       os.Getenv("SIGNA_OBJECT_STORAGE_REGION"),
 		ObjectStorageBucket:       os.Getenv("SIGNA_OBJECT_STORAGE_BUCKET"),
