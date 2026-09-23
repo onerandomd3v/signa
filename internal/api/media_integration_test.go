@@ -141,6 +141,9 @@ func TestMediaHTTPIntegration(t *testing.T) {
 		response = mediaRequest(t, handler, http.MethodPost, "/reports/"+reportID+"/media", mediaConfirmRequest{ObjectKey: newKey, mediaUploadRequest: mediaUploadRequest{MediaType: media.TypeImage, ContentType: "image/png", SizeBytes: 1024}}, "10.0.0.6:1000")
 		assertMediaError(t, response, http.StatusBadRequest, "media_object_not_found")
 		storage.headErr = nil
+		disabledHandler := NewHandlerWithMedia(nil, rateConfig, pool, nil)
+		response = mediaRequest(t, disabledHandler, http.MethodPost, "/reports/"+reportID+"/media", mediaConfirmRequest{ObjectKey: newKey, mediaUploadRequest: mediaUploadRequest{MediaType: media.TypeImage, ContentType: "image/png", SizeBytes: 1024}}, "10.0.0.7:1001")
+		assertMediaError(t, response, http.StatusServiceUnavailable, "media_storage_unavailable")
 		storage.setObject(newKey, media.ObjectMetadata{ContentType: "image/jpeg", SizeBytes: 1024})
 		response = mediaRequest(t, handler, http.MethodPost, "/reports/"+reportID+"/media", mediaConfirmRequest{ObjectKey: newKey, mediaUploadRequest: mediaUploadRequest{MediaType: media.TypeImage, ContentType: "image/png", SizeBytes: 1024}}, "10.0.0.7:1000")
 		assertMediaError(t, response, http.StatusBadRequest, "media_metadata_mismatch")
@@ -235,11 +238,12 @@ func TestMediaHTTPIntegration(t *testing.T) {
 	t.Run("media endpoints are rate limited", func(t *testing.T) {
 		limitedHandler := NewHandlerWithMedia(nil, RateLimitConfig{PerClientRatePerMinute: 1, PerClientBurst: 1, GlobalRatePerMinute: 1, GlobalBurst: 1}, pool, storage)
 		input := mediaUploadRequest{MediaType: media.TypeImage, ContentType: "image/png", SizeBytes: 1}
+		confirmInput := mediaConfirmRequest{ObjectKey: media.ObjectKey(reportID), mediaUploadRequest: input}
 		if response := mediaRequest(t, limitedHandler, http.MethodPost, "/reports/"+reportID+"/media/uploads", input, "10.0.3.1:1000"); response.Code != http.StatusOK {
 			t.Fatalf("first limited request status = %d", response.Code)
 		}
-		if response := mediaRequest(t, limitedHandler, http.MethodPost, "/reports/"+reportID+"/media/uploads", input, "10.0.3.1:1000"); response.Code != http.StatusTooManyRequests {
-			t.Fatalf("second limited request status = %d, want 429", response.Code)
+		if response := mediaRequest(t, limitedHandler, http.MethodPost, "/reports/"+reportID+"/media", confirmInput, "10.0.3.1:1000"); response.Code != http.StatusTooManyRequests {
+			t.Fatalf("limited confirmation status = %d, want 429", response.Code)
 		}
 	})
 }
