@@ -9,7 +9,7 @@ COD-191 validates a structured extraction from a `report.created.v1` event, but 
 
 ## Current boundary
 
-The worker uses `LoggingObserver` only as an explicit boundary. It logs contract metadata without report text or evidence quotes, then returns `ErrDurableExtractionDestinationUnresolved`. The processor therefore does not acknowledge the Redis message, preserving retry visibility while the destination is unresolved.
+The worker uses `LoggingObserver` only as an explicit boundary. It logs contract metadata without report text or evidence quotes, then returns `ErrDurableExtractionDestinationUnresolved`. The processor therefore does not acknowledge the Redis message, preserving retry visibility while the destination is unresolved. The consumer keeps that pending message in a process-local quarantine so it does not invoke the provider again, while continuing to service other work.
 
 ## Owner decision required
 
@@ -17,4 +17,4 @@ The owner must choose and approve the durable result behavior before this blocke
 
 ## Consequence
 
-The default worker intentionally leaves successfully validated extraction messages pending. Tests may use an in-memory observer to verify the processor boundary, but production ACK/persistence behavior remains blocked until the owner decision is recorded in a follow-up ADR or issue.
+The default worker intentionally leaves successfully validated extraction messages pending. The process-local quarantine is deliberately not durable; restart behavior remains subject to the future owner decision. Tests may use an in-memory observer to verify the processor boundary, but production ACK/persistence behavior remains blocked until the owner decision is recorded in a follow-up ADR or issue.

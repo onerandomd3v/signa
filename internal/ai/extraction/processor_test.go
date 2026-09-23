@@ -87,9 +87,11 @@ type fakeProvider struct {
 	rawText string
 	result  []byte
 	err     error
+	calls   int
 }
 
 func (p *fakeProvider) Extract(_ context.Context, rawText string) ([]byte, error) {
+	p.calls++
 	p.rawText = rawText
 	return p.result, p.err
 }

@@ -2,6 +2,7 @@ package extraction
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -65,6 +66,10 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return fmt.Errorf("ensure extraction consumer group: %w", err)
 	}
 
+	// This process-local quarantine prevents a validated result with no
+	// approved durable destination from triggering another provider call. The
+	// message intentionally remains pending; no new persistence state is added.
+	blockedMessageIDs := make(map[string]struct{})
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -77,6 +82,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 			}
 			return fmt.Errorf("read pending extraction messages: %w", err)
 		}
+		messages = filterBlockedMessages(messages, blockedMessageIDs)
 		if len(messages) == 0 {
 			messages, err = c.client.Read(ctx, c.stream, c.group, c.consumer, false, c.pollPeriod)
 			if err != nil {
@@ -85,10 +91,21 @@ func (c *Consumer) Run(ctx context.Context) error {
 				}
 				return fmt.Errorf("read new extraction messages: %w", err)
 			}
+			messages = filterBlockedMessages(messages, blockedMessageIDs)
 		}
 
 		for _, message := range messages {
+			if _, blocked := blockedMessageIDs[message.ID]; blocked {
+				continue
+			}
 			if err := c.processor.Process(ctx, message); err != nil {
+				if errors.Is(err, ErrDurableExtractionDestinationUnresolved) {
+					blockedMessageIDs[message.ID] = struct{}{}
+					if c.logger != nil {
+						c.logger.Warn("report extraction blocked; message remains pending until durable destination is resolved", "stream_message_id", message.ID, "error", err)
+					}
+					continue
+				}
 				if c.logger != nil {
 					c.logger.Error("report extraction failed; message remains pending", "stream_message_id", message.ID, "error", err)
 				}
@@ -99,6 +116,20 @@ func (c *Consumer) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func filterBlockedMessages(messages []StreamMessage, blocked map[string]struct{}) []StreamMessage {
+	if len(messages) == 0 || len(blocked) == 0 {
+		return messages
+	}
+	filtered := make([]StreamMessage, 0, len(messages))
+	for _, message := range messages {
+		if _, ok := blocked[message.ID]; ok {
+			continue
+		}
+		filtered = append(filtered, message)
+	}
+	return filtered
 }
 
 func wait(ctx context.Context, duration time.Duration) error {
@@ -146,7 +177,7 @@ func (c *RedisStreamClient) Read(ctx context.Context, stream, group, consumer st
 		Group:    group,
 		Consumer: consumer,
 		Streams:  []string{stream, id},
-		Count:    1,
+		Count:    100,
 		Block:    block,
 	}).Result()
 	if err != nil {

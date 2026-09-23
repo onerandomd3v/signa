@@ -25,7 +25,7 @@ The OpenAI provider uses the structured JSON response format with the OpenAI-com
 
 ### Stream processing
 
-The worker ensures a named consumer group exists at stream offset `0`, so reports already in the stream before first startup are consumed. It first services pending messages for retry visibility, then reads new messages. It accepts only `report.created.v1` messages from `signa:report-events`, parses the payload's `report_id`, loads `raw_text`, extracts and validates the result, invokes the observer, and calls `XACK` last. Parse, database, provider, validation, observer, and unresolved-destination errors return without acknowledgement.
+The worker ensures a named consumer group exists at stream offset `0`, so reports already in the stream before first startup are consumed. It first services pending messages for retry visibility, then reads new messages. It accepts only `report.created.v1` messages from `signa:report-events`, parses the payload's `report_id`, loads `raw_text`, extracts and validates the result, invokes the observer, and calls `XACK` last. Parse, database, provider, validation, and ordinary observer errors return without acknowledgement and remain retryable. `ErrDurableExtractionDestinationUnresolved` is different: the consumer records that message ID in a process-local quarantine, leaves it pending without another provider call, and keeps the consumer loop alive for other work.
 
 ### Configuration
 

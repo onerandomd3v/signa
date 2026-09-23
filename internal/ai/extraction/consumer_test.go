@@ -49,6 +49,35 @@ func TestConsumerLeavesFailedMessagePendingForRetry(t *testing.T) {
 	}
 }
 
+func TestConsumerDoesNotRetryUnresolvedDestination(t *testing.T) {
+	message := StreamMessage{ID: "1740000000000-0", Values: reportCreatedFields()}
+	client := &blockedPendingStreamClient{message: message}
+	provider := &fakeProvider{result: []byte(validExtractionJSON())}
+	acker := &fakeAcker{}
+	processor := NewProcessor(
+		&fakeReportReader{rawText: "raw report"},
+		provider,
+		&fakeValidator{result: Extraction{ContractVersion: "signa.ai.report-extraction.v0"}},
+		LoggingObserver{},
+		acker,
+		"signa:report-events",
+		"extractors",
+	)
+	consumer := NewConsumer(client, processor, "signa:report-events", "extractors", "worker-1", time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := consumer.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want exactly one before the message becomes blocked", provider.calls)
+	}
+	if acker.calls != 0 {
+		t.Fatalf("acks = %d, want none for blocked message", acker.calls)
+	}
+}
+
 func reportCreatedFields() map[string]any {
 	return map[string]any{
 		"event_id":       "event-1",
@@ -62,6 +91,26 @@ type fakeStreamClient struct {
 	ensureGroupCalled bool
 	pending           []StreamMessage
 	acks              []string
+}
+
+type blockedPendingStreamClient struct {
+	message StreamMessage
+}
+
+func (f *blockedPendingStreamClient) EnsureGroup(context.Context, string, string) error {
+	return nil
+}
+
+func (f *blockedPendingStreamClient) Read(ctx context.Context, _ string, _ string, _ string, pending bool, _ time.Duration) ([]StreamMessage, error) {
+	if pending {
+		return []StreamMessage{f.message}, nil
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (f *blockedPendingStreamClient) Ack(context.Context, string, string, string) error {
+	return nil
 }
 
 func (f *fakeStreamClient) EnsureGroup(context.Context, string, string) error {
