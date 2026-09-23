@@ -11,8 +11,7 @@ type ReportFormProps = {
 
 type SubmissionState = "idle" | "submitting" | "success" | "error";
 
-const unavailableMessage =
-  "This report was not sent. Report submission is not connected yet.";
+const unavailableMessage = "Not sent — report submission isn’t available yet.";
 
 export function ReportForm({ onSubmit }: ReportFormProps) {
   const [reportText, setReportText] = useState("");
@@ -29,7 +28,7 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
     if (!rawText) {
       setHasValidationError(true);
       setSubmissionState("error");
-      setMessage("Add a short description before submitting.");
+      setMessage("Add a short description.");
       return;
     }
 
@@ -46,10 +45,10 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
     try {
       await onSubmit({ raw_text: rawText });
       setSubmissionState("success");
-      setMessage("Your report has been submitted.");
+      setMessage("Report submitted.");
     } catch {
       setSubmissionState("error");
-      setMessage("Your report could not be submitted. Please try again.");
+      setMessage("Could not submit. Try again.");
     }
   }
 
@@ -78,7 +77,7 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
         <div className="space-y-5" role="status" aria-live="polite">
           <p className="font-medium text-foreground">{message}</p>
           <p className="text-sm leading-6 text-muted-foreground">
-            Thank you for sharing what you observed.
+            Thanks for sharing.
           </p>
           <Button
             className="h-11 px-5 text-sm font-semibold"
@@ -93,7 +92,7 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
         <>
           <div className="space-y-2">
             <label className="text-sm font-semibold" htmlFor="report-text">
-              Describe what happened
+              What happened?
               <span className="ml-1 font-normal text-muted-foreground">
                 (required)
               </span>
@@ -106,14 +105,14 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
               disabled={isSubmitting}
               id="report-text"
               onChange={(event) => handleChange(event.target.value)}
-              placeholder="What did you see or hear? Include a place or time if you know it."
+              placeholder="What did you see or hear?"
               value={reportText}
             />
             <p
               className="text-sm leading-6 text-muted-foreground"
               id="report-help"
             >
-              A brief description is enough. Please share only what you know.
+              A short description is enough.
             </p>
             <p
               aria-live="polite"
@@ -133,8 +132,7 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
               </span>
             </p>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Text is enough to report. Photo, audio, and video attachments will
-              be available later.
+              Attachments aren’t available yet.
             </p>
             <Button
               aria-describedby="evidence-help"
@@ -144,7 +142,7 @@ export function ReportForm({ onSubmit }: ReportFormProps) {
               variant="outline"
               type="button"
             >
-              Attach a file (optional)
+              Add attachment (optional)
             </Button>
             <span className="sr-only" id="evidence-help">
               Attachments are not available in this preview.
