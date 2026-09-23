@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL"} {
+	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("SIGNA_DATABASE_URL", "")
@@ -40,6 +40,10 @@ func TestLoadEnvironment(t *testing.T) {
 	t.Setenv("SIGNA_REDIS_ADDR", "127.0.0.1:6380")
 	t.Setenv("SIGNA_SHUTDOWN_TIMEOUT", "2s")
 	t.Setenv("SIGNA_WORKER_INTERVAL", "250ms")
+	t.Setenv("SIGNA_REPORT_RATE_PER_MINUTE", "10")
+	t.Setenv("SIGNA_REPORT_RATE_BURST", "4")
+	t.Setenv("SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "200")
+	t.Setenv("SIGNA_REPORT_GLOBAL_RATE_BURST", "40")
 
 	got, err := Load()
 	if err != nil {
@@ -47,11 +51,15 @@ func TestLoadEnvironment(t *testing.T) {
 	}
 
 	want := Config{
-		APIAddr:         "127.0.0.1:9090",
-		DatabaseURL:     "postgres://user:password@localhost:5432/example?sslmode=disable",
-		RedisAddr:       "127.0.0.1:6380",
-		ShutdownTimeout: 2 * time.Second,
-		WorkerInterval:  250 * time.Millisecond,
+		APIAddr:                   "127.0.0.1:9090",
+		DatabaseURL:               "postgres://user:password@localhost:5432/example?sslmode=disable",
+		RedisAddr:                 "127.0.0.1:6380",
+		ShutdownTimeout:           2 * time.Second,
+		WorkerInterval:            250 * time.Millisecond,
+		ReportRatePerMinute:       10,
+		ReportRateBurst:           4,
+		GlobalReportRatePerMinute: 200,
+		GlobalReportRateBurst:     40,
 	}
 	if got != want {
 		t.Errorf("Load() = %+v, want %+v", got, want)

@@ -103,6 +103,10 @@ export type CreateReportErrors = {
      */
     409: ErrorResponse;
     /**
+     * Too many report submissions
+     */
+    429: ErrorResponse;
+    /**
      * Internal server error
      */
     500: ErrorResponse;

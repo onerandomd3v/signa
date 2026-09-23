@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/onerandomd3v/signa/internal/reports"
 )
@@ -39,6 +40,7 @@ type errorResponse struct {
 }
 
 const maxIdempotencyKeyLength = 255
+const maxRawTextRunes = 10000
 
 func reportIngestHandler(logger *slog.Logger, ingestor reports.Ingestor) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
@@ -96,6 +98,9 @@ func reportIngestHandler(logger *slog.Logger, ingestor reports.Ingestor) http.Ha
 }
 
 func validateReportRequest(body reportRequest) (reports.IngestRequest, error) {
+	if utf8.RuneCountInString(body.RawText) > maxRawTextRunes {
+		return reports.IngestRequest{}, errors.New("raw_text must be at most 10000 Unicode characters")
+	}
 	if strings.TrimSpace(body.RawText) == "" {
 		return reports.IngestRequest{}, errors.New("raw_text must be non-empty")
 	}

@@ -42,7 +42,12 @@ func run(parent context.Context, logger *slog.Logger) error {
 		return err
 	}
 
-	server := api.NewServer(cfg.APIAddr, logger, reports.NewStore(pool))
+	server := api.NewServerWithRateLimit(cfg.APIAddr, logger, api.RateLimitConfig{
+		PerClientRatePerMinute: cfg.ReportRatePerMinute,
+		PerClientBurst:         cfg.ReportRateBurst,
+		GlobalRatePerMinute:    cfg.GlobalReportRatePerMinute,
+		GlobalBurst:            cfg.GlobalReportRateBurst,
+	}, reports.NewStore(pool))
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("api starting", "addr", cfg.APIAddr)
