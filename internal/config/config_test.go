@@ -122,3 +122,23 @@ func TestLoadRejectsMalformedWebOrigin(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadCanonicalizesWebOrigins(t *testing.T) {
+	t.Setenv("SIGNA_WEB_ALLOWED_ORIGINS", " HTTPS://EXAMPLE.com:443, http://Example.com:80, https://example.com:8443 ")
+
+	got, err := webAllowedOriginsFromEnv()
+	if err != nil {
+		t.Fatalf("webAllowedOriginsFromEnv() error = %v", err)
+	}
+	want := []string{"https://example.com", "http://example.com", "https://example.com:8443"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("webAllowedOriginsFromEnv() = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadRejectsOutOfRangeWebOriginPort(t *testing.T) {
+	t.Setenv("SIGNA_WEB_ALLOWED_ORIGINS", "https://example.com:99999")
+	if _, err := webAllowedOriginsFromEnv(); err == nil {
+		t.Fatal("webAllowedOriginsFromEnv() error = nil, want invalid port error")
+	}
+}

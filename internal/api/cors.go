@@ -29,6 +29,7 @@ func (c corsMiddleware) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
+		writer.Header().Add("Vary", "Origin")
 		_, allowed := c.allowed[origin]
 		if !allowed {
 			next.ServeHTTP(writer, request)
@@ -36,7 +37,7 @@ func (c corsMiddleware) Middleware(next http.Handler) http.Handler {
 		}
 
 		writer.Header().Set("Access-Control-Allow-Origin", origin)
-		writer.Header().Add("Vary", "Origin")
+		writer.Header().Set("Access-Control-Expose-Headers", "Retry-After")
 		if request.Method == http.MethodOptions {
 			if !validPreflight(request) {
 				writer.WriteHeader(http.StatusForbidden)

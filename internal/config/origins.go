@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -23,40 +24,58 @@ func webAllowedOriginsFromEnv() ([]string, error) {
 		if origin == "" {
 			return nil, fmt.Errorf("SIGNA_WEB_ALLOWED_ORIGINS contains an empty origin")
 		}
-		if err := validateWebOrigin(origin); err != nil {
+		canonicalOrigin, err := normalizeWebOrigin(origin)
+		if err != nil {
 			return nil, fmt.Errorf("SIGNA_WEB_ALLOWED_ORIGINS: %w", err)
 		}
-		if _, exists := seen[origin]; exists {
+		if _, exists := seen[canonicalOrigin]; exists {
 			continue
 		}
-		seen[origin] = struct{}{}
-		origins = append(origins, origin)
+		seen[canonicalOrigin] = struct{}{}
+		origins = append(origins, canonicalOrigin)
 	}
 	return origins, nil
 }
 
-func validateWebOrigin(origin string) error {
+func normalizeWebOrigin(origin string) (string, error) {
 	if origin == "*" || strings.Contains(origin, "*") {
-		return fmt.Errorf("wildcard origins are not allowed")
+		return "", fmt.Errorf("wildcard origins are not allowed")
 	}
 	if strings.IndexFunc(origin, unicode.IsSpace) >= 0 {
-		return fmt.Errorf("origin %q contains whitespace", origin)
+		return "", fmt.Errorf("origin %q contains whitespace", origin)
 	}
 	parsed, err := url.Parse(origin)
 	if err != nil {
-		return fmt.Errorf("origin %q is invalid: %w", origin, err)
+		return "", fmt.Errorf("origin %q is invalid: %w", origin, err)
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("origin %q must use http or https", origin)
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", fmt.Errorf("origin %q must use http or https", origin)
 	}
 	if parsed.Host == "" || parsed.Hostname() == "" {
-		return fmt.Errorf("origin %q must include a host", origin)
+		return "", fmt.Errorf("origin %q must include a host", origin)
 	}
 	if parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
-		return fmt.Errorf("origin %q must contain only scheme and authority", origin)
+		return "", fmt.Errorf("origin %q must contain only scheme and authority", origin)
 	}
-	if parsed.Port() == "" && strings.Contains(parsed.Host, ":") && !strings.HasPrefix(parsed.Host, "[") {
-		return fmt.Errorf("origin %q has an invalid port", origin)
+	port := parsed.Port()
+	if port == "" && strings.Contains(parsed.Host, ":") && !strings.HasPrefix(parsed.Host, "[") {
+		return "", fmt.Errorf("origin %q has an invalid port", origin)
 	}
-	return nil
+	if port != "" {
+		portNumber, err := strconv.ParseUint(port, 10, 16)
+		if err != nil {
+			return "", fmt.Errorf("origin %q has an invalid port", origin)
+		}
+		if (scheme == "http" && portNumber != 80) || (scheme == "https" && portNumber != 443) {
+			port = ":" + port
+		} else {
+			port = ""
+		}
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return scheme + "://" + host + port, nil
 }

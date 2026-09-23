@@ -35,6 +35,9 @@ func TestCORSAllowedPreflightAndPost(t *testing.T) {
 	if got := preflightResponse.Header().Get("Vary"); got != "Origin" {
 		t.Fatalf("Vary = %q", got)
 	}
+	if got := preflightResponse.Header().Get("Access-Control-Expose-Headers"); got != "Retry-After" {
+		t.Fatalf("expose headers = %q", got)
+	}
 	if ingestor.calls != 0 {
 		t.Fatalf("preflight ingestor calls = %d, want 0", ingestor.calls)
 	}
@@ -50,6 +53,33 @@ func TestCORSAllowedPreflightAndPost(t *testing.T) {
 	}
 	if got := postResponse.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
 		t.Fatalf("POST allow origin = %q", got)
+	}
+	if got := postResponse.Header().Get("Access-Control-Expose-Headers"); got != "Retry-After" {
+		t.Fatalf("POST expose headers = %q", got)
+	}
+}
+
+func TestCORSRateLimitedResponseExposesRetryAfter(t *testing.T) {
+	handler := NewHandlerWithCORS(nil, RateLimitConfig{PerClientRatePerMinute: 1, PerClientBurst: 1, GlobalRatePerMinute: 1, GlobalBurst: 1}, []string{"http://localhost:3000"}, &fakeIngestor{acknowledgement: reports.Acknowledgement{ReportID: "report-1"}})
+	post := func(key string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/reports", strings.NewReader(`{"raw_text":"report"}`))
+		request.RemoteAddr = "10.0.0.3:1000"
+		request.Header.Set("Origin", "http://localhost:3000")
+		request.Header.Set("Idempotency-Key", key)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	post("first")
+	response := post("second")
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("rate-limited POST status = %d, want 429", response.Code)
+	}
+	if response.Header().Get("Retry-After") == "" {
+		t.Fatal("rate-limited response missing Retry-After")
+	}
+	if got := response.Header().Get("Access-Control-Expose-Headers"); got != "Retry-After" {
+		t.Fatalf("rate-limited expose headers = %q", got)
 	}
 }
 
@@ -91,6 +121,9 @@ func TestCORSDisallowedAndSpoofedOriginsReceiveNoAuthorizationHeaders(t *testing
 		handler.ServeHTTP(response, request)
 		if response.Header().Get("Access-Control-Allow-Origin") != "" || response.Header().Get("Access-Control-Allow-Credentials") != "" {
 			t.Fatalf("origin %q received CORS authorization headers: %v", origin, response.Header())
+		}
+		if got := response.Header().Get("Vary"); got != "Origin" {
+			t.Fatalf("origin %q Vary = %q, want Origin", origin, got)
 		}
 	}
 }
