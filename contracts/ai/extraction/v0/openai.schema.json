@@ -1,0 +1,122 @@
+{
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "enum": ["signa.ai.report-extraction.v0"]
+    },
+    "taxonomy_version": {
+      "type": "string",
+      "enum": ["signa.event-taxonomy.v0"]
+    },
+    "event_type": {
+      "type": "object",
+      "properties": {
+        "status": {"type": "string", "enum": ["identified", "ambiguous", "unknown"]},
+        "value": {
+          "anyOf": [
+            {"type": "string", "enum": ["possible_gunfire", "road_closure", "traffic_collision", "fire", "flooding", "other"]},
+            {"type": "null"}
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["possible_gunfire", "road_closure", "traffic_collision", "fire", "flooding", "other"]}
+        },
+        "evidence_quotes": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["status", "value", "candidates", "evidence_quotes"],
+      "additionalProperties": false
+    },
+    "location_reference": {
+      "type": "object",
+      "properties": {
+        "status": {"type": "string", "enum": ["identified", "ambiguous", "unknown"]},
+        "value": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "candidates": {"type": "array", "items": {"type": "string"}},
+        "evidence_quotes": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["status", "value", "candidates", "evidence_quotes"],
+      "additionalProperties": false
+    },
+    "time_reference": {
+      "type": "object",
+      "properties": {
+        "status": {"type": "string", "enum": ["identified", "ambiguous", "unknown"]},
+        "value": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "candidates": {"type": "array", "items": {"type": "string"}},
+        "evidence_quotes": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["status", "value", "candidates", "evidence_quotes"],
+      "additionalProperties": false
+    },
+    "source_claim": {
+      "type": "object",
+      "properties": {
+        "status": {"type": "string", "enum": ["identified", "ambiguous", "unknown"]},
+        "value": {
+          "anyOf": [
+            {"type": "string", "enum": ["first_hand", "second_hand", "forwarded", "unclear"]},
+            {"type": "null"}
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["first_hand", "second_hand", "forwarded", "unclear"]}
+        },
+        "evidence_quotes": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["status", "value", "candidates", "evidence_quotes"],
+      "additionalProperties": false
+    },
+    "language": {
+      "type": "object",
+      "properties": {
+        "status": {"type": "string", "enum": ["identified", "ambiguous", "unknown"]},
+        "value": {
+          "anyOf": [
+            {"type": "string", "enum": ["en", "pcm", "en-pcm"]},
+            {"type": "null"}
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["en", "pcm", "en-pcm"]}
+        },
+        "evidence_quotes": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["status", "value", "candidates", "evidence_quotes"],
+      "additionalProperties": false
+    },
+    "severity_candidate": {
+      "type": "object",
+      "properties": {
+        "status": {"type": "string", "enum": ["identified", "ambiguous", "unknown"]},
+        "value": {
+          "anyOf": [
+            {"type": "string", "enum": ["LOW", "MODERATE", "HIGH", "CRITICAL"]},
+            {"type": "null"}
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["LOW", "MODERATE", "HIGH", "CRITICAL"]}
+        },
+        "evidence_quotes": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["status", "value", "candidates", "evidence_quotes"],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "contract_version",
+    "taxonomy_version",
+    "event_type",
+    "location_reference",
+    "time_reference",
+    "source_claim",
+    "language",
+    "severity_candidate"
+  ],
+  "additionalProperties": false
+}

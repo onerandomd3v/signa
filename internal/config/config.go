@@ -17,6 +17,12 @@ const (
 	defaultReportRateBurst           = 3
 	defaultGlobalReportRatePerMinute = 120
 	defaultGlobalReportRateBurst     = 30
+	defaultOpenAIModel               = "gpt-4.1-mini"
+	defaultOpenAIBaseURL             = "https://api.openai.com/v1"
+	defaultAISchemaPath              = "contracts/ai/extraction/v0/schema.json"
+	defaultAIGenerationSchemaPath    = "contracts/ai/extraction/v0/openai.schema.json"
+	defaultAIConsumerGroup           = "signa-ai-text-extraction"
+	defaultAIPollInterval            = time.Second
 )
 
 // Config contains the runtime settings needed by the foundation processes.
@@ -30,6 +36,14 @@ type Config struct {
 	ReportRateBurst           int
 	GlobalReportRatePerMinute int
 	GlobalReportRateBurst     int
+	OpenAIAPIKey              string
+	OpenAIModel               string
+	OpenAIBaseURL             string
+	AISchemaPath              string
+	AIGenerationSchemaPath    string
+	AIConsumerGroup           string
+	AIConsumerName            string
+	AIPollInterval            time.Duration
 }
 
 // Load reads configuration from environment variables and applies local defaults.
@@ -58,6 +72,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	aiPollInterval, err := durationFromEnv("SIGNA_AI_POLL_INTERVAL", defaultAIPollInterval)
+	if err != nil {
+		return Config{}, err
+	}
 
 	apiAddr := os.Getenv("SIGNA_API_ADDR")
 	if apiAddr == "" {
@@ -71,6 +89,26 @@ func Load() (Config, error) {
 	if redisAddr == "" {
 		redisAddr = defaultRedisAddr
 	}
+	openAIModel := os.Getenv("SIGNA_OPENAI_MODEL")
+	if openAIModel == "" {
+		openAIModel = defaultOpenAIModel
+	}
+	openAIBaseURL := os.Getenv("SIGNA_OPENAI_BASE_URL")
+	if openAIBaseURL == "" {
+		openAIBaseURL = defaultOpenAIBaseURL
+	}
+	aiSchemaPath := os.Getenv("SIGNA_AI_SCHEMA_PATH")
+	if aiSchemaPath == "" {
+		aiSchemaPath = defaultAISchemaPath
+	}
+	aiGenerationSchemaPath := os.Getenv("SIGNA_AI_GENERATION_SCHEMA_PATH")
+	if aiGenerationSchemaPath == "" {
+		aiGenerationSchemaPath = defaultAIGenerationSchemaPath
+	}
+	aiConsumerGroup := os.Getenv("SIGNA_AI_CONSUMER_GROUP")
+	if aiConsumerGroup == "" {
+		aiConsumerGroup = defaultAIConsumerGroup
+	}
 
 	return Config{
 		APIAddr:                   apiAddr,
@@ -82,6 +120,14 @@ func Load() (Config, error) {
 		ReportRateBurst:           reportRateBurst,
 		GlobalReportRatePerMinute: globalReportRatePerMinute,
 		GlobalReportRateBurst:     globalReportRateBurst,
+		OpenAIAPIKey:              os.Getenv("SIGNA_OPENAI_API_KEY"),
+		OpenAIModel:               openAIModel,
+		OpenAIBaseURL:             openAIBaseURL,
+		AISchemaPath:              aiSchemaPath,
+		AIGenerationSchemaPath:    aiGenerationSchemaPath,
+		AIConsumerGroup:           aiConsumerGroup,
+		AIConsumerName:            os.Getenv("SIGNA_AI_CONSUMER_NAME"),
+		AIPollInterval:            aiPollInterval,
 	}, nil
 }
 

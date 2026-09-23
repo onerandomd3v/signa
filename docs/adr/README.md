@@ -22,3 +22,7 @@ Do not renumber accepted ADRs. Supersede a decision with a new ADR that links to
 - [0007 — OpenAPI contract](0007-openapi-contract.md)
 - [0008 — AI interpretation vs deterministic decisions](0008-ai-interpretation-deterministic-decisions.md)
 - [0009 — Location minimization](0009-location-minimization.md)
+
+## Open architecture blockers
+
+- [0010 — AI extraction result destination blocker](0010-ai-extraction-result-destination-blocker.md)

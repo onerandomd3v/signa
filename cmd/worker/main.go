@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/ai/extraction"
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/logging"
 	"github.com/onerandomd3v/signa/internal/outbox"
@@ -48,5 +50,64 @@ func run(parent context.Context, logger *slog.Logger) error {
 	}
 
 	publisher := outbox.NewPublisher(database, redisClient, logger)
-	return worker.Run(ctx, logger, cfg.WorkerInterval, publisher)
+	schema, err := os.ReadFile(cfg.AISchemaPath)
+	if err != nil {
+		return fmt.Errorf("read AI extraction schema: %w", err)
+	}
+	validator, err := extraction.NewValidator(schema)
+	if err != nil {
+		return err
+	}
+	generationSchema, err := os.ReadFile(cfg.AIGenerationSchemaPath)
+	if err != nil {
+		return fmt.Errorf("read OpenAI generation schema: %w", err)
+	}
+	provider, err := extraction.NewOpenAIProvider(extraction.OpenAIConfig{
+		APIKey:           cfg.OpenAIAPIKey,
+		Model:            cfg.OpenAIModel,
+		BaseURL:          cfg.OpenAIBaseURL,
+		GenerationSchema: generationSchema,
+	})
+	if err != nil {
+		return err
+	}
+
+	streamClient := extraction.NewRedisStreamClient(redisClient)
+	observer := extraction.LoggingObserver{Logger: logger}
+	processor := extraction.NewProcessor(
+		extraction.NewPostgresReportReader(database),
+		provider,
+		validator,
+		observer,
+		streamClient,
+		outbox.ReportEventsStream,
+		cfg.AIConsumerGroup,
+	)
+	consumerName := cfg.AIConsumerName
+	if consumerName == "" {
+		hostname, hostnameErr := os.Hostname()
+		if hostnameErr != nil || hostname == "" {
+			hostname = "worker"
+		}
+		consumerName = hostname
+	}
+	consumer := extraction.NewConsumer(
+		streamClient,
+		processor,
+		outbox.ReportEventsStream,
+		cfg.AIConsumerGroup,
+		consumerName,
+		cfg.AIPollInterval,
+	).WithLogger(logger)
+
+	errCh := make(chan error, 2)
+	go func() { errCh <- worker.Run(ctx, logger, cfg.WorkerInterval, publisher) }()
+	go func() { errCh <- consumer.Run(ctx) }()
+
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-errCh:
+		return err
+	}
 }
