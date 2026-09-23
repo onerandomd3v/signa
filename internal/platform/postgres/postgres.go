@@ -17,7 +17,12 @@ func Ping(ctx context.Context, databaseURL string) error {
 	if err != nil {
 		return err
 	}
-	defer connection.Close(context.Background())
 
-	return connection.Ping(ctx)
+	pingErr := connection.Ping(ctx)
+	closeErr := connection.Close(context.Background())
+	if pingErr != nil {
+		return pingErr
+	}
+
+	return closeErr
 }
