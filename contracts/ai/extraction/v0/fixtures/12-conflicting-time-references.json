@@ -1,0 +1,14 @@
+{
+  "fixture_id": "v0-conflicting-time-references",
+  "raw_report_text": "Somebody said the fire started at 6pm, but another person said it began around 8pm behind the shops.",
+  "expected_extraction": {
+    "contract_version": "signa.ai.report-extraction.v0",
+    "taxonomy_version": "signa.event-taxonomy.v0",
+    "event_type": {"status": "identified", "value": "fire", "candidates": [], "evidence_quotes": ["fire"]},
+    "location_reference": {"status": "identified", "value": "behind the shops", "candidates": [], "evidence_quotes": ["behind the shops"]},
+    "time_reference": {"status": "ambiguous", "value": null, "candidates": ["at 6pm", "around 8pm"], "evidence_quotes": ["at 6pm", "around 8pm"]},
+    "source_claim": {"status": "identified", "value": "second_hand", "candidates": [], "evidence_quotes": ["Somebody said", "another person said"]},
+    "language": {"status": "identified", "value": "en", "candidates": [], "evidence_quotes": ["Somebody said the fire"]},
+    "severity_candidate": {"status": "unknown", "value": null, "candidates": [], "evidence_quotes": []}
+  }
+}

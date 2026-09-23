@@ -7,7 +7,8 @@ This directory defines the versioned, structured interpretation that a later wor
 - `schema.json` is the JSON Schema Draft 2020-12 contract. The output pins both `contract_version` (`signa.ai.report-extraction.v0`) and `taxonomy_version` (`signa.event-taxonomy.v0`).
 - `openai.schema.json` is the separate OpenAI strict-generation schema. It intentionally omits Draft 2020-12 conditional keywords such as `allOf` and `if`/`then`; returned output is still validated against the full canonical `schema.json`.
 - `event-taxonomy.json` defines the conservative MVP event identifiers and boundaries. Keep its identifiers aligned with the event enum in `schema.json`. Add a new version rather than silently changing the meaning of a published version.
-- `fixtures/` contains raw report examples and explicit expected extraction outputs for later implementation and evaluation work.
+- `fixtures/` contains raw report examples and explicit expected extraction outputs for implementation and evaluation.
+- `evaluation.json` is the versioned v0 evaluation manifest. It reuses the fixtures, assigns coverage categories, and records the tolerance version used by the evaluator.
 
 ## Field and uncertainty semantics
 
@@ -54,6 +55,14 @@ AI extraction is evidence interpretation, not verification. AI output alone cann
 
 Those decisions remain with deterministic backend/domain policy. Missing actors, causes, provenance, certainty, locations, times, and event types remain missing; do not add coordinates, names, or precision unsupported by the report.
 
-## Validation scope
+## Evaluation and validation
 
-The repository currently has no JSON Schema validator or contract test tooling. JSON parsing and fixture/taxonomy consistency can be checked with available standard-library tools, but those checks are not a substitute for validating the schema against a JSON Schema implementation. COD-191 should add/use the repository's chosen validator when worker implementation begins.
+The evaluator in `internal/ai/extraction/evaluation` validates every expected fixture and every provider output against `schema.json` before field-by-field comparison. It does not add confidence, truth, verification, persistence, severity policy, priority, or alert logic.
+
+Run the deterministic regression suite locally or in CI with:
+
+```text
+go test ./internal/ai/extraction/evaluation -run TestVersionedV0EvaluationSuite -count=1 -v
+```
+
+The regression uses an injected fixture-replay provider and requires no network, OpenAI credentials, PostgreSQL, or Redis. A live provider can be tested separately by injecting an implementation of `extraction.Provider`; it is never required for this suite.

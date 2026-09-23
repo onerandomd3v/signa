@@ -1,0 +1,76 @@
+{
+  "evaluation_version": "signa.ai.report-extraction-evaluation.v0",
+  "contract_version": "signa.ai.report-extraction.v0",
+  "tolerance_version": "signa.ai.report-extraction-evaluation-tolerances.v0",
+  "default_tolerances": {
+    "candidates": "unordered",
+    "evidence_quotes": "unordered"
+  },
+  "cases": [
+    {
+      "case_id": "v0-gunfire-first-hand-english",
+      "fixture": "fixtures/01-gunfire-first-hand-english.json",
+      "categories": ["standard_english"]
+    },
+    {
+      "case_id": "v0-road-closure-pidgin-hearsay",
+      "fixture": "fixtures/02-road-closure-pidgin-hearsay.json",
+      "categories": ["nigerian_pidgin", "hearsay"]
+    },
+    {
+      "case_id": "v0-incomplete-vague-market",
+      "fixture": "fixtures/03-incomplete-vague-market.json",
+      "categories": ["nigerian_pidgin", "incomplete_vague", "unknown_preservation"]
+    },
+    {
+      "case_id": "v0-noisy-slang-misspelled",
+      "fixture": "fixtures/04-noisy-slang-misspelled.json",
+      "categories": ["mixed_english_pidgin", "hearsay"]
+    },
+    {
+      "case_id": "v0-ambiguous-sounds",
+      "fixture": "fixtures/05-ambiguous-sounds.json",
+      "categories": ["standard_english", "ambiguous_event", "unknown_preservation"]
+    },
+    {
+      "case_id": "v0-flooding-relative-time",
+      "fixture": "fixtures/06-flooding-relative-time.json",
+      "categories": ["standard_english", "relative_time"]
+    },
+    {
+      "case_id": "v0-forwarded-unknown-origin",
+      "fixture": "fixtures/07-forwarded-unknown-origin.json",
+      "categories": ["standard_english", "forwarded_claim"]
+    },
+    {
+      "case_id": "v0-non-incident-question",
+      "fixture": "fixtures/08-non-incident-question.json",
+      "categories": ["standard_english", "unrelated_non_incident", "unknown_preservation"]
+    },
+    {
+      "case_id": "v0-unclear-source",
+      "fixture": "fixtures/09-unclear-source.json",
+      "categories": ["standard_english", "unknown_source"]
+    },
+    {
+      "case_id": "v0-mixed-english-pidgin",
+      "fixture": "fixtures/10-mixed-english-pidgin.json",
+      "categories": ["mixed_english_pidgin", "hearsay"]
+    },
+    {
+      "case_id": "v0-undetermined-language",
+      "fixture": "fixtures/11-undetermined-language.json",
+      "categories": ["unknown_language", "unknown_preservation"]
+    },
+    {
+      "case_id": "v0-conflicting-time-references",
+      "fixture": "fixtures/12-conflicting-time-references.json",
+      "categories": ["standard_english", "conflicting_time", "ambiguous_time"]
+    },
+    {
+      "case_id": "v0-ambiguous-location-references",
+      "fixture": "fixtures/13-ambiguous-location-references.json",
+      "categories": ["standard_english", "conflicting_location", "ambiguous_location"]
+    }
+  ]
+}
