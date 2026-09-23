@@ -75,6 +75,7 @@ Optional local configuration can be copied from `.env.example`:
 - `SIGNA_DATABASE_URL` points to the local PostgreSQL/PostGIS service.
 - `SIGNA_REDIS_ADDR` points to the local Redis service.
 - `SIGNA_SHUTDOWN_TIMEOUT` and `SIGNA_WORKER_INTERVAL` use Go duration values; the worker polls every `500ms` by default.
+- `SIGNA_REPORT_RATE_PER_MINUTE` / `SIGNA_REPORT_RATE_BURST` configure per-client report limits; global limits use `SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE` / `SIGNA_REPORT_GLOBAL_RATE_BURST`.
 
 Run the worker in another terminal:
 
