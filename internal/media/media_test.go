@@ -42,3 +42,14 @@ func TestObjectKeyNamespace(t *testing.T) {
 		t.Fatal("foreign or nested key was accepted")
 	}
 }
+
+func TestMissingObjectCodes(t *testing.T) {
+	for _, code := range []string{"NotFound", "NoSuchKey", "404"} {
+		if !isMissingObjectCode(code) {
+			t.Errorf("isMissingObjectCode(%q) = false", code)
+		}
+	}
+	if isMissingObjectCode("AccessDenied") {
+		t.Error("isMissingObjectCode(AccessDenied) = true")
+	}
+}
