@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CreateReportData, CreateReportErrors, CreateReportResponses, GetHealthData, GetHealthResponses } from './types.gen';
+import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, GetHealthData, GetHealthResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -28,6 +28,30 @@ export const getHealth = <ThrowOnError extends boolean = false>(options?: Option
  */
 export const createReport = <ThrowOnError extends boolean = false>(options: Options<CreateReportData, ThrowOnError>): RequestResult<CreateReportResponses, CreateReportErrors, ThrowOnError> => (options.client ?? client).post<CreateReportResponses, CreateReportErrors, ThrowOnError>({
     url: '/reports',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Authorize a direct private media upload
+ */
+export const authorizeReportMediaUpload = <ThrowOnError extends boolean = false>(options: Options<AuthorizeReportMediaUploadData, ThrowOnError>): RequestResult<AuthorizeReportMediaUploadResponses, AuthorizeReportMediaUploadErrors, ThrowOnError> => (options.client ?? client).post<AuthorizeReportMediaUploadResponses, AuthorizeReportMediaUploadErrors, ThrowOnError>({
+    url: '/reports/{report_id}/media/uploads',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Confirm and attach a completed direct media upload
+ */
+export const attachReportMedia = <ThrowOnError extends boolean = false>(options: Options<AttachReportMediaData, ThrowOnError>): RequestResult<AttachReportMediaResponses, AttachReportMediaErrors, ThrowOnError> => (options.client ?? client).post<AttachReportMediaResponses, AttachReportMediaErrors, ThrowOnError>({
+    url: '/reports/{report_id}/media',
     ...options,
     headers: {
         'Content-Type': 'application/json',

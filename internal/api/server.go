@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/media"
 	"github.com/onerandomd3v/signa/internal/reports"
 )
 
@@ -16,6 +18,10 @@ func NewHandler(logger *slog.Logger, ingestors ...reports.Ingestor) http.Handler
 }
 
 func NewHandlerWithRateLimit(logger *slog.Logger, rateConfig RateLimitConfig, ingestors ...reports.Ingestor) http.Handler {
+	return NewHandlerWithMedia(logger, rateConfig, nil, nil, ingestors...)
+}
+
+func NewHandlerWithMedia(logger *slog.Logger, rateConfig RateLimitConfig, pool *pgxpool.Pool, storage media.Storage, ingestors ...reports.Ingestor) http.Handler {
 	var ingestor reports.Ingestor
 	if len(ingestors) > 0 {
 		ingestor = ingestors[0]
@@ -23,6 +29,10 @@ func NewHandlerWithRateLimit(logger *slog.Logger, rateConfig RateLimitConfig, in
 	router := chi.NewRouter()
 	router.Get("/healthz", healthHandler(logger))
 	router.With(NewRateLimiter(rateConfig, RateLimiterOptions{}).Middleware).Post("/reports", reportIngestHandler(logger, ingestor))
+	mediaLimiter := NewRateLimiter(rateConfig, RateLimiterOptions{})
+	handler := &mediaHandler{logger: logger, pool: pool, storage: storage}
+	router.With(mediaLimiter.Middleware).Post("/reports/{report_id}/media/uploads", handler.authorizeUpload)
+	router.With(mediaLimiter.Middleware).Post("/reports/{report_id}/media", handler.confirmUpload)
 	return router
 }
 
@@ -32,9 +42,13 @@ func NewServer(addr string, logger *slog.Logger, ingestors ...reports.Ingestor) 
 }
 
 func NewServerWithRateLimit(addr string, logger *slog.Logger, rateConfig RateLimitConfig, ingestors ...reports.Ingestor) *http.Server {
+	return NewServerWithMedia(addr, logger, rateConfig, nil, nil, ingestors...)
+}
+
+func NewServerWithMedia(addr string, logger *slog.Logger, rateConfig RateLimitConfig, pool *pgxpool.Pool, storage media.Storage, ingestors ...reports.Ingestor) *http.Server {
 	return &http.Server{
 		Addr:              addr,
-		Handler:           NewHandlerWithRateLimit(logger, rateConfig, ingestors...),
+		Handler:           NewHandlerWithMedia(logger, rateConfig, pool, storage, ingestors...),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,
