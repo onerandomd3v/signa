@@ -98,7 +98,7 @@ func (p *OpenAIProvider) Extract(ctx context.Context, rawText string) ([]byte, e
 	if err != nil {
 		return nil, fmt.Errorf("call OpenAI: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read OpenAI response: %w", err)
