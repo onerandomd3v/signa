@@ -43,4 +43,55 @@ npm run dev
 
 Open <http://localhost:3000>. From `apps/web`, run `npm run lint`, `npm run typecheck`, `npm test`, `npm run format:check`, and `npm run build` for the frontend checks and production build.
 
-Local frontend settings belong in `apps/web/.env.local`, which is ignored by the root `.gitignore`; never commit local environment files or secrets. No environment variables are needed yet, so there is no `.env.example`. When a feature introduces configuration, document its variable names and safe placeholders in `.env.example`. Variables exposed to browser code must use Next.js's `NEXT_PUBLIC_` prefix and must never contain secrets.
+Local frontend settings belong in `apps/web/.env.local`, which is ignored by the root `.gitignore`; never commit local environment files or secrets. No frontend environment variables are needed yet. When a frontend feature introduces configuration, document its variable names and safe placeholders in an appropriate example environment file. Variables exposed to browser code must use Next.js's `NEXT_PUBLIC_` prefix and must never contain secrets.
+
+## Go foundation
+
+Requires Go 1.25 or later.
+
+Run the API:
+
+```text
+go run ./cmd/api
+```
+
+The API listens on `:8080` by default. Check its health with `GET http://localhost:8080/healthz`.
+
+Optional local configuration can be copied from `.env.example`:
+
+- `SIGNA_API_ADDR` sets the API listen address.
+- `SIGNA_DATABASE_URL` points to the local PostgreSQL/PostGIS service.
+- `SIGNA_REDIS_ADDR` points to the local Redis service.
+- `SIGNA_SHUTDOWN_TIMEOUT` and `SIGNA_WORKER_INTERVAL` use Go duration values such as `10s` or `500ms`.
+
+Run the worker in another terminal:
+
+```text
+go run ./cmd/worker
+```
+
+Run tests and static checks:
+
+```text
+go test ./...
+go vet ./...
+```
+
+## Local data infrastructure
+
+Start and stop the local PostgreSQL/PostGIS and Redis services with:
+
+```text
+make infra-up
+make infra-down
+```
+
+Apply the PostGIS baseline migration and verify connectivity with:
+
+```text
+make migrate-up
+make db-ping
+make redis-ping
+```
+
+The Compose file uses local-only credentials (`signa` / `signa_local`). Do not reuse them outside local development. The integration checks are explicit and are not included in the normal `go test ./...` run.
