@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +60,9 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	}
 	defer func() { _ = connection.Close(context.Background()) }()
 	assertTableExists(t, ctx, connection, testSchema, "report_media")
+	assertTableExists(t, ctx, connection, testSchema, "incidents")
+	assertTableExists(t, ctx, connection, testSchema, "incident_reports")
+	assertTableExists(t, ctx, connection, testSchema, "incident_state_history")
 
 	t.Run("report columns", func(t *testing.T) {
 		rows, err := connection.Query(ctx, `
@@ -275,9 +280,11 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
+	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	assertTableMissing(t, ctx, connection, testSchema, "reports")
 	assertTableMissing(t, ctx, connection, testSchema, "outbox_events")
 	assertTableMissing(t, ctx, connection, testSchema, "report_media")
+	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
@@ -288,7 +295,11 @@ func TestReportAndOutboxMigration(t *testing.T) {
 
 func runGoose(t *testing.T, ctx context.Context, databaseURL string, command string) {
 	t.Helper()
-	goose := exec.CommandContext(ctx, "go", "run", "github.com/pressly/goose/v3/cmd/goose@v3.27.0", "-dir", ".", "postgres", databaseURL, command)
+	goBinary := filepath.Join(runtime.GOROOT(), "bin", "go")
+	if runtime.GOOS == "windows" {
+		goBinary += ".exe"
+	}
+	goose := exec.CommandContext(ctx, goBinary, "run", "github.com/pressly/goose/v3/cmd/goose@v3.27.0", "-dir", ".", "postgres", databaseURL, command)
 	goose.Dir = "."
 	output, err := goose.CombinedOutput()
 	if err != nil {
