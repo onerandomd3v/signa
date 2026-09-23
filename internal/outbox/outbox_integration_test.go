@@ -61,9 +61,17 @@ func TestPublisherIntegrationAndConsumerGroupProof(t *testing.T) {
 	publisher := NewPublisher(pool, redisClient, nil)
 	publisher.stream = stream
 
+	unsupportedID := insertUnsupportedOutboxEvent(t, ctx, pool)
 	eventID := insertOutboxEvent(t, ctx, pool)
 	if err := publisher.PublishCycle(ctx); err != nil {
 		t.Fatalf("publish cycle: %v", err)
+	}
+	var unsupportedPublishedAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT published_at FROM outbox_events WHERE id = $1`, unsupportedID).Scan(&unsupportedPublishedAt); err != nil {
+		t.Fatal(err)
+	}
+	if unsupportedPublishedAt != nil {
+		t.Fatal("unsupported event was published by report publisher")
 	}
 	var publishedAt *time.Time
 	if err := pool.QueryRow(ctx, `SELECT published_at FROM outbox_events WHERE id = $1`, eventID).Scan(&publishedAt); err != nil {
@@ -137,6 +145,16 @@ func insertOutboxEvent(t *testing.T, ctx context.Context, pool *pgxpool.Pool) st
 	err := pool.QueryRow(ctx, `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ('report.created', 'report', gen_random_uuid(), '{"report_id":"safe-test-payload"}') RETURNING id::text`).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert outbox event: %v", err)
+	}
+	return id
+}
+
+func insertUnsupportedOutboxEvent(t *testing.T, ctx context.Context, pool *pgxpool.Pool) string {
+	t.Helper()
+	var id string
+	err := pool.QueryRow(ctx, `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ('future.event', 'report', gen_random_uuid(), '{}') RETURNING id::text`).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert unsupported outbox event: %v", err)
 	}
 	return id
 }

@@ -95,7 +95,7 @@ func (p *Publisher) publishOne(ctx context.Context, attempted map[string]struct{
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	query := `SELECT id::text, event_type, aggregate_type, aggregate_id::text, payload, created_at
-		FROM outbox_events WHERE published_at IS NULL`
+		FROM outbox_events WHERE published_at IS NULL AND event_type = 'report.created'`
 	args := make([]any, 0, len(attempted))
 	if len(attempted) > 0 {
 		placeholders := make([]string, 0, len(attempted))
@@ -126,12 +126,41 @@ func (p *Publisher) publishOne(ctx context.Context, attempted map[string]struct{
 		return event, false, p.recordFailure(ctx, tx, event, err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE outbox_events SET published_at = now(), last_error = NULL WHERE id = $1`, event.ID); err != nil {
-		return event, false, fmt.Errorf("acknowledge published outbox event %s: %w", event.ID, err)
+		_ = tx.Rollback(ctx)
+		return event, false, p.recordAcknowledgementFailure(ctx, event, fmt.Errorf("update published outbox event %s: %w", event.ID, err))
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return event, false, fmt.Errorf("commit published outbox event %s: %w", event.ID, err)
+		return event, false, p.recordAcknowledgementFailure(ctx, event, fmt.Errorf("commit published outbox event %s: %w", event.ID, err))
 	}
 	return event, true, nil
+}
+
+func (p *Publisher) recordAcknowledgementFailure(ctx context.Context, event *Event, acknowledgementErr error) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("record acknowledgement failure for outbox event %s: %w (original: %v)", event.ID, err, acknowledgementErr)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var retryAttempt int
+	err = tx.QueryRow(ctx, `
+		UPDATE outbox_events
+		SET retry_attempts = retry_attempts + 1, last_error = $2
+		WHERE id = $1 AND published_at IS NULL
+		RETURNING retry_attempts
+	`, event.ID, truncateError(acknowledgementErr.Error())).Scan(&retryAttempt)
+	if err == pgx.ErrNoRows {
+		// The original commit may have succeeded even if its client observed an error.
+		return acknowledgementErr
+	}
+	if err != nil {
+		return fmt.Errorf("record acknowledgement failure for outbox event %s: %w (original: %v)", event.ID, err, acknowledgementErr)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit acknowledgement failure for outbox event %s: %w (original: %v)", event.ID, err, acknowledgementErr)
+	}
+	p.log("outbox acknowledgement failed", slog.String("event_id", event.ID), slog.String("event_name", eventName(event)), slog.String("aggregate_id", event.AggregateID), slog.Int("retry_attempt", retryAttempt), slog.String("error", truncateError(acknowledgementErr.Error())))
+	return acknowledgementErr
 }
 
 func (p *Publisher) recordFailure(ctx context.Context, tx pgx.Tx, event *Event, publishErr error) error {
