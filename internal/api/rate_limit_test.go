@@ -69,6 +69,19 @@ func TestGlobalReportRateLimitStopsAggregateTraffic(t *testing.T) {
 	}
 }
 
+func TestRejectedClientRequestDoesNotConsumeGlobalToken(t *testing.T) {
+	limiter := NewRateLimiter(RateLimitConfig{PerClientRatePerMinute: 1, PerClientBurst: 1, GlobalRatePerMinute: 2, GlobalBurst: 2}, RateLimiterOptions{})
+	if allowed, _ := limiter.Allow("client-1"); !allowed {
+		t.Fatal("first request was rejected")
+	}
+	if allowed, _ := limiter.Allow("client-1"); allowed {
+		t.Fatal("client burst request was accepted")
+	}
+	if allowed, _ := limiter.Allow("client-2"); !allowed {
+		t.Fatal("second client was rejected after another client's rejection")
+	}
+}
+
 func TestHealthzIsNotRateLimited(t *testing.T) {
 	handler := NewHandlerWithRateLimit(nil, RateLimitConfig{PerClientRatePerMinute: 1, PerClientBurst: 1, GlobalRatePerMinute: 1, GlobalBurst: 1}, nil)
 	for i := 0; i < 3; i++ {

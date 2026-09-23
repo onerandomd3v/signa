@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -89,8 +90,8 @@ func intFromEnv(name string, fallback int) (int, error) {
 	if value == "" {
 		return fallback, nil
 	}
-	var parsed int
-	if _, err := fmt.Sscan(value, &parsed); err != nil || parsed <= 0 {
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
 		return 0, fmt.Errorf("%s must be a positive integer", name)
 	}
 	return parsed, nil

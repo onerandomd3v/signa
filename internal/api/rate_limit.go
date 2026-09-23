@@ -103,7 +103,7 @@ func (l *RateLimiter) Allow(clientKey string) (bool, string) {
 
 	now := l.now()
 	l.cleanup(now)
-	if allowed, retryAfter := l.global.allow(now, l.config.GlobalRatePerMinute, l.config.GlobalBurst); !allowed {
+	if allowed, retryAfter := l.global.canTake(now, l.config.GlobalRatePerMinute, l.config.GlobalBurst); !allowed {
 		return false, retryAfter
 	}
 	client, exists := l.clients[clientKey]
@@ -112,7 +112,12 @@ func (l *RateLimiter) Allow(clientKey string) (bool, string) {
 		l.clients[clientKey] = client
 	}
 	client.lastSeen = now
-	return client.bucket.allow(now, l.config.PerClientRatePerMinute, l.config.PerClientBurst)
+	if allowed, retryAfter := client.bucket.canTake(now, l.config.PerClientRatePerMinute, l.config.PerClientBurst); !allowed {
+		return false, retryAfter
+	}
+	l.global.tokens--
+	client.bucket.tokens--
+	return true, ""
 }
 
 func (l *RateLimiter) ClientCount() int {
@@ -129,17 +134,12 @@ func (l *RateLimiter) cleanup(now time.Time) {
 	}
 }
 
-func (b *tokenBucket) allow(now time.Time, ratePerMinute, burst int) (bool, string) {
+func (b *tokenBucket) canTake(now time.Time, ratePerMinute, burst int) (bool, string) {
 	if ratePerMinute <= 0 || burst <= 0 {
 		return false, "1"
 	}
-	elapsed := now.Sub(b.lastRefill).Seconds()
-	if elapsed > 0 {
-		b.tokens = math.Min(float64(burst), b.tokens+elapsed*float64(ratePerMinute)/60)
-		b.lastRefill = now
-	}
+	b.refill(now, ratePerMinute, burst)
 	if b.tokens >= 1 {
-		b.tokens--
 		return true, ""
 	}
 	seconds := math.Ceil((1 - b.tokens) * 60 / float64(ratePerMinute))
@@ -147,6 +147,14 @@ func (b *tokenBucket) allow(now time.Time, ratePerMinute, burst int) (bool, stri
 		seconds = 1
 	}
 	return false, formatRetryAfter(seconds)
+}
+
+func (b *tokenBucket) refill(now time.Time, ratePerMinute, burst int) {
+	elapsed := now.Sub(b.lastRefill).Seconds()
+	if elapsed > 0 {
+		b.tokens = math.Min(float64(burst), b.tokens+elapsed*float64(ratePerMinute)/60)
+		b.lastRefill = now
+	}
 }
 
 func newTokenBucket(burst int, now time.Time) tokenBucket {

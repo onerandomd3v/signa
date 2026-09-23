@@ -72,3 +72,10 @@ func TestLoadRejectsInvalidDuration(t *testing.T) {
 		t.Fatal("Load() error = nil, want an invalid-duration error")
 	}
 }
+
+func TestLoadRejectsMalformedRateLimit(t *testing.T) {
+	t.Setenv("SIGNA_REPORT_RATE_PER_MINUTE", "6oops")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want malformed rate-limit error")
+	}
+}
