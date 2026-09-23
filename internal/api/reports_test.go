@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,6 +67,7 @@ func TestCreateReportRejectsInvalidRequests(t *testing.T) {
 		body string
 	}{
 		{name: "missing idempotency key", body: `{"raw_text":"report"}`},
+		{name: "idempotency key too long", key: strings.Repeat("k", maxIdempotencyKeyLength+1), body: `{"raw_text":"report"}`},
 		{name: "malformed json", key: "key-1", body: `{"raw_text":`},
 		{name: "empty text", key: "key-1", body: `{"raw_text":"  "}`},
 		{name: "missing latitude", key: "key-1", body: `{"raw_text":"report","device_location":{"longitude":3}}`},
@@ -80,8 +83,11 @@ func TestCreateReportRejectsInvalidRequests(t *testing.T) {
 				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 			}
 			code := "invalid_request"
-			if test.name == "missing idempotency key" {
+			switch test.name {
+			case "missing idempotency key":
 				code = "missing_idempotency_key"
+			case "idempotency key too long":
+				code = "invalid_idempotency_key"
 			}
 			assertErrorResponse(t, recorder, code)
 		})
@@ -106,6 +112,22 @@ func TestCreateReportReturnsInternalErrorContract(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
 	}
 	assertErrorResponse(t, recorder, "internal_error")
+}
+
+func TestCreateReportLogsInternalErrors(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	request := httptest.NewRequest(http.MethodPost, "/reports", strings.NewReader(`{"raw_text":"report"}`))
+	request.Header.Set("Idempotency-Key", "key-1")
+	recorder := httptest.NewRecorder()
+	NewHandler(logger, &fakeIngestor{err: errors.New("database unavailable")}).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(logs.String(), "report ingestion failed") || !strings.Contains(logs.String(), "database unavailable") {
+		t.Fatalf("logs = %q, want internal error details", logs.String())
+	}
 }
 
 func performReportRequest(t *testing.T, ingestor reports.Ingestor, key string, body string) *httptest.ResponseRecorder {

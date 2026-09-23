@@ -33,6 +33,7 @@ paths:
           schema:
             type: string
             minLength: 1
+            maxLength: 255
       requestBody:
         required: true
         content:

@@ -18,7 +18,7 @@ func NewHandler(logger *slog.Logger, ingestors ...reports.Ingestor) http.Handler
 	}
 	router := chi.NewRouter()
 	router.Get("/healthz", healthHandler(logger))
-	router.Post("/reports", reportIngestHandler(ingestor))
+	router.Post("/reports", reportIngestHandler(logger, ingestor))
 	return router
 }
 
@@ -28,6 +28,7 @@ func NewServer(addr string, logger *slog.Logger, ingestors ...reports.Ingestor) 
 		Addr:              addr,
 		Handler:           NewHandler(logger, ingestors...),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 }

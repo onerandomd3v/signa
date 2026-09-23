@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -37,11 +38,17 @@ type errorResponse struct {
 	Error errorBody `json:"error"`
 }
 
-func reportIngestHandler(ingestor reports.Ingestor) http.HandlerFunc {
+const maxIdempotencyKeyLength = 255
+
+func reportIngestHandler(logger *slog.Logger, ingestor reports.Ingestor) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		idempotencyKey := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
 		if idempotencyKey == "" {
 			writeError(writer, http.StatusBadRequest, "missing_idempotency_key", "Idempotency-Key is required")
+			return
+		}
+		if len(idempotencyKey) > maxIdempotencyKeyLength {
+			writeError(writer, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key must be at most 255 bytes")
 			return
 		}
 
@@ -72,6 +79,9 @@ func reportIngestHandler(ingestor reports.Ingestor) http.HandlerFunc {
 			if errors.Is(err, reports.ErrIdempotencyConflict) {
 				writeError(writer, http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used for a different request")
 				return
+			}
+			if logger != nil {
+				logger.Error("report ingestion failed", "error", err)
 			}
 			writeError(writer, http.StatusInternalServerError, "internal_error", "report could not be accepted")
 			return

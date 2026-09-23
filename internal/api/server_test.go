@@ -50,6 +50,9 @@ func TestNewServerTimeouts(t *testing.T) {
 	if server.IdleTimeout != 60*time.Second {
 		t.Fatalf("IdleTimeout = %s, want 60s", server.IdleTimeout)
 	}
+	if server.ReadTimeout != 30*time.Second {
+		t.Fatalf("ReadTimeout = %s, want 30s", server.ReadTimeout)
+	}
 	if server.WriteTimeout != 0 {
 		t.Fatalf("WriteTimeout = %s, want zero for future SSE compatibility", server.WriteTimeout)
 	}
