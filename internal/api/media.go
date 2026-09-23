@@ -112,6 +112,20 @@ func (h *mediaHandler) confirmUpload(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusNotFound, "report_not_found", "report was not found")
 		return
 	}
+	existing, found, err := h.findMedia(request.Context(), input.ObjectKey)
+	if err != nil {
+		h.logError("load existing media attachment", err)
+		writeError(writer, http.StatusInternalServerError, "internal_error", "unable to load media attachment")
+		return
+	}
+	if found {
+		if !sameMediaAttachment(existing, reportID, input) {
+			writeError(writer, http.StatusConflict, "media_conflict", "object_key is already attached with different metadata")
+			return
+		}
+		writeJSON(writer, http.StatusOK, existing)
+		return
+	}
 	if h.storage == nil {
 		writeError(writer, http.StatusServiceUnavailable, "media_storage_unavailable", "media storage is not configured")
 		return
@@ -130,7 +144,7 @@ func (h *mediaHandler) confirmUpload(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusBadRequest, "media_metadata_mismatch", "uploaded object metadata does not match the request")
 		return
 	}
-	record, err := h.persistMedia(request.Context(), reportID, input)
+	record, created, err := h.persistMedia(request.Context(), reportID, input)
 	if err != nil {
 		if errors.Is(err, errMediaConflict) {
 			writeError(writer, http.StatusConflict, "media_conflict", "object_key is already attached with different metadata")
@@ -140,7 +154,11 @@ func (h *mediaHandler) confirmUpload(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusInternalServerError, "internal_error", "unable to attach media")
 		return
 	}
-	writeJSON(writer, http.StatusCreated, record)
+	if created {
+		writeJSON(writer, http.StatusCreated, record)
+		return
+	}
+	writeJSON(writer, http.StatusOK, record)
 }
 
 var errMediaConflict = errors.New("media object conflict")
@@ -153,10 +171,28 @@ func (h *mediaHandler) reportExists(ctx context.Context, id uuid.UUID) bool {
 	return exists
 }
 
-func (h *mediaHandler) persistMedia(ctx context.Context, reportID uuid.UUID, input mediaConfirmRequest) (mediaRecord, error) {
+func (h *mediaHandler) findMedia(ctx context.Context, objectKey string) (mediaRecord, bool, error) {
+	var record mediaRecord
+	var created time.Time
+	err := h.pool.QueryRow(ctx, `SELECT id::text, report_id::text, object_key, media_type, content_type, size_bytes, created_at FROM report_media WHERE object_key = $1`, objectKey).Scan(&record.ID, &record.ReportID, &record.ObjectKey, &record.MediaType, &record.ContentType, &record.SizeBytes, &created)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return mediaRecord{}, false, nil
+	}
+	if err != nil {
+		return mediaRecord{}, false, err
+	}
+	record.CreatedAt = created.UTC()
+	return record, true, nil
+}
+
+func sameMediaAttachment(record mediaRecord, reportID uuid.UUID, input mediaConfirmRequest) bool {
+	return record.ReportID == reportID.String() && record.MediaType == input.MediaType && record.ContentType == input.ContentType && record.SizeBytes == input.SizeBytes
+}
+
+func (h *mediaHandler) persistMedia(ctx context.Context, reportID uuid.UUID, input mediaConfirmRequest) (mediaRecord, bool, error) {
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
-		return mediaRecord{}, err
+		return mediaRecord{}, false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var record mediaRecord
@@ -170,26 +206,29 @@ func (h *mediaHandler) persistMedia(ctx context.Context, reportID uuid.UUID, inp
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = tx.QueryRow(ctx, `SELECT id::text, report_id::text, object_key, media_type, content_type, size_bytes, created_at FROM report_media WHERE object_key = $1`, input.ObjectKey).Scan(&record.ID, &record.ReportID, &record.ObjectKey, &record.MediaType, &record.ContentType, &record.SizeBytes, &created)
 		if err != nil {
-			return mediaRecord{}, err
+			return mediaRecord{}, false, err
 		}
-		if record.ReportID != reportID.String() || record.MediaType != input.MediaType || record.ContentType != input.ContentType || record.SizeBytes != input.SizeBytes {
-			return mediaRecord{}, errMediaConflict
+		if !sameMediaAttachment(record, reportID, input) {
+			return mediaRecord{}, false, errMediaConflict
 		}
 		record.CreatedAt = created.UTC()
-		return record, tx.Commit(ctx)
+		if err := tx.Commit(ctx); err != nil {
+			return mediaRecord{}, false, err
+		}
+		return record, false, nil
 	}
 	if err != nil {
-		return mediaRecord{}, err
+		return mediaRecord{}, false, err
 	}
 	payload := fmt.Sprintf(`{"report_id":%q,"media_id":%q}`, reportID.String(), record.ID)
 	if _, err := tx.Exec(ctx, `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ('report.media_attached', 'report', $1, $2::jsonb)`, reportID, payload); err != nil {
-		return mediaRecord{}, err
+		return mediaRecord{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return mediaRecord{}, err
+		return mediaRecord{}, false, err
 	}
 	record.CreatedAt = created.UTC()
-	return record, nil
+	return record, true, nil
 }
 
 func (h *mediaHandler) logError(message string, err error) {
