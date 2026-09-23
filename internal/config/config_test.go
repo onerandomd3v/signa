@@ -1,12 +1,13 @@
 package config
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
 
 func TestLoadDefaults(t *testing.T) {
-	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL"} {
+	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_WEB_ALLOWED_ORIGINS"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("SIGNA_DATABASE_URL", "")
@@ -35,6 +36,9 @@ func TestLoadDefaults(t *testing.T) {
 	if got.OpenAIModel != defaultOpenAIModel || got.OpenAIBaseURL != defaultOpenAIBaseURL || got.AISchemaPath != defaultAISchemaPath || got.AIGenerationSchemaPath != defaultAIGenerationSchemaPath || got.AIConsumerGroup != defaultAIConsumerGroup || got.AIPollInterval != defaultAIPollInterval {
 		t.Errorf("AI defaults = %+v", got)
 	}
+	if !reflect.DeepEqual(got.WebAllowedOrigins, []string{defaultWebAllowedOrigin}) {
+		t.Fatalf("WebAllowedOrigins = %#v, want %#v", got.WebAllowedOrigins, []string{defaultWebAllowedOrigin})
+	}
 }
 
 func TestLoadEnvironment(t *testing.T) {
@@ -55,6 +59,7 @@ func TestLoadEnvironment(t *testing.T) {
 	t.Setenv("SIGNA_AI_CONSUMER_GROUP", "test-group")
 	t.Setenv("SIGNA_AI_CONSUMER_NAME", "test-consumer")
 	t.Setenv("SIGNA_AI_POLL_INTERVAL", "750ms")
+	t.Setenv("SIGNA_WEB_ALLOWED_ORIGINS", " http://localhost:3000, https://staging.signa.test, http://localhost:3000 ")
 
 	got, err := Load()
 	if err != nil {
@@ -79,8 +84,9 @@ func TestLoadEnvironment(t *testing.T) {
 		AIConsumerGroup:           "test-group",
 		AIConsumerName:            "test-consumer",
 		AIPollInterval:            750 * time.Millisecond,
+		WebAllowedOrigins:         []string{"http://localhost:3000", "https://staging.signa.test"},
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Load() = %+v, want %+v", got, want)
 	}
 }
@@ -103,5 +109,16 @@ func TestLoadRejectsInvalidAIPollInterval(t *testing.T) {
 	t.Setenv("SIGNA_AI_POLL_INTERVAL", "not-a-duration")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() error = nil, want an invalid-AI-poll-interval error")
+	}
+}
+
+func TestLoadRejectsMalformedWebOrigin(t *testing.T) {
+	for _, value := range []string{"*", "http://localhost:3000/path", "ftp://localhost:3000", "http://", "http://localhost:3000,,https://example.test"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("SIGNA_WEB_ALLOWED_ORIGINS", value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() error = nil for %q", value)
+			}
+		})
 	}
 }
