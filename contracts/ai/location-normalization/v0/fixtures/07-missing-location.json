@@ -1,0 +1,11 @@
+{
+  "fixture_id": "location-v0-missing-location",
+  "source_extraction_fixture": "../../extraction/v0/fixtures/11-undetermined-language.json",
+  "expected_normalization": {
+    "contract_version": "signa.location-normalization.v0",
+    "input_contract_version": "signa.ai.report-extraction.v0",
+    "location_state": "unknown",
+    "source_location_reference": {"status": "unknown", "value": null, "candidates": [], "evidence_quotes": []},
+    "candidates": []
+  }
+}

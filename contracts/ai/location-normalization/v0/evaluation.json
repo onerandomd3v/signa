@@ -1,0 +1,51 @@
+{
+  "evaluation_version": "signa.location-normalization-evaluation.v0",
+  "contract_version": "signa.location-normalization.v0",
+  "tolerance_version": "signa.location-normalization-evaluation-tolerances.v0",
+  "default_tolerances": {
+    "candidates": "unordered",
+    "evidence_quotes": "unordered"
+  },
+  "cases": [
+    {
+      "case_id": "location-v0-clear-third-mainland-bridge",
+      "fixture": "fixtures/01-clear-third-mainland-bridge.json",
+      "categories": ["clear_local_place", "nigerian_lagos_reference"]
+    },
+    {
+      "case_id": "location-v0-vague-near-market",
+      "fixture": "fixtures/02-vague-near-market.json",
+      "categories": ["vague_place"]
+    },
+    {
+      "case_id": "location-v0-similar-maryland-names",
+      "fixture": "fixtures/03-similar-maryland-names.json",
+      "categories": ["same_or_similar_place_names", "multiple_possible_places"]
+    },
+    {
+      "case_id": "location-v0-multiple-ikeja-maryland",
+      "fixture": "fixtures/04-multiple-ikeja-maryland.json",
+      "categories": ["multiple_possible_places", "nigerian_lagos_reference"]
+    },
+    {
+      "case_id": "location-v0-lagos-ojuelegba",
+      "fixture": "fixtures/05-lagos-ojuelegba.json",
+      "categories": ["clear_local_place", "nigerian_lagos_reference"]
+    },
+    {
+      "case_id": "location-v0-pidgin-near-market",
+      "fixture": "fixtures/06-pidgin-near-market.json",
+      "categories": ["pidgin_or_mixed_language", "vague_place"]
+    },
+    {
+      "case_id": "location-v0-missing-location",
+      "fixture": "fixtures/07-missing-location.json",
+      "categories": ["missing_location"]
+    },
+    {
+      "case_id": "location-v0-conflicting-shops-wording",
+      "fixture": "fixtures/08-conflicting-shops-wording.json",
+      "categories": ["conflicting_location", "vague_place"]
+    }
+  ]
+}
