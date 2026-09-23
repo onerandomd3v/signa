@@ -12,24 +12,51 @@ export type HealthResponse = {
 };
 
 /**
- * Architecture-level report shape reserved for future report APIs.
+ * Report state returned by the backend; exact device coordinates are never returned here.
  */
 export type Report = {
     id?: string;
-    reporter_id?: string;
+    reporter_id?: string | null;
     incident_id?: string | null;
     raw_text?: string;
     normalized_text?: string | null;
-    source_type?: string;
-    eyewitness_claim?: string;
-    claimed_location?: ReportLocation;
+    source_type?: string | null;
+    eyewitness_claim?: string | null;
+    claimed_location?: ReportLocation | null;
     observed_at?: string | null;
     submitted_at?: string;
     device_location?: ReportLocation | null;
     location_accuracy?: number | null;
-    language?: string;
-    evidence_state?: string;
+    language?: string | null;
+    evidence_state?: string | null;
     created_at?: string;
+};
+
+export type CreateReportRequest = {
+    /**
+     * Text of the report; surrounding whitespace is ignored for validation.
+     */
+    raw_text: string;
+    device_location?: DeviceLocation | null;
+};
+
+export type DeviceLocation = {
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+};
+
+export type ReportAcknowledgement = {
+    report_id: string;
+    status: 'accepted';
+    submitted_at: string;
+};
+
+export type ErrorResponse = {
+    error: {
+        code: string;
+        message: string;
+    };
 };
 
 /**
@@ -55,3 +82,39 @@ export type GetHealthResponses = {
 };
 
 export type GetHealthResponse = GetHealthResponses[keyof GetHealthResponses];
+
+export type CreateReportData = {
+    body: CreateReportRequest;
+    headers: {
+        'Idempotency-Key': string;
+    };
+    path?: never;
+    query?: never;
+    url: '/reports';
+};
+
+export type CreateReportErrors = {
+    /**
+     * Invalid request
+     */
+    400: ErrorResponse;
+    /**
+     * Idempotency key conflict
+     */
+    409: ErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ErrorResponse;
+};
+
+export type CreateReportError = CreateReportErrors[keyof CreateReportErrors];
+
+export type CreateReportResponses = {
+    /**
+     * Report accepted for asynchronous processing
+     */
+    202: ReportAcknowledgement;
+};
+
+export type CreateReportResponse = CreateReportResponses[keyof CreateReportResponses];

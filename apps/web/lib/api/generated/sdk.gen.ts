@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { GetHealthData, GetHealthResponses } from './types.gen';
+import type { CreateReportData, CreateReportErrors, CreateReportResponses, GetHealthData, GetHealthResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -22,3 +22,15 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
  * Check API health
  */
 export const getHealth = <ThrowOnError extends boolean = false>(options?: Options<GetHealthData, ThrowOnError>): RequestResult<GetHealthResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetHealthResponses, unknown, ThrowOnError>({ url: '/healthz', ...options });
+
+/**
+ * Accept a text-first report
+ */
+export const createReport = <ThrowOnError extends boolean = false>(options: Options<CreateReportData, ThrowOnError>): RequestResult<CreateReportResponses, CreateReportErrors, ThrowOnError> => (options.client ?? client).post<CreateReportResponses, CreateReportErrors, ThrowOnError>({
+    url: '/reports',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
