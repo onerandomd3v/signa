@@ -7,9 +7,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/logging"
+	"github.com/onerandomd3v/signa/internal/outbox"
 	"github.com/onerandomd3v/signa/internal/worker"
+	goRedis "github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -29,5 +32,21 @@ func run(parent context.Context, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return worker.Run(ctx, logger, cfg.WorkerInterval)
+	database, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+	if err := database.Ping(ctx); err != nil {
+		return err
+	}
+
+	redisClient := goRedis.NewClient(&goRedis.Options{Addr: cfg.RedisAddr})
+	defer func() { _ = redisClient.Close() }()
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		return err
+	}
+
+	publisher := outbox.NewPublisher(database, redisClient, logger)
+	return worker.Run(ctx, logger, cfg.WorkerInterval, publisher)
 }

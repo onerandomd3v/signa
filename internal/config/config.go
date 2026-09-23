@@ -11,7 +11,7 @@ const (
 	defaultDatabaseURL     = "postgres://signa:signa_local@localhost:5432/signa?sslmode=disable"
 	defaultRedisAddr       = "localhost:6379"
 	defaultShutdownTimeout = 10 * time.Second
-	defaultWorkerInterval  = 10 * time.Second
+	defaultWorkerInterval  = 500 * time.Millisecond
 )
 
 // Config contains the runtime settings needed by the foundation processes.
