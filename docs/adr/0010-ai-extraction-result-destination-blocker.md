@@ -1,6 +1,6 @@
 # 0010 — AI extraction result destination blocker
 
-**Status:** Blocked pending owner direction  
+**Status:** Blocked pending owner direction
 **Scope:** COD-191 structured AI text extraction
 
 ## Context
