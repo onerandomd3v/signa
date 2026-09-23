@@ -5,6 +5,8 @@ package migrations
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,7 +19,7 @@ import (
 const defaultDatabaseURL = "postgres://signa:signa_local@localhost:5432/signa?sslmode=disable"
 
 func TestReportAndOutboxMigration(t *testing.T) {
-	databaseURL := os.Getenv("SIGNA_DATABASE_URL")
+	databaseURL := os.Getenv("SIGNA_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		databaseURL = defaultDatabaseURL
 	}
@@ -25,10 +27,34 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	runGoose(t, ctx, databaseURL, "up")
-	connection, err := pgx.Connect(ctx, databaseURL)
+	parsedDatabaseURL, err := url.Parse(databaseURL)
 	if err != nil {
-		t.Fatalf("connect to PostgreSQL: %v", err)
+		t.Fatalf("parse PostgreSQL URL: %v", err)
+	}
+
+	testDatabaseName := fmt.Sprintf("signa_migration_test_%d", time.Now().UnixNano())
+	maintenanceURL := *parsedDatabaseURL
+	maintenanceURL.Path = "/postgres"
+	maintenanceConnection, err := pgx.Connect(ctx, maintenanceURL.String())
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL maintenance database: %v", err)
+	}
+	defer func() {
+		_, _ = maintenanceConnection.Exec(context.Background(), `DROP DATABASE IF EXISTS `+testDatabaseName)
+		_ = maintenanceConnection.Close(context.Background())
+	}()
+
+	if _, err := maintenanceConnection.Exec(ctx, `CREATE DATABASE `+testDatabaseName); err != nil {
+		t.Fatalf("create isolated migration database: %v", err)
+	}
+
+	testDatabaseURL := *parsedDatabaseURL
+	testDatabaseURL.Path = "/" + testDatabaseName
+	testSchema := "public"
+	runGoose(t, ctx, testDatabaseURL.String(), "up")
+	connection, err := pgx.Connect(ctx, testDatabaseURL.String())
+	if err != nil {
+		t.Fatalf("connect to isolated PostgreSQL database: %v", err)
 	}
 	defer func() { _ = connection.Close(context.Background()) }()
 
@@ -36,9 +62,9 @@ func TestReportAndOutboxMigration(t *testing.T) {
 		rows, err := connection.Query(ctx, `
 			SELECT column_name, is_nullable, data_type, udt_name
 			FROM information_schema.columns
-			WHERE table_schema = 'public' AND table_name = 'reports'
+			WHERE table_schema = $1 AND table_name = 'reports'
 			ORDER BY ordinal_position
-		`)
+		`, testSchema)
 		if err != nil {
 			t.Fatalf("query report columns: %v", err)
 		}
@@ -100,12 +126,12 @@ func TestReportAndOutboxMigration(t *testing.T) {
 			FROM pg_attribute AS a
 			JOIN pg_class AS c ON c.oid = a.attrelid
 			JOIN pg_namespace AS n ON n.oid = c.relnamespace
-			WHERE n.nspname = 'public'
+			WHERE n.nspname = $1
 			  AND c.relname = 'reports'
 			  AND a.attname IN ('claimed_location', 'device_location')
 			  AND a.attnum > 0
 			  AND NOT a.attisdropped
-		`)
+		`, testSchema)
 		if err != nil {
 			t.Fatalf("query spatial columns: %v", err)
 		}
@@ -131,9 +157,9 @@ func TestReportAndOutboxMigration(t *testing.T) {
 		rows, err = connection.Query(ctx, `
 			SELECT indexname, indexdef
 			FROM pg_indexes
-			WHERE schemaname = 'public'
+			WHERE schemaname = $1
 			  AND tablename IN ('reports', 'outbox_events')
-		`)
+		`, testSchema)
 		if err != nil {
 			t.Fatalf("query indexes: %v", err)
 		}
@@ -175,8 +201,8 @@ func TestReportAndOutboxMigration(t *testing.T) {
 		rows, err := connection.Query(ctx, `
 			SELECT column_name
 			FROM information_schema.columns
-			WHERE table_schema = 'public' AND table_name = 'outbox_events'
-		`)
+			WHERE table_schema = $1 AND table_name = 'outbox_events'
+		`, testSchema)
 		if err != nil {
 			t.Fatalf("query outbox columns: %v", err)
 		}
@@ -239,12 +265,12 @@ func TestReportAndOutboxMigration(t *testing.T) {
 		}
 	})
 
-	runGoose(t, ctx, databaseURL, "down")
-	assertTableMissing(t, ctx, connection, "reports")
-	assertTableMissing(t, ctx, connection, "outbox_events")
-	runGoose(t, ctx, databaseURL, "up")
-	assertTableExists(t, ctx, connection, "reports")
-	assertTableExists(t, ctx, connection, "outbox_events")
+	runGoose(t, ctx, testDatabaseURL.String(), "down")
+	assertTableMissing(t, ctx, connection, testSchema, "reports")
+	assertTableMissing(t, ctx, connection, testSchema, "outbox_events")
+	runGoose(t, ctx, testDatabaseURL.String(), "up")
+	assertTableExists(t, ctx, connection, testSchema, "reports")
+	assertTableExists(t, ctx, connection, testSchema, "outbox_events")
 }
 
 func runGoose(t *testing.T, ctx context.Context, databaseURL string, command string) {
@@ -257,10 +283,10 @@ func runGoose(t *testing.T, ctx context.Context, databaseURL string, command str
 	}
 }
 
-func assertTableExists(t *testing.T, ctx context.Context, connection *pgx.Conn, table string) {
+func assertTableExists(t *testing.T, ctx context.Context, connection *pgx.Conn, schema string, table string) {
 	t.Helper()
 	var exists bool
-	if err := connection.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+table).Scan(&exists); err != nil {
+	if err := connection.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+"."+table).Scan(&exists); err != nil {
 		t.Fatalf("check table %s: %v", table, err)
 	}
 	if !exists {
@@ -268,10 +294,10 @@ func assertTableExists(t *testing.T, ctx context.Context, connection *pgx.Conn, 
 	}
 }
 
-func assertTableMissing(t *testing.T, ctx context.Context, connection *pgx.Conn, table string) {
+func assertTableMissing(t *testing.T, ctx context.Context, connection *pgx.Conn, schema string, table string) {
 	t.Helper()
 	var exists bool
-	if err := connection.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+table).Scan(&exists); err != nil {
+	if err := connection.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+"."+table).Scan(&exists); err != nil {
 		t.Fatalf("check table %s: %v", table, err)
 	}
 	if exists {
