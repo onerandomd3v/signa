@@ -42,7 +42,7 @@ func run(parent context.Context, logger *slog.Logger) error {
 	}
 
 	redisClient := goRedis.NewClient(&goRedis.Options{Addr: cfg.RedisAddr})
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		return err
 	}
