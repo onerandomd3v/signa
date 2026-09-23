@@ -60,7 +60,7 @@
 
 - [ ] Write failing HTTP-server tests for request authorization, model, structured JSON response format, prompt containing raw text, successful content extraction, HTTP errors, malformed response envelopes, and missing key/model.
 - [ ] Run `go test ./internal/ai/extraction -run TestOpenAI -v`; confirm expected failures.
-- [ ] Implement the minimal `net/http` adapter using OpenAI structured JSON output and no SDK dependency; never log or serialize the API key into test output.
+- [ ] Implement the minimal `net/http` adapter using the separate OpenAI-compatible generation schema and no SDK dependency; validate returned output against the unchanged canonical schema; never log or serialize the API key into test output.
 - [ ] Run provider tests and confirm all request/response/error cases pass without network access.
 - [ ] Run `go vet ./internal/ai/extraction`.
 
@@ -100,9 +100,9 @@
 
 - [ ] Write failing consumer tests for group creation, pending retry, new-message read, successful ack, and failure without ack; add config parsing/default/error tests.
 - [ ] Run focused consumer/config tests and confirm expected failures.
-- [ ] Implement consumer-group initialization, pending-first reads, bounded blocking, cancellation, and logging; ensure no new stream or event type is introduced.
+- [ ] Implement consumer-group initialization at stream offset `0`, pending-first reads, bounded blocking, cancellation, and logging; ensure no new stream or event type is introduced.
 - [ ] Add safe `.env.example` placeholders for `SIGNA_OPENAI_API_KEY`, `SIGNA_OPENAI_MODEL`, `SIGNA_OPENAI_BASE_URL`, `SIGNA_AI_SCHEMA_PATH`, `SIGNA_AI_CONSUMER_GROUP`, `SIGNA_AI_CONSUMER_NAME`, and `SIGNA_AI_POLL_INTERVAL`.
-- [ ] Wire the consumer beside the existing outbox publisher using the configured schema file and an explicit logging observer; do not persist or publish the result.
+- [ ] Wire the consumer beside the existing outbox publisher using separate canonical/generation schema files; the default observer must surface the unresolved durable-destination architecture blocker without ACKing; do not invent persistence or publish a new result event.
 - [ ] Run focused consumer/config tests and `go test ./...`.
 
 ### Task 5: Add live integration coverage and verify the branch

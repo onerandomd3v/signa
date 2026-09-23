@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL"} {
+	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("SIGNA_DATABASE_URL", "")
@@ -32,7 +32,7 @@ func TestLoadDefaults(t *testing.T) {
 	if got.WorkerInterval != defaultWorkerInterval {
 		t.Errorf("WorkerInterval = %s, want %s", got.WorkerInterval, defaultWorkerInterval)
 	}
-	if got.OpenAIModel != defaultOpenAIModel || got.OpenAIBaseURL != defaultOpenAIBaseURL || got.AISchemaPath != defaultAISchemaPath || got.AIConsumerGroup != defaultAIConsumerGroup || got.AIPollInterval != defaultAIPollInterval {
+	if got.OpenAIModel != defaultOpenAIModel || got.OpenAIBaseURL != defaultOpenAIBaseURL || got.AISchemaPath != defaultAISchemaPath || got.AIGenerationSchemaPath != defaultAIGenerationSchemaPath || got.AIConsumerGroup != defaultAIConsumerGroup || got.AIPollInterval != defaultAIPollInterval {
 		t.Errorf("AI defaults = %+v", got)
 	}
 }
@@ -51,6 +51,7 @@ func TestLoadEnvironment(t *testing.T) {
 	t.Setenv("SIGNA_OPENAI_MODEL", "test-model")
 	t.Setenv("SIGNA_OPENAI_BASE_URL", "http://localhost:9999/v1")
 	t.Setenv("SIGNA_AI_SCHEMA_PATH", "schema.json")
+	t.Setenv("SIGNA_AI_GENERATION_SCHEMA_PATH", "openai-schema.json")
 	t.Setenv("SIGNA_AI_CONSUMER_GROUP", "test-group")
 	t.Setenv("SIGNA_AI_CONSUMER_NAME", "test-consumer")
 	t.Setenv("SIGNA_AI_POLL_INTERVAL", "750ms")
@@ -74,6 +75,7 @@ func TestLoadEnvironment(t *testing.T) {
 		OpenAIModel:               "test-model",
 		OpenAIBaseURL:             "http://localhost:9999/v1",
 		AISchemaPath:              "schema.json",
+		AIGenerationSchemaPath:    "openai-schema.json",
 		AIConsumerGroup:           "test-group",
 		AIConsumerName:            "test-consumer",
 		AIPollInterval:            750 * time.Millisecond,

@@ -5,6 +5,7 @@ This directory defines the versioned, structured interpretation that a later wor
 ## Files and versions
 
 - `schema.json` is the JSON Schema Draft 2020-12 contract. The output pins both `contract_version` (`signa.ai.report-extraction.v0`) and `taxonomy_version` (`signa.event-taxonomy.v0`).
+- `openai.schema.json` is the separate OpenAI strict-generation schema. It intentionally omits Draft 2020-12 conditional keywords such as `allOf` and `if`/`then`; returned output is still validated against the full canonical `schema.json`.
 - `event-taxonomy.json` defines the conservative MVP event identifiers and boundaries. Keep its identifiers aligned with the event enum in `schema.json`. Add a new version rather than silently changing the meaning of a published version.
 - `fixtures/` contains raw report examples and explicit expected extraction outputs for later implementation and evaluation work.
 

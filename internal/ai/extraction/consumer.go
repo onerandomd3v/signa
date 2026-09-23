@@ -124,7 +124,9 @@ func (c *RedisStreamClient) EnsureGroup(ctx context.Context, stream, group strin
 	if c == nil || c.client == nil {
 		return fmt.Errorf("redis stream client is required")
 	}
-	err := c.client.XGroupCreateMkStream(ctx, stream, group, "$").Err()
+	// Start at the beginning so events published before the first worker
+	// startup are not skipped. Existing groups retain their own cursor.
+	err := c.client.XGroupCreateMkStream(ctx, stream, group, "0").Err()
 	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
 		return err
 	}

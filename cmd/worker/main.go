@@ -58,11 +58,15 @@ func run(parent context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	generationSchema, err := os.ReadFile(cfg.AIGenerationSchemaPath)
+	if err != nil {
+		return fmt.Errorf("read OpenAI generation schema: %w", err)
+	}
 	provider, err := extraction.NewOpenAIProvider(extraction.OpenAIConfig{
-		APIKey:  cfg.OpenAIAPIKey,
-		Model:   cfg.OpenAIModel,
-		BaseURL: cfg.OpenAIBaseURL,
-		Schema:  schema,
+		APIKey:           cfg.OpenAIAPIKey,
+		Model:            cfg.OpenAIModel,
+		BaseURL:          cfg.OpenAIBaseURL,
+		GenerationSchema: generationSchema,
 	})
 	if err != nil {
 		return err

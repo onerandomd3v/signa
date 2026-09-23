@@ -11,8 +11,8 @@ Consume `report.created.v1` events, load the authoritative report text from Post
 - The consumer uses the existing `signa:report-events` Redis Stream and consumer-group architecture.
 - Provider and configuration interfaces keep unit tests independent of OpenAI credentials and network access.
 - The existing v0 `identified`, `ambiguous`, and `unknown` semantics are preserved exactly, including literal evidence quotes and un-resolved location/time wording.
-- No migration, extraction table, downstream event, or service boundary is added. The repository has no approved durable destination for successful extraction output; the processor therefore exposes an explicit validated-result observer boundary and logs the result in the executable wiring. A later issue must define durable attachment/audit storage before persistence is added.
-- Failures leave the stream message pending and retryable. Only successful report loading, extraction, schema validation, and result observation are acknowledged.
+- No migration, extraction table, downstream event, or service boundary is added. The repository has no approved durable destination for successful extraction output. The default `LoggingObserver` therefore surfaces `ErrDurableExtractionDestinationUnresolved` after logging metadata, and the message remains pending. Owner direction is required before ACK/persistence behavior can be finalized.
+- Failures leave the stream message pending and retryable. The default worker does not acknowledge a validated result until an approved durable destination replaces the blocker observer.
 - OpenAI credentials are read only from environment configuration and never appear in repository files.
 
 ## Design
@@ -21,11 +21,11 @@ Consume `report.created.v1` events, load the authoritative report text from Post
 
 `internal/ai/extraction` owns the v0 contract model, schema validator, provider interface, OpenAI HTTP provider, report-text loader interface, event parser, and stream processor. The processor accepts narrow interfaces for PostgreSQL, Redis, provider, validator, and result observation so tests can use fakes.
 
-The OpenAI provider uses the structured JSON response format with the v0 schema and returns the model's JSON object as typed extraction data. The validator is a real JSON Schema Draft 2020-12 implementation initialized from `contracts/ai/extraction/v0/schema.json`; it rejects malformed JSON and contract violations before the result can be acknowledged.
+The OpenAI provider uses the structured JSON response format with the OpenAI-compatible generation schema at `contracts/ai/extraction/v0/openai.schema.json`. The validator is a real JSON Schema Draft 2020-12 implementation initialized from the unchanged canonical `contracts/ai/extraction/v0/schema.json`; it rejects malformed JSON and conditional contract violations before the result can be acknowledged.
 
 ### Stream processing
 
-The worker ensures a named consumer group exists, first services pending messages for retry visibility, then reads new messages. It accepts only `report.created.v1` messages from `signa:report-events`, parses the payload's `report_id`, loads `raw_text`, extracts and validates the result, observes/logs it, and calls `XACK` last. Parse, database, provider, validation, and observer errors return without acknowledgement.
+The worker ensures a named consumer group exists at stream offset `0`, so reports already in the stream before first startup are consumed. It first services pending messages for retry visibility, then reads new messages. It accepts only `report.created.v1` messages from `signa:report-events`, parses the payload's `report_id`, loads `raw_text`, extracts and validates the result, invokes the observer, and calls `XACK` last. Parse, database, provider, validation, observer, and unresolved-destination errors return without acknowledgement.
 
 ### Configuration
 

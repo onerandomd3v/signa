@@ -2,11 +2,18 @@ package extraction
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 )
+
+// ErrDurableExtractionDestinationUnresolved prevents the default worker from
+// acknowledging a validated extraction that has nowhere approved to live.
+// Owner direction is required before this boundary can be replaced with a
+// durable persistence or downstream publication decision.
+var ErrDurableExtractionDestinationUnresolved = errors.New("durable extraction result destination requires owner direction")
 
 type ReportReader interface {
 	LoadRawText(context.Context, string) (string, error)
@@ -31,7 +38,7 @@ func (o LoggingObserver) Observe(_ context.Context, reportID string, result Extr
 	if o.Logger != nil {
 		o.Logger.Info("report text extraction completed", "report_id", reportID, "contract_version", result.ContractVersion, "taxonomy_version", result.TaxonomyVersion)
 	}
-	return nil
+	return fmt.Errorf("%w; validated result was not acknowledged", ErrDurableExtractionDestinationUnresolved)
 }
 
 type Acknowledger interface {

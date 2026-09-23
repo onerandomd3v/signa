@@ -20,6 +20,7 @@ const (
 	defaultOpenAIModel               = "gpt-4.1-mini"
 	defaultOpenAIBaseURL             = "https://api.openai.com/v1"
 	defaultAISchemaPath              = "contracts/ai/extraction/v0/schema.json"
+	defaultAIGenerationSchemaPath    = "contracts/ai/extraction/v0/openai.schema.json"
 	defaultAIConsumerGroup           = "signa-ai-text-extraction"
 	defaultAIPollInterval            = time.Second
 )
@@ -39,6 +40,7 @@ type Config struct {
 	OpenAIModel               string
 	OpenAIBaseURL             string
 	AISchemaPath              string
+	AIGenerationSchemaPath    string
 	AIConsumerGroup           string
 	AIConsumerName            string
 	AIPollInterval            time.Duration
@@ -99,6 +101,10 @@ func Load() (Config, error) {
 	if aiSchemaPath == "" {
 		aiSchemaPath = defaultAISchemaPath
 	}
+	aiGenerationSchemaPath := os.Getenv("SIGNA_AI_GENERATION_SCHEMA_PATH")
+	if aiGenerationSchemaPath == "" {
+		aiGenerationSchemaPath = defaultAIGenerationSchemaPath
+	}
 	aiConsumerGroup := os.Getenv("SIGNA_AI_CONSUMER_GROUP")
 	if aiConsumerGroup == "" {
 		aiConsumerGroup = defaultAIConsumerGroup
@@ -118,6 +124,7 @@ func Load() (Config, error) {
 		OpenAIModel:               openAIModel,
 		OpenAIBaseURL:             openAIBaseURL,
 		AISchemaPath:              aiSchemaPath,
+		AIGenerationSchemaPath:    aiGenerationSchemaPath,
 		AIConsumerGroup:           aiConsumerGroup,
 		AIConsumerName:            os.Getenv("SIGNA_AI_CONSUMER_NAME"),
 		AIPollInterval:            aiPollInterval,

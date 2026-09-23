@@ -65,6 +65,13 @@ func TestProcessorDoesNotAcknowledgeFailures(t *testing.T) {
 	}
 }
 
+func TestLoggingObserverSurfacesDurableDestinationBlocker(t *testing.T) {
+	err := (LoggingObserver{}).Observe(context.Background(), "11111111-1111-4111-8111-111111111111", Extraction{ContractVersion: "signa.ai.report-extraction.v0"})
+	if !errors.Is(err, ErrDurableExtractionDestinationUnresolved) {
+		t.Fatalf("LoggingObserver.Observe() error = %v, want durable-destination blocker", err)
+	}
+}
+
 type fakeReportReader struct {
 	reportID string
 	rawText  string

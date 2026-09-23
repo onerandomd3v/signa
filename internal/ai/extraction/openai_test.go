@@ -5,6 +5,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -29,13 +33,14 @@ func TestOpenAIProviderSendsStructuredOutputRequest(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"` + strings.ReplaceAll(validExtractionJSON(), `"`, `\"`) + `"}}]}`))
 	}))
 	defer server.Close()
+	generationSchema := readExtractionSchema(t, "openai.schema.json")
 
 	provider, err := NewOpenAIProvider(OpenAIConfig{
-		APIKey:     "test-key",
-		Model:      "test-model",
-		BaseURL:    server.URL,
-		HTTPClient: server.Client(),
-		Schema:     []byte(`{"type":"object"}`),
+		APIKey:           "test-key",
+		Model:            "test-model",
+		BaseURL:          server.URL,
+		HTTPClient:       server.Client(),
+		GenerationSchema: generationSchema,
 	})
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider() error = %v", err)
@@ -58,6 +63,12 @@ func TestOpenAIProviderSendsStructuredOutputRequest(t *testing.T) {
 	if !ok || schemaConfig["strict"] != true || schemaConfig["name"] != "signa_ai_report_extraction_v0" {
 		t.Fatalf("json_schema = %#v", responseFormat["json_schema"])
 	}
+	if got := schemaConfig["schema"]; !reflect.DeepEqual(got, mustJSONDocument(t, generationSchema)) {
+		t.Fatalf("request schema = %#v, want OpenAI generation schema", got)
+	}
+	if _, err := newTestValidator(t).Validate(result); err != nil {
+		t.Fatalf("canonical validator rejected provider output: %v", err)
+	}
 	messages, ok := requestBody["messages"].([]any)
 	if !ok || len(messages) != 2 {
 		t.Fatalf("messages = %#v", requestBody["messages"])
@@ -72,8 +83,8 @@ func TestOpenAIProviderRejectsMissingConfiguration(t *testing.T) {
 		name   string
 		config OpenAIConfig
 	}{
-		{name: "missing key", config: OpenAIConfig{Model: "test-model", Schema: []byte(`{"type":"object"}`)}},
-		{name: "missing model", config: OpenAIConfig{APIKey: "test-key", Schema: []byte(`{"type":"object"}`)}},
+		{name: "missing key", config: OpenAIConfig{Model: "test-model", GenerationSchema: []byte(`{"type":"object"}`)}},
+		{name: "missing model", config: OpenAIConfig{APIKey: "test-key", GenerationSchema: []byte(`{"type":"object"}`)}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := NewOpenAIProvider(test.config); err == nil {
@@ -88,7 +99,7 @@ func TestOpenAIProviderReturnsHTTPError(t *testing.T) {
 		http.Error(w, "provider unavailable", http.StatusBadGateway)
 	}))
 	defer server.Close()
-	provider, err := NewOpenAIProvider(OpenAIConfig{APIKey: "test-key", Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Schema: []byte(`{"type":"object"}`)})
+	provider, err := NewOpenAIProvider(OpenAIConfig{APIKey: "test-key", Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), GenerationSchema: []byte(`{"type":"object"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,12 +114,37 @@ func TestOpenAIProviderRejectsMalformedResponse(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[]}`))
 	}))
 	defer server.Close()
-	provider, err := NewOpenAIProvider(OpenAIConfig{APIKey: "test-key", Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Schema: []byte(`{"type":"object"}`)})
+	provider, err := NewOpenAIProvider(OpenAIConfig{APIKey: "test-key", Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), GenerationSchema: []byte(`{"type":"object"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := provider.Extract(t.Context(), "report"); err == nil {
 		t.Fatal("Extract() error = nil")
+	}
+}
+
+func TestOpenAIProviderRejectsCanonicalConditionalSchema(t *testing.T) {
+	canonical := readExtractionSchema(t, "schema.json")
+	if _, err := NewOpenAIProvider(OpenAIConfig{
+		APIKey:           "test-key",
+		Model:            "test-model",
+		GenerationSchema: canonical,
+	}); err == nil || !strings.Contains(err.Error(), "allOf") {
+		t.Fatalf("NewOpenAIProvider() error = %v, want unsupported canonical-schema keyword", err)
+	}
+}
+
+func TestOpenAIGenerationSchemaIsSeparateFromCanonicalSchema(t *testing.T) {
+	canonical := readExtractionSchema(t, "schema.json")
+	generation := readExtractionSchema(t, "openai.schema.json")
+	if string(canonical) == string(generation) {
+		t.Fatal("OpenAI generation schema must not be the canonical schema")
+	}
+	if err := validateOpenAISchemaKeywords(mustJSONDocument(t, generation)); err != nil {
+		t.Fatalf("generation schema is not OpenAI-compatible: %v", err)
+	}
+	if err := json.Unmarshal(canonical, &map[string]any{}); err != nil {
+		t.Fatalf("canonical schema is not valid JSON: %v", err)
 	}
 }
 
@@ -119,4 +155,24 @@ func mustString(value any) string {
 	}
 	content, _ := message["content"].(string)
 	return content
+}
+
+func readExtractionSchema(t *testing.T, name string) []byte {
+	t.Helper()
+	_, file, _, _ := runtime.Caller(0)
+	path := filepath.Join(filepath.Dir(file), "..", "..", "..", "contracts", "ai", "extraction", "v0", name)
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
+}
+
+func mustJSONDocument(t *testing.T, contents []byte) any {
+	t.Helper()
+	var document any
+	if err := json.Unmarshal(contents, &document); err != nil {
+		t.Fatal(err)
+	}
+	return document
 }
