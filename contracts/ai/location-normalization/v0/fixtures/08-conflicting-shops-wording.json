@@ -1,0 +1,14 @@
+{
+  "fixture_id": "location-v0-conflicting-shops-wording",
+  "input_location_reference": {"status": "ambiguous", "value": null, "candidates": ["behind the shops", "near the shops"], "evidence_quotes": ["behind the shops or near the shops"]},
+  "expected_normalization": {
+    "contract_version": "signa.location-normalization.v0",
+    "input_contract_version": "signa.ai.report-extraction.v0",
+    "location_state": "ambiguous",
+    "source_location_reference": {"status": "ambiguous", "value": null, "candidates": ["behind the shops", "near the shops"], "evidence_quotes": ["behind the shops or near the shops"]},
+    "candidates": [
+      {"reported_text": "behind the shops", "normalized_text": "shops", "reference_kind": "unknown", "qualifier": "behind", "evidence_quotes": ["behind the shops or near the shops"]},
+      {"reported_text": "near the shops", "normalized_text": "shops", "reference_kind": "unknown", "qualifier": "near", "evidence_quotes": ["behind the shops or near the shops"]}
+    ]
+  }
+}
