@@ -72,7 +72,10 @@ func TestReportAndOutboxMigration(t *testing.T) {
 				t.Errorf("missing report column %q", name)
 			}
 		}
-		for _, name := range []string{"incident_id", "device_location", "location_accuracy"} {
+		for _, name := range []string{
+			"incident_id", "normalized_text", "observed_at", "claimed_location",
+			"device_location", "location_accuracy",
+		} {
 			if columns[name].nullable != "YES" {
 				t.Errorf("%s nullable = %q, want YES", name, columns[name].nullable)
 			}
