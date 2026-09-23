@@ -58,8 +58,11 @@ export type MediaUploadRequest = {
     size_bytes: number;
 };
 
-export type MediaConfirmationRequest = MediaUploadRequest & {
+export type MediaConfirmationRequest = {
     object_key: string;
+    media_type: 'image' | 'audio' | 'video';
+    content_type: string;
+    size_bytes: number;
 };
 
 export type MediaUploadAuthorization = {

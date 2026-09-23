@@ -248,14 +248,22 @@ components:
           format: int64
           minimum: 1
     MediaConfirmationRequest:
-      allOf:
-        - $ref: '#/components/schemas/MediaUploadRequest'
-        - type: object
-          required: [object_key]
-          properties:
-            object_key:
-              type: string
-              minLength: 1
+      type: object
+      required: [object_key, media_type, content_type, size_bytes]
+      additionalProperties: false
+      properties:
+        object_key:
+          type: string
+          minLength: 1
+        media_type:
+          type: string
+          enum: [image, audio, video]
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
     MediaUploadAuthorization:
       type: object
       required: [object_key, upload_url, required_headers, expires_at]

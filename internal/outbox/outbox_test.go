@@ -25,3 +25,13 @@ func TestMapEventRejectsUnsupportedType(t *testing.T) {
 		t.Fatal("MapEvent() error = nil")
 	}
 }
+
+func TestMapEventMediaAttachedV1(t *testing.T) {
+	got, err := MapEvent(Event{ID: "event-2", EventType: "report.media_attached", AggregateType: "report", AggregateID: "report-1", Payload: json.RawMessage(`{"report_id":"report-1","media_id":"media-1"}`), CreatedAt: time.Unix(0, 0)})
+	if err != nil {
+		t.Fatalf("MapEvent() error = %v", err)
+	}
+	if got.EventName != MediaAttachedV1 || got.Payload == "" {
+		t.Fatalf("mapped media event = %+v", got)
+	}
+}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -52,7 +52,7 @@ func (s *S3Storage) Head(ctx context.Context, objectKey string) (ObjectMetadata,
 	output, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(objectKey)})
 	if err != nil {
 		var responseError interface{ ErrorCode() string }
-		if errors.As(err, &responseError) && responseError.ErrorCode() == http.StatusText(http.StatusNotFound) {
+		if errors.As(err, &responseError) && isMissingObjectCode(responseError.ErrorCode()) {
 			return ObjectMetadata{}, ErrObjectNotFound
 		}
 		return ObjectMetadata{}, fmt.Errorf("head media object: %w", err)
@@ -66,4 +66,13 @@ func (s *S3Storage) Head(ctx context.Context, objectKey string) (ObjectMetadata,
 		sizeBytes = *output.ContentLength
 	}
 	return ObjectMetadata{ContentType: contentType, SizeBytes: sizeBytes}, nil
+}
+
+func isMissingObjectCode(code string) bool {
+	switch strings.ToLower(code) {
+	case "notfound", "nosuchkey", "404":
+		return true
+	default:
+		return false
+	}
 }

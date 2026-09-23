@@ -15,7 +15,9 @@ import (
 
 const (
 	ReportEventsStream = "signa:report-events"
+	MediaEventsStream  = "signa:media-events"
 	ReportCreatedV1    = "report.created.v1"
+	MediaAttachedV1    = "report.media_attached.v1"
 	DefaultBatchSize   = 100
 	maxErrorLength     = 1000
 )
@@ -95,7 +97,7 @@ func (p *Publisher) publishOne(ctx context.Context, attempted map[string]struct{
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	query := `SELECT id::text, event_type, aggregate_type, aggregate_id::text, payload, created_at
-		FROM outbox_events WHERE published_at IS NULL AND event_type = 'report.created'`
+		FROM outbox_events WHERE published_at IS NULL AND event_type IN ('report.created', 'report.media_attached')`
 	args := make([]any, 0, len(attempted))
 	if len(attempted) > 0 {
 		placeholders := make([]string, 0, len(attempted))
@@ -118,7 +120,11 @@ func (p *Publisher) publishOne(ctx context.Context, attempted map[string]struct{
 	if err != nil {
 		return event, false, p.recordFailure(ctx, tx, event, err)
 	}
-	_, err = p.redis.XAdd(ctx, &goRedis.XAddArgs{Stream: p.stream, Values: map[string]any{
+	stream := p.stream
+	if event.EventType == "report.media_attached" && stream == ReportEventsStream {
+		stream = MediaEventsStream
+	}
+	_, err = p.redis.XAdd(ctx, &goRedis.XAddArgs{Stream: stream, Values: map[string]any{
 		"event_id": streamEvent.EventID, "event_name": streamEvent.EventName, "aggregate_type": streamEvent.AggregateType,
 		"aggregate_id": streamEvent.AggregateID, "occurred_at": streamEvent.OccurredAt, "payload": streamEvent.Payload,
 	}}).Result()
@@ -177,15 +183,22 @@ func (p *Publisher) recordFailure(ctx context.Context, tx pgx.Tx, event *Event, 
 }
 
 func MapEvent(event Event) (StreamEvent, error) {
-	if event.EventType != "report.created" {
+	eventName := map[string]string{
+		"report.created":        ReportCreatedV1,
+		"report.media_attached": MediaAttachedV1,
+	}[event.EventType]
+	if eventName == "" {
 		return StreamEvent{}, fmt.Errorf("unsupported outbox event type %q", event.EventType)
 	}
-	return StreamEvent{EventID: event.ID, EventName: ReportCreatedV1, AggregateType: event.AggregateType, AggregateID: event.AggregateID, OccurredAt: event.CreatedAt.UTC().Format(time.RFC3339Nano), Payload: string(event.Payload)}, nil
+	return StreamEvent{EventID: event.ID, EventName: eventName, AggregateType: event.AggregateType, AggregateID: event.AggregateID, OccurredAt: event.CreatedAt.UTC().Format(time.RFC3339Nano), Payload: string(event.Payload)}, nil
 }
 
 func eventName(event *Event) string {
-	if event.EventType == "report.created" {
+	switch event.EventType {
+	case "report.created":
 		return ReportCreatedV1
+	case "report.media_attached":
+		return MediaAttachedV1
 	}
 	return event.EventType
 }
