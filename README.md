@@ -43,6 +43,16 @@ npm run dev
 
 Open <http://localhost:3000>. From `apps/web`, run `npm run lint`, `npm run typecheck`, `npm test`, `npm run format:check`, and `npm run build` for the frontend checks and production build.
 
+Validate and regenerate the TypeScript API client from the canonical OpenAPI contract:
+
+```sh
+cd apps/web
+npm run api:lint
+npm run api:generate
+```
+
+The generated client and types are committed under `apps/web/lib/api/generated/`. Run `npm run api:check` to lint the contract, regenerate the output, and verify that generation produces no diff.
+
 Local frontend settings belong in `apps/web/.env.local`, which is ignored by the root `.gitignore`; never commit local environment files or secrets. No frontend environment variables are needed yet. When a frontend feature introduces configuration, document its variable names and safe placeholders in an appropriate example environment file. Variables exposed to browser code must use Next.js's `NEXT_PUBLIC_` prefix and must never contain secrets.
 
 ## Go foundation
