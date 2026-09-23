@@ -14,7 +14,7 @@
     "format:check": "prettier --check . ../../README.md",
     "api:lint": "redocly lint ../../contracts/openapi.yaml",
     "api:generate": "openapi-ts",
-    "api:check": "npm run api:lint && npm run api:generate && git diff --exit-code -- lib/api/generated",
+    "api:check": "npm run api:lint && npm run api:generate && git diff --exit-code -- lib/api/generated && node scripts/check-generated.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
