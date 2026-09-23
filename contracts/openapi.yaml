@@ -1,0 +1,81 @@
+openapi: 3.1.0
+info:
+  title: Signa API
+  version: 0.1.0
+  description: Canonical HTTP contract between the Signa Go backend and TypeScript frontend.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Check API health
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          const: ok
+          description: Health status returned by the API.
+    Report:
+      type: object
+      description: Architecture-level report shape reserved for future report APIs.
+      properties:
+        id:
+          type: string
+        reporter_id:
+          type: string
+        incident_id:
+          type: [string, 'null']
+        raw_text:
+          type: string
+        normalized_text:
+          type: [string, 'null']
+        source_type:
+          type: string
+        eyewitness_claim:
+          type: string
+        claimed_location:
+          $ref: '#/components/schemas/ReportLocation'
+        observed_at:
+          type: [string, 'null']
+          format: date-time
+        submitted_at:
+          type: string
+          format: date-time
+        device_location:
+          anyOf:
+            - $ref: '#/components/schemas/ReportLocation'
+            - type: 'null'
+        location_accuracy:
+          type: [number, 'null']
+        language:
+          type: string
+        evidence_state:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    ReportLocation:
+      type: object
+      description: Location associated with a report; exact retention and public precision remain policy decisions.
+      properties:
+        latitude:
+          type: number
+        longitude:
+          type: number
