@@ -13,6 +13,7 @@ import (
 	"github.com/onerandomd3v/signa/internal/api"
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/logging"
+	"github.com/onerandomd3v/signa/internal/media"
 	"github.com/onerandomd3v/signa/internal/reports"
 )
 
@@ -42,12 +43,27 @@ func run(parent context.Context, logger *slog.Logger) error {
 		return err
 	}
 
-	server := api.NewServerWithRateLimit(cfg.APIAddr, logger, api.RateLimitConfig{
+	var storage media.Storage
+	if cfg.ObjectStorageEndpoint != "" || cfg.ObjectStorageBucket != "" || cfg.ObjectStorageAccessKeyID != "" || cfg.ObjectStorageSecret != "" {
+		storage, err = media.NewConfiguredS3Storage(ctx, media.S3Config{
+			Endpoint: cfg.ObjectStorageEndpoint, Region: cfg.ObjectStorageRegion, Bucket: cfg.ObjectStorageBucket,
+			AccessKeyID: cfg.ObjectStorageAccessKeyID, SecretAccessKey: cfg.ObjectStorageSecret,
+		})
+		if err != nil && !errors.Is(err, media.ErrStorageUnavailable) {
+			return err
+		}
+		if errors.Is(err, media.ErrStorageUnavailable) {
+			logger.Warn("media storage is not fully configured; media uploads are disabled")
+			storage = nil
+		}
+	}
+
+	server := api.NewServerWithMedia(cfg.APIAddr, logger, api.RateLimitConfig{
 		PerClientRatePerMinute: cfg.ReportRatePerMinute,
 		PerClientBurst:         cfg.ReportRateBurst,
 		GlobalRatePerMinute:    cfg.GlobalReportRatePerMinute,
 		GlobalBurst:            cfg.GlobalReportRateBurst,
-	}, reports.NewStore(pool))
+	}, pool, storage, reports.NewStore(pool))
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("api starting", "addr", cfg.APIAddr)

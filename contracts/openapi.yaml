@@ -76,7 +76,64 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/{report_id}/media/uploads:
+    post:
+      operationId: authorizeReportMediaUpload
+      summary: Authorize a direct private media upload
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ReportID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaUploadRequest'
+      responses:
+        '200':
+          description: Short-lived upload authorization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaUploadAuthorization'
+        '400': { description: Invalid media request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Report not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '429': { description: Rate limit exceeded, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: Media storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /reports/{report_id}/media:
+    post:
+      operationId: attachReportMedia
+      summary: Confirm and attach a completed direct media upload
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ReportID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaConfirmationRequest'
+      responses:
+        '201':
+          description: Media metadata attached to the report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportMedia'
+        '400': { description: Invalid media request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Report not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '409': { description: Media attachment conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '429': { description: Rate limit exceeded, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: Media storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 components:
+  parameters:
+    ReportID:
+      name: report_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   schemas:
     HealthResponse:
       type: object
@@ -176,6 +233,58 @@ components:
         submitted_at:
           type: string
           format: date-time
+    MediaUploadRequest:
+      type: object
+      required: [media_type, content_type, size_bytes]
+      additionalProperties: false
+      properties:
+        media_type:
+          type: string
+          enum: [image, audio, video]
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+    MediaConfirmationRequest:
+      type: object
+      required: [object_key, media_type, content_type, size_bytes]
+      additionalProperties: false
+      properties:
+        object_key:
+          type: string
+          minLength: 1
+        media_type:
+          type: string
+          enum: [image, audio, video]
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+    MediaUploadAuthorization:
+      type: object
+      required: [object_key, upload_url, required_headers, expires_at]
+      properties:
+        object_key: { type: string }
+        upload_url: { type: string, format: uri }
+        required_headers:
+          type: object
+          additionalProperties: { type: string }
+        expires_at: { type: string, format: date-time }
+    ReportMedia:
+      type: object
+      required: [id, report_id, object_key, media_type, content_type, size_bytes, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        report_id: { type: string, format: uuid }
+        object_key: { type: string }
+        media_type: { type: string, enum: [image, audio, video] }
+        content_type: { type: string }
+        size_bytes: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
     ErrorResponse:
       type: object
       required:

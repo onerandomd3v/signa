@@ -44,6 +44,11 @@ type Config struct {
 	AIConsumerGroup           string
 	AIConsumerName            string
 	AIPollInterval            time.Duration
+	ObjectStorageEndpoint     string
+	ObjectStorageRegion       string
+	ObjectStorageBucket       string
+	ObjectStorageAccessKeyID  string
+	ObjectStorageSecret       string
 }
 
 // Load reads configuration from environment variables and applies local defaults.
@@ -128,6 +133,11 @@ func Load() (Config, error) {
 		AIConsumerGroup:           aiConsumerGroup,
 		AIConsumerName:            os.Getenv("SIGNA_AI_CONSUMER_NAME"),
 		AIPollInterval:            aiPollInterval,
+		ObjectStorageEndpoint:     os.Getenv("SIGNA_OBJECT_STORAGE_ENDPOINT"),
+		ObjectStorageRegion:       os.Getenv("SIGNA_OBJECT_STORAGE_REGION"),
+		ObjectStorageBucket:       os.Getenv("SIGNA_OBJECT_STORAGE_BUCKET"),
+		ObjectStorageAccessKeyID:  os.Getenv("SIGNA_OBJECT_STORAGE_ACCESS_KEY_ID"),
+		ObjectStorageSecret:       os.Getenv("SIGNA_OBJECT_STORAGE_SECRET_ACCESS_KEY"),
 	}, nil
 }
 

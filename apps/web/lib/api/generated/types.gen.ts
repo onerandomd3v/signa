@@ -52,6 +52,38 @@ export type ReportAcknowledgement = {
     submitted_at: string;
 };
 
+export type MediaUploadRequest = {
+    media_type: 'image' | 'audio' | 'video';
+    content_type: string;
+    size_bytes: number;
+};
+
+export type MediaConfirmationRequest = {
+    object_key: string;
+    media_type: 'image' | 'audio' | 'video';
+    content_type: string;
+    size_bytes: number;
+};
+
+export type MediaUploadAuthorization = {
+    object_key: string;
+    upload_url: string;
+    required_headers: {
+        [key: string]: string;
+    };
+    expires_at: string;
+};
+
+export type ReportMedia = {
+    id: string;
+    report_id: string;
+    object_key: string;
+    media_type: 'image' | 'audio' | 'video';
+    content_type: string;
+    size_bytes: number;
+    created_at: string;
+};
+
 export type ErrorResponse = {
     error: {
         code: string;
@@ -66,6 +98,8 @@ export type ReportLocation = {
     latitude?: number;
     longitude?: number;
 };
+
+export type ReportId = string;
 
 export type GetHealthData = {
     body?: never;
@@ -122,3 +156,85 @@ export type CreateReportResponses = {
 };
 
 export type CreateReportResponse = CreateReportResponses[keyof CreateReportResponses];
+
+export type AuthorizeReportMediaUploadData = {
+    body: MediaUploadRequest;
+    path: {
+        report_id: string;
+    };
+    query?: never;
+    url: '/reports/{report_id}/media/uploads';
+};
+
+export type AuthorizeReportMediaUploadErrors = {
+    /**
+     * Invalid media request
+     */
+    400: ErrorResponse;
+    /**
+     * Report not found
+     */
+    404: ErrorResponse;
+    /**
+     * Rate limit exceeded
+     */
+    429: ErrorResponse;
+    /**
+     * Media storage unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type AuthorizeReportMediaUploadError = AuthorizeReportMediaUploadErrors[keyof AuthorizeReportMediaUploadErrors];
+
+export type AuthorizeReportMediaUploadResponses = {
+    /**
+     * Short-lived upload authorization
+     */
+    200: MediaUploadAuthorization;
+};
+
+export type AuthorizeReportMediaUploadResponse = AuthorizeReportMediaUploadResponses[keyof AuthorizeReportMediaUploadResponses];
+
+export type AttachReportMediaData = {
+    body: MediaConfirmationRequest;
+    path: {
+        report_id: string;
+    };
+    query?: never;
+    url: '/reports/{report_id}/media';
+};
+
+export type AttachReportMediaErrors = {
+    /**
+     * Invalid media request
+     */
+    400: ErrorResponse;
+    /**
+     * Report not found
+     */
+    404: ErrorResponse;
+    /**
+     * Media attachment conflict
+     */
+    409: ErrorResponse;
+    /**
+     * Rate limit exceeded
+     */
+    429: ErrorResponse;
+    /**
+     * Media storage unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type AttachReportMediaError = AttachReportMediaErrors[keyof AttachReportMediaErrors];
+
+export type AttachReportMediaResponses = {
+    /**
+     * Media metadata attached to the report
+     */
+    201: ReportMedia;
+};
+
+export type AttachReportMediaResponse = AttachReportMediaResponses[keyof AttachReportMediaResponses];
