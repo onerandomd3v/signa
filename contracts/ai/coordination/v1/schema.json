@@ -34,7 +34,25 @@
         "known_pair_count": {"type": "integer", "minimum": 0},
         "supporting_pair_count": {"type": "integer", "minimum": 0},
         "reason": {"type": "string", "minLength": 1}
-      }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"name": {"enum": ["text_similarity", "media_fingerprint"]}}, "required": ["name"]},
+          "then": {"properties": {"outcome": {"enum": ["repetition_risk", "no_signal", "unknown"]}}}
+        },
+        {
+          "if": {"properties": {"name": {"const": "source_origin"}}, "required": ["name"]},
+          "then": {"properties": {"outcome": {"enum": ["repetition_risk", "independence_support", "unknown", "mixed_signals"]}}}
+        },
+        {
+          "if": {"properties": {"name": {"const": "source_claim"}}, "required": ["name"]},
+          "then": {"properties": {"outcome": {"enum": ["repetition_risk", "no_signal", "unknown"]}}}
+        },
+        {
+          "if": {"properties": {"name": {"const": "submission_timing"}}, "required": ["name"]},
+          "then": {"properties": {"outcome": {"enum": ["synchronized", "unsynchronized", "unknown"]}}}
+        }
+      ]
     }
   }
 }

@@ -67,6 +67,15 @@ func (v *Validator) ValidateForInput(data []byte, input Input, config Config) (A
 	if assessment.ObservationCount != len(input.Observations) {
 		return Assessment{}, fmt.Errorf("observation_count does not match supplied input")
 	}
+	expectedPairCount := len(input.Observations) * (len(input.Observations) - 1) / 2
+	for _, factor := range assessment.Factors {
+		if factor.PairCount != expectedPairCount {
+			return Assessment{}, fmt.Errorf("factor %s pair_count mismatch: got %d, want %d", factor.Name, factor.PairCount, expectedPairCount)
+		}
+	}
+	if err := validateTimingForInput(assessment, input, config, expectedPairCount); err != nil {
+		return Assessment{}, err
+	}
 	var document any
 	if err := json.Unmarshal(data, &document); err != nil {
 		return Assessment{}, fmt.Errorf("decode coordination assessment: %w", err)
@@ -85,6 +94,50 @@ func (v *Validator) ValidateForInput(data []byte, input Input, config Config) (A
 	return assessment, nil
 }
 
+func validateTimingForInput(assessment Assessment, input Input, config Config, pairCount int) error {
+	want := assessTiming(input.Observations, config, pairCount)
+	var got *Factor
+	for i := range assessment.Factors {
+		if assessment.Factors[i].Name == "submission_timing" {
+			got = &assessment.Factors[i]
+			break
+		}
+	}
+	if got == nil {
+		return fmt.Errorf("submission_timing factor is missing")
+	}
+	if got.Outcome != want.Outcome {
+		return fmt.Errorf("submission_timing outcome mismatch: got %q, want %q", got.Outcome, want.Outcome)
+	}
+	if !sameOptionalWeight(got.Weight, want.Weight) {
+		return fmt.Errorf("submission_timing weight mismatch: got %s, want %s", formatWeight(got.Weight), formatWeight(want.Weight))
+	}
+	if got.PairCount != want.PairCount {
+		return fmt.Errorf("submission_timing pair_count mismatch: got %d, want %d", got.PairCount, want.PairCount)
+	}
+	if got.KnownPairCount != want.KnownPairCount {
+		return fmt.Errorf("submission_timing known_pair_count mismatch: got %d, want %d", got.KnownPairCount, want.KnownPairCount)
+	}
+	if got.SupportingPairCount != want.SupportingPairCount {
+		return fmt.Errorf("submission_timing supporting_pair_count mismatch: got %d, want %d", got.SupportingPairCount, want.SupportingPairCount)
+	}
+	return nil
+}
+
+func sameOptionalWeight(left, right *float64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func formatWeight(value *float64) string {
+	if value == nil {
+		return "null"
+	}
+	return fmt.Sprintf("%g", *value)
+}
+
 func validateAssessment(result Assessment) error {
 	if result.ContractVersion != ContractVersion {
 		return fmt.Errorf("unsupported coordination contract version %q", result.ContractVersion)
@@ -98,9 +151,9 @@ func validateAssessment(result Assessment) error {
 	wanted := map[string]bool{"text_similarity": true, "media_fingerprint": true, "source_origin": true, "source_claim": true, "submission_timing": true}
 	allowed := map[string]map[string]bool{
 		"text_similarity":   {"repetition_risk": true, "no_signal": true, "unknown": true},
-		"media_fingerprint": {"repetition_risk": true, "no_signal": true, "unknown": true, "mixed_signals": true},
+		"media_fingerprint": {"repetition_risk": true, "no_signal": true, "unknown": true},
 		"source_origin":     {"repetition_risk": true, "independence_support": true, "unknown": true, "mixed_signals": true},
-		"source_claim":      {"repetition_risk": true, "no_signal": true, "unknown": true, "mixed_signals": true},
+		"source_claim":      {"repetition_risk": true, "no_signal": true, "unknown": true},
 		"submission_timing": {"synchronized": true, "unsynchronized": true, "unknown": true},
 	}
 	var timing string
