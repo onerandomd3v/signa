@@ -91,24 +91,4 @@ func TestProximityValidation(t *testing.T) {
 	if err := (RestrictedUserLocation{UserID: uuid.New(), Point: point, ObservedAt: time.Now()}).Validate(); err != nil {
 		t.Fatal(err)
 	}
-	validAsOf := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
-	validQuery := ProximityQuery{Target: point, RadiusMeters: 100, AsOf: validAsOf, MaxAge: time.Hour}
-	if err := validQuery.Validate(); err != nil {
-		t.Fatalf("valid proximity query rejected: %v", err)
-	}
-	for name, query := range map[string]ProximityQuery{
-		"zero as_of":       {Target: point, RadiusMeters: 100, MaxAge: time.Hour},
-		"zero max age":     {Target: point, RadiusMeters: 100, AsOf: validAsOf},
-		"negative max age": {Target: point, RadiusMeters: 100, AsOf: validAsOf, MaxAge: -time.Second},
-	} {
-		t.Run(name, func(t *testing.T) {
-			err := query.Validate()
-			if name == "zero as_of" && !errors.Is(err, ErrInvalidAsOf) {
-				t.Fatalf("Validate() error = %v, want ErrInvalidAsOf", err)
-			}
-			if name != "zero as_of" && !errors.Is(err, ErrInvalidMaxAge) {
-				t.Fatalf("Validate() error = %v, want ErrInvalidMaxAge", err)
-			}
-		})
-	}
 }

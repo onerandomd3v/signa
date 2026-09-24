@@ -31,21 +31,13 @@ func (s *Store) UpsertUserLocation(ctx context.Context, location RestrictedUserL
 	if err := location.Validate(); err != nil {
 		return false, err
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("begin upsert user location: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if err := lockUserLocation(ctx, tx, location.UserID); err != nil {
-		return false, err
-	}
 	var userID string
-	err = tx.QueryRow(ctx, `
+	err := s.pool.QueryRow(ctx, `
 		INSERT INTO user_locations (user_id, location, accuracy_meters, observed_at)
 		SELECT $1, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography, $4, $5
 		WHERE NOT EXISTS (
 			SELECT 1 FROM user_location_deletions
-			WHERE user_id = $1 AND last_observed_at >= $5
+			WHERE user_id = $1 AND deleted_at >= $5
 		)
 		ON CONFLICT (user_id) DO UPDATE
 		SET location = EXCLUDED.location,
@@ -55,7 +47,7 @@ func (s *Store) UpsertUserLocation(ctx context.Context, location RestrictedUserL
 		WHERE EXCLUDED.observed_at > user_locations.observed_at
 		  AND NOT EXISTS (
 			SELECT 1 FROM user_location_deletions
-			WHERE user_id = EXCLUDED.user_id AND last_observed_at >= EXCLUDED.observed_at
+			WHERE user_id = EXCLUDED.user_id AND deleted_at >= EXCLUDED.observed_at
 		  )
 		RETURNING user_id::text
 	`, location.UserID, location.Point.Latitude, location.Point.Longitude, location.AccuracyMeters, location.ObservedAt).Scan(&userID)
@@ -64,9 +56,6 @@ func (s *Store) UpsertUserLocation(ctx context.Context, location RestrictedUserL
 	}
 	if err != nil {
 		return false, fmt.Errorf("upsert user location: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit upsert user location: %w", err)
 	}
 	return userID != "", nil
 }
@@ -86,25 +75,12 @@ func (s *Store) DeleteUserLocation(ctx context.Context, userID uuid.UUID, delete
 		return fmt.Errorf("begin delete user location: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := lockUserLocation(ctx, tx, userID); err != nil {
-		return err
-	}
-	var currentObservedAt *time.Time
-	if err := tx.QueryRow(ctx, `SELECT observed_at FROM user_locations WHERE user_id = $1 FOR UPDATE`, userID).Scan(&currentObservedAt); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("read current user location: %w", err)
-	}
-	watermark := deletedAt
-	if currentObservedAt != nil && currentObservedAt.After(watermark) {
-		watermark = *currentObservedAt
-	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO user_location_deletions (user_id, last_observed_at, deleted_at)
-		VALUES ($1, $2, $3)
+		INSERT INTO user_location_deletions (user_id, deleted_at)
+		VALUES ($1, $2)
 		ON CONFLICT (user_id) DO UPDATE
-		SET last_observed_at = GREATEST(user_location_deletions.last_observed_at, EXCLUDED.last_observed_at),
-		    deleted_at = GREATEST(user_location_deletions.deleted_at, EXCLUDED.deleted_at),
-		    updated_at = now()
-	`, userID, watermark, deletedAt); err != nil {
+		SET deleted_at = GREATEST(user_location_deletions.deleted_at, EXCLUDED.deleted_at)
+	`, userID, deletedAt); err != nil {
 		return fmt.Errorf("record user location deletion: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM user_locations WHERE user_id = $1`, userID); err != nil {
@@ -117,16 +93,19 @@ func (s *Store) DeleteUserLocation(ctx context.Context, userID uuid.UUID, delete
 }
 
 // FindUsersWithinRadius returns deterministic, privacy-safe proximity data for
-// snapshots observed within the caller's explicit [AsOf-MaxAge, AsOf] window.
-// It never returns the exact stored coordinates.
-func (s *Store) FindUsersWithinRadius(ctx context.Context, query ProximityQuery) ([]ProximityResult, error) {
+// snapshots observed at or after the caller's explicit freshness cutoff. It
+// never returns the exact stored coordinates.
+func (s *Store) FindUsersWithinRadius(ctx context.Context, target Point, radiusMeters float64, limit int, observedAfter time.Time) ([]ProximityResult, error) {
 	if s == nil || s.pool == nil {
 		return nil, errors.New("geospatial store dependencies are required")
 	}
-	if err := query.Validate(); err != nil {
+	if err := validateProximity(target, radiusMeters, limit); err != nil {
 		return nil, err
 	}
-	queryString := `
+	if observedAfter.IsZero() {
+		return nil, ErrInvalidObserved
+	}
+	query := `
 		SELECT ul.user_id, ST_Distance(ul.location, target.point), ul.accuracy_meters, ul.observed_at
 		FROM user_locations AS ul
 		CROSS JOIN (
@@ -134,15 +113,14 @@ func (s *Store) FindUsersWithinRadius(ctx context.Context, query ProximityQuery)
 		) AS target
 		WHERE ST_DWithin(ul.location, target.point, $3)
 		  AND ul.observed_at >= $4
-		  AND ul.observed_at <= $5
 		ORDER BY ST_Distance(ul.location, target.point), ul.user_id
-		LIMIT $6
+		LIMIT $5
 	`
-	effectiveLimit := query.Limit
+	effectiveLimit := limit
 	if effectiveLimit == 0 {
 		effectiveLimit = maxProximityLimit
 	}
-	rows, err := s.pool.Query(ctx, queryString, query.Target.Latitude, query.Target.Longitude, query.RadiusMeters, query.AsOf.Add(-query.MaxAge), query.AsOf, effectiveLimit)
+	rows, err := s.pool.Query(ctx, query, target.Latitude, target.Longitude, radiusMeters, observedAfter, effectiveLimit)
 	if err != nil {
 		return nil, fmt.Errorf("find users within radius: %w", err)
 	}
@@ -159,11 +137,4 @@ func (s *Store) FindUsersWithinRadius(ctx context.Context, query ProximityQuery)
 		return nil, fmt.Errorf("iterate proximity results: %w", err)
 	}
 	return results, nil
-}
-
-func lockUserLocation(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, userID.String()); err != nil {
-		return fmt.Errorf("lock user location %s: %w", userID, err)
-	}
-	return nil
 }
