@@ -82,7 +82,7 @@ func TestUserLocationStoreIntegration(t *testing.T) {
 	if latitude != location.Point.Latitude || longitude != location.Point.Longitude {
 		t.Fatalf("stale upsert changed location = (%v, %v)", latitude, longitude)
 	}
-	if replaced, err := store.UpsertUserLocation(ctx, RestrictedUserLocation{UserID: userID, Point: Point{Latitude: 6.5245, Longitude: 3.3792}, ObservedAt: observedAt.Add(time.Minute)}); err != nil || !replaced {
+	if replaced, err := store.UpsertUserLocation(ctx, RestrictedUserLocation{UserID: userID, Point: Point{Latitude: 6.5245, Longitude: 3.3792}, AccuracyMeters: &accuracy, ObservedAt: observedAt.Add(time.Minute)}); err != nil || !replaced {
 		t.Fatalf("newer upsert = (%v, %v), want (true, nil)", replaced, err)
 	}
 	var snapshotCount int
@@ -104,7 +104,7 @@ func TestUserLocationStoreIntegration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	results, err := store.FindUsersWithinRadius(ctx, nearTarget, 1000, 0)
+	results, err := store.FindUsersWithinRadius(ctx, nearTarget, 1000, 0, observedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +113,14 @@ func TestUserLocationStoreIntegration(t *testing.T) {
 	}
 	if results[0].DistanceMeters > results[1].DistanceMeters {
 		t.Fatalf("distance ordering = %v then %v", results[0].DistanceMeters, results[1].DistanceMeters)
+	}
+	if results[0].AccuracyMeters == nil || *results[0].AccuracyMeters != accuracy {
+		t.Fatalf("proximity accuracy = %v, want %v", results[0].AccuracyMeters, accuracy)
+	}
+	if freshOnly, err := store.FindUsersWithinRadius(ctx, nearTarget, 1000, 0, observedAt.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	} else if len(freshOnly) != 0 {
+		t.Fatalf("stale proximity results = %+v, want none", freshOnly)
 	}
 	encoded, err := json.Marshal(results)
 	if err != nil {
@@ -123,18 +131,21 @@ func TestUserLocationStoreIntegration(t *testing.T) {
 			t.Fatalf("proximity result exposes restricted field %q: %s", restrictedField, encoded)
 		}
 	}
-	limited, err := store.FindUsersWithinRadius(ctx, nearTarget, 1000, 1)
+	limited, err := store.FindUsersWithinRadius(ctx, nearTarget, 1000, 1, observedAt)
 	if err != nil || len(limited) != 1 || limited[0].UserID != userID {
 		t.Fatalf("limited proximity results = (%+v, %v)", limited, err)
 	}
-	if _, err := store.FindUsersWithinRadius(ctx, nearTarget, 0, 0); !errors.Is(err, ErrInvalidRadius) {
+	if _, err := store.FindUsersWithinRadius(ctx, nearTarget, 0, 0, observedAt); !errors.Is(err, ErrInvalidRadius) {
 		t.Fatalf("zero-radius error = %v, want ErrInvalidRadius", err)
 	}
-	if _, err := store.FindUsersWithinRadius(ctx, nearTarget, 1000, maxProximityLimit+1); !errors.Is(err, ErrInvalidLimit) {
+	if _, err := store.FindUsersWithinRadius(ctx, nearTarget, 1000, maxProximityLimit+1, observedAt); !errors.Is(err, ErrInvalidLimit) {
 		t.Fatalf("over-limit error = %v, want ErrInvalidLimit", err)
 	}
-	if err := store.DeleteUserLocation(ctx, userID); err != nil {
+	if err := store.DeleteUserLocation(ctx, userID, observedAt.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
+	}
+	if replaced, err := store.UpsertUserLocation(ctx, RestrictedUserLocation{UserID: userID, Point: nearTarget, ObservedAt: observedAt.Add(time.Hour)}); err != nil || replaced {
+		t.Fatalf("stale post-deletion upsert = (%v, %v), want (false, nil)", replaced, err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_locations WHERE user_id = $1`, userID).Scan(&snapshotCount); err != nil {
 		t.Fatal(err)

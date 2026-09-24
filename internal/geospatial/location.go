@@ -22,6 +22,7 @@ var (
 	ErrInvalidLocation = errors.New("invalid user location")
 	ErrInvalidRadius   = errors.New("invalid proximity radius")
 	ErrInvalidLimit    = errors.New("invalid proximity limit")
+	ErrInvalidObserved = errors.New("invalid proximity observation cutoff")
 )
 
 // Point is an exact geographic point. It is restricted to internal use and
@@ -46,6 +47,7 @@ type RestrictedUserLocation struct {
 type ProximityResult struct {
 	UserID         uuid.UUID `json:"user_id"`
 	DistanceMeters float64   `json:"distance_meters"`
+	AccuracyMeters *float64  `json:"accuracy_meters,omitempty"`
 	ObservedAt     time.Time `json:"observed_at"`
 }
 

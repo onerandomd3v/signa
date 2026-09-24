@@ -88,4 +88,7 @@ func TestProximityValidation(t *testing.T) {
 	if err := validateProximity(point, 100, maxProximityLimit+1); !errors.Is(err, ErrInvalidLimit) {
 		t.Fatalf("validateProximity() error = %v, want ErrInvalidLimit", err)
 	}
+	if err := (RestrictedUserLocation{UserID: uuid.New(), Point: point, ObservedAt: time.Now()}).Validate(); err != nil {
+		t.Fatal(err)
+	}
 }

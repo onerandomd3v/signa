@@ -15,6 +15,12 @@ CREATE TABLE user_locations (
         )
 );
 
+-- This stores only the deletion version, never a location history or point.
+CREATE TABLE user_location_deletions (
+    user_id UUID PRIMARY KEY,
+    deleted_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE INDEX user_locations_location_gist_idx
     ON user_locations USING GIST (location);
 
@@ -24,4 +30,5 @@ CREATE INDEX incidents_affected_geometry_gist_idx
 -- +goose Down
 DROP INDEX IF EXISTS incidents_affected_geometry_gist_idx;
 DROP INDEX IF EXISTS user_locations_location_gist_idx;
+DROP TABLE IF EXISTS user_location_deletions;
 DROP TABLE IF EXISTS user_locations;
