@@ -21,6 +21,8 @@ describe("PushSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getVapidPublicKey).mockReturnValue(undefined);
+    vi.mocked(readPushState).mockResolvedValue("not-requested");
+    vi.mocked(enablePush).mockReset();
   });
   afterEach(() => cleanup());
 
@@ -51,6 +53,23 @@ describe("PushSettings", () => {
     });
     fireEvent(document, new Event("visibilitychange"));
     await waitFor(() => expect(readPushState).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a reset-permission subscription as removable, not active", async () => {
+    vi.mocked(readPushState).mockResolvedValue("default-subscribed");
+    render(<PushSettings />);
+
+    expect(
+      await screen.findByText(
+        "Permission hasn’t been granted. A push subscription remains in this browser.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Remove browser subscription" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("This browser is subscribed to push notifications."),
+    ).toBeNull();
   });
 
   it("announces pending work and allows retry after a subscription failure", async () => {
