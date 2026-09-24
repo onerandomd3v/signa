@@ -73,8 +73,8 @@ Environment-file boundaries:
 
 - `.env.example` is the complete local-development/full-stack reference.
 - `apps/web/.env.example` contains frontend/Vercel web variables only.
-- `deploy/env/api.env.example` contains Go API deployment variables.
-- `deploy/env/worker.env.example` contains Go worker deployment variables.
+- `deploy/api/.env.example` contains Go API deployment configuration.
+- `deploy/worker/.env.example` contains Go worker deployment configuration.
 
 Production secrets must be configured in the deployment platform and must never be committed to the repository.
 
