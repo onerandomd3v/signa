@@ -78,11 +78,8 @@ func (p Processor) Evaluate(ctx context.Context, left, right Evidence) (Assessme
 	if p.Validator == nil {
 		return Assessment{}, errors.New("contradiction validator is required")
 	}
-	if err := ValidateInput(left); err != nil {
-		return Assessment{}, fmt.Errorf("validate left evidence: %w", err)
-	}
-	if err := ValidateInput(right); err != nil {
-		return Assessment{}, fmt.Errorf("validate right evidence: %w", err)
+	if err := validatePair(left, right); err != nil {
+		return Assessment{}, err
 	}
 	data, err := p.Provider.Assess(ctx, left, right)
 	if err != nil {
@@ -94,6 +91,10 @@ func (p Processor) Evaluate(ctx context.Context, left, right Evidence) (Assessme
 	}
 	if assessment.LeftEvidenceID != left.ID || assessment.RightEvidenceID != right.ID {
 		return Assessment{}, errors.New("contradiction assessment evidence IDs do not match request")
+	}
+	expectedRecency := recency(left.ObservedAt, right.ObservedAt)
+	if assessment.RecencyOrder != expectedRecency {
+		return Assessment{}, fmt.Errorf("contradiction assessment recency_order %q does not match supplied timestamps %q", assessment.RecencyOrder, expectedRecency)
 	}
 	return assessment, nil
 }
@@ -158,6 +159,19 @@ func ValidateInput(input Evidence) error {
 	return nil
 }
 
+func validatePair(left, right Evidence) error {
+	if err := ValidateInput(left); err != nil {
+		return fmt.Errorf("validate left evidence: %w", err)
+	}
+	if err := ValidateInput(right); err != nil {
+		return fmt.Errorf("validate right evidence: %w", err)
+	}
+	if strings.TrimSpace(left.ID) == strings.TrimSpace(right.ID) {
+		return errors.New("left and right evidence must have distinct IDs")
+	}
+	return nil
+}
+
 // RuleBasedEvaluator compares only exact categorical event/location context
 // and the supported opposite claim states. Timestamp ordering has no cutoff.
 type RuleBasedEvaluator struct{}
@@ -170,11 +184,8 @@ func (RuleBasedEvaluator) Evaluate(ctx context.Context, left, right Evidence) ([
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := ValidateInput(left); err != nil {
-		return nil, fmt.Errorf("validate left evidence: %w", err)
-	}
-	if err := ValidateInput(right); err != nil {
-		return nil, fmt.Errorf("validate right evidence: %w", err)
+	if err := validatePair(left, right); err != nil {
+		return nil, err
 	}
 	event := compareEvent(left.EventType, right.EventType)
 	place := compareLocation(left.Location, right.Location)

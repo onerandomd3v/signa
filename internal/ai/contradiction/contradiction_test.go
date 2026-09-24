@@ -3,6 +3,7 @@ package contradiction
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -70,6 +71,72 @@ func TestProcessorRejectsInvalidProviderOutput(t *testing.T) {
 	}
 }
 
+func TestProcessorBindsProviderRecencyToInputTimestamps(t *testing.T) {
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	earlier := base.Add(-time.Hour)
+	later := base.Add(time.Hour)
+	tests := []struct {
+		name     string
+		leftAt   *time.Time
+		rightAt  *time.Time
+		provider string
+	}{
+		{"rejects left_newer when right is newer", &earlier, &later, "left_newer"},
+		{"rejects right_newer when left is newer", &later, &earlier, "right_newer"},
+		{"missing timestamp requires unknown", &later, nil, "left_newer"},
+		{"rejects same_time when timestamps differ", &earlier, &later, "same_time"},
+		{"rejects wrong same_time result", &base, &base, "right_newer"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			left := evidence("left", "road_closure", "Third Mainland Bridge", "passage", "blocked", time.Time{})
+			right := evidence("right", "road_closure", "Third Mainland Bridge", "passage", "open", time.Time{})
+			left.ObservedAt, right.ObservedAt = test.leftAt, test.rightAt
+			processor := Processor{Provider: providerWithRecency(t, test.provider), Validator: testValidator(t)}
+			if _, err := processor.Evaluate(context.Background(), left, right); err == nil {
+				t.Fatal("processor accepted provider recency inconsistent with input timestamps")
+			}
+		})
+	}
+}
+
+func TestProcessorAcceptsCorrectProviderRecency(t *testing.T) {
+	leftAt := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	rightAt := leftAt.Add(time.Minute)
+	left := evidence("left", "road_closure", "Third Mainland Bridge", "passage", "blocked", time.Time{})
+	right := evidence("right", "road_closure", "Third Mainland Bridge", "passage", "open", time.Time{})
+	left.ObservedAt, right.ObservedAt = &leftAt, &rightAt
+	processor := Processor{Provider: providerWithRecency(t, "right_newer"), Validator: testValidator(t)}
+	assessment, err := processor.Evaluate(context.Background(), left, right)
+	if err != nil {
+		t.Fatalf("processor rejected matching provider recency: %v", err)
+	}
+	if assessment.RecencyOrder != "right_newer" {
+		t.Fatalf("recency_order = %q, want right_newer", assessment.RecencyOrder)
+	}
+}
+
+func TestProcessorRejectsSameEvidenceIdentity(t *testing.T) {
+	item := evidence("same-report", "road_closure", "Third Mainland Bridge", "passage", "blocked", time.Time{})
+	providerCalled := false
+	processor := Processor{
+		Provider: ProviderFunc(func(context.Context, Evidence, Evidence) ([]byte, error) {
+			providerCalled = true
+			return nil, errors.New("provider should not be called")
+		}),
+		Validator: testValidator(t),
+	}
+	if _, err := processor.Evaluate(context.Background(), item, item); err == nil {
+		t.Fatal("processor accepted evidence compared with itself")
+	}
+	if providerCalled {
+		t.Fatal("provider was called for identical evidence IDs")
+	}
+	if _, err := (RuleBasedEvaluator{}).Evaluate(context.Background(), item, item); err == nil {
+		t.Fatal("rule-based evaluator accepted evidence compared with itself")
+	}
+}
+
 func TestValidatorRejectsContradictionOutsideClaimFactor(t *testing.T) {
 	data := []byte(`{"contract_version":"signa.ai.contradiction-assessment.v1","input_contract_version":"signa.ai.report-extraction.v0","left_evidence_id":"a","right_evidence_id":"b","contradiction_state":"contradiction_signal","recency_order":"unknown","factors":[{"name":"event_type","outcome":"contradiction","reason":"invalid factor outcome"},{"name":"location_reference","outcome":"no_signal","reason":"same place"},{"name":"claim_state","outcome":"contradiction","reason":"opposite claims"}]}`)
 	if _, err := testValidator(t).Validate(data); err == nil {
@@ -119,6 +186,22 @@ func evidence(id, eventType, place, subject, state string, observedAt time.Time)
 }
 
 func stringPointer(value string) *string { return &value }
+
+func providerWithRecency(t *testing.T, order string) Provider {
+	t.Helper()
+	return ProviderFunc(func(ctx context.Context, left, right Evidence) ([]byte, error) {
+		data, err := (RuleBasedEvaluator{}).Evaluate(ctx, left, right)
+		if err != nil {
+			return nil, err
+		}
+		var result Assessment
+		if err := json.Unmarshal(data, &result); err != nil {
+			return nil, err
+		}
+		result.RecencyOrder = order
+		return json.Marshal(result)
+	})
+}
 
 func TestContractTypesAreJSONStable(t *testing.T) {
 	data, err := json.Marshal(evidence("a", "road_closure", "Third Mainland Bridge", "passage", "blocked", time.Time{}))
