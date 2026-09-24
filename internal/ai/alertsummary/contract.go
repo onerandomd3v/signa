@@ -216,6 +216,10 @@ func ValidateBound(state State, summary Summary) error {
 	if strings.TrimSpace(summary.Title) == "" || strings.TrimSpace(summary.Message) == "" || strings.TrimSpace(summary.UncertaintyQualifier) == "" {
 		return fmt.Errorf("title, message, and uncertainty_qualifier are required")
 	}
+	expected := RenderDeterministic(state)
+	if summary.Title != expected.Title || summary.Message != expected.Message || summary.UncertaintyQualifier != expected.UncertaintyQualifier {
+		return fmt.Errorf("provider public wording must use the caller-derived template")
+	}
 	text := strings.ToLower(summary.Title + " " + summary.Message + " " + summary.UncertaintyQualifier)
 	for _, word := range []string{"confirmed", "verified", "definitely", "certainly", "fact"} {
 		if containsWord(text, word) {

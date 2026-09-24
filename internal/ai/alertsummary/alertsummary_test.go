@@ -120,6 +120,28 @@ func TestValidateBoundRejectsUnsupportedOngoingClaims(t *testing.T) {
 	}
 }
 
+func TestValidateBoundRejectsInventedProseWithMatchingMetadata(t *testing.T) {
+	tests := []struct {
+		name    string
+		state   alertsummary.State
+		message string
+	}{
+		{"another event type", validState(), "A fire is reported near a junction."},
+		{"another location", validState(), "Possible road blockage near Ikeja."},
+		{"stronger confidence", validState(), "High confidence incident near a junction."},
+		{"current activity for stale incident", staleState(), "The incident is happening now near a junction."},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := alertsummary.RenderDeterministic(tc.state)
+			candidate.Message = tc.message
+			if err := alertsummary.ValidateBound(tc.state, candidate); err == nil {
+				t.Fatalf("accepted invented public prose: %q", tc.message)
+			}
+		})
+	}
+}
+
 func TestValidateBoundAcceptsValidSummary(t *testing.T) {
 	state := validState()
 	if err := alertsummary.ValidateState(state); err != nil {
@@ -212,4 +234,14 @@ func validState() alertsummary.State {
 	return alertsummary.State{SnapshotVersion: alertsummary.SnapshotVersion, IncidentID: "inc-valid", EventType: "possible_road_blockage", ConfidenceState: alertsummary.Unverified, Severity: stringPointer("HIGH"), LifecycleStatus: "OPEN", PublicLocation: alertsummary.PublicLocation{Status: "APPROXIMATE", Label: stringPointer("near a junction")}, Freshness: alertsummary.Freshness{State: alertsummary.Current, LastSignalAt: &last, AgeSeconds: &age}, AsOf: asOf, PolicyVersions: alertsummary.PolicyVersions{Confidence: "signa.incident-confidence-severity.v1", Lifecycle: "signa.incident-lifecycle.v1"}}
 }
 
-func stringPointer(value string) *string { return &value }
+func staleState() alertsummary.State {
+	state := validState()
+	state.Freshness.State = alertsummary.Stale
+	state.Freshness.LastSignalAt = timePointer(state.AsOf.Add(-48 * time.Hour))
+	age := int64(48 * 60 * 60)
+	state.Freshness.AgeSeconds = &age
+	return state
+}
+
+func stringPointer(value string) *string     { return &value }
+func timePointer(value time.Time) *time.Time { return &value }
