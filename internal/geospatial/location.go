@@ -22,7 +22,8 @@ var (
 	ErrInvalidLocation = errors.New("invalid user location")
 	ErrInvalidRadius   = errors.New("invalid proximity radius")
 	ErrInvalidLimit    = errors.New("invalid proximity limit")
-	ErrInvalidObserved = errors.New("invalid proximity observation cutoff")
+	ErrInvalidAsOf     = errors.New("invalid proximity as_of")
+	ErrInvalidMaxAge   = errors.New("invalid proximity max age")
 )
 
 // Point is an exact geographic point. It is restricted to internal use and
@@ -49,6 +50,14 @@ type ProximityResult struct {
 	DistanceMeters float64   `json:"distance_meters"`
 	AccuracyMeters *float64  `json:"accuracy_meters,omitempty"`
 	ObservedAt     time.Time `json:"observed_at"`
+}
+
+type ProximityQuery struct {
+	Target       Point
+	RadiusMeters float64
+	AsOf         time.Time
+	MaxAge       time.Duration
+	Limit        int
 }
 
 func (p Point) Validate() error {
@@ -86,6 +95,19 @@ func validateProximity(point Point, radiusMeters float64, limit int) error {
 	}
 	if limit < 0 || limit > maxProximityLimit {
 		return fmt.Errorf("%w: limit must be between 0 and %d", ErrInvalidLimit, maxProximityLimit)
+	}
+	return nil
+}
+
+func (q ProximityQuery) Validate() error {
+	if err := validateProximity(q.Target, q.RadiusMeters, q.Limit); err != nil {
+		return err
+	}
+	if q.AsOf.IsZero() {
+		return ErrInvalidAsOf
+	}
+	if q.MaxAge <= 0 {
+		return ErrInvalidMaxAge
 	}
 	return nil
 }
