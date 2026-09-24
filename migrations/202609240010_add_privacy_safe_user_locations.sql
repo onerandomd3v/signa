@@ -18,7 +18,9 @@ CREATE TABLE user_locations (
 -- This stores only the deletion version, never a location history or point.
 CREATE TABLE user_location_deletions (
     user_id UUID PRIMARY KEY,
-    deleted_at TIMESTAMPTZ NOT NULL
+    last_observed_at TIMESTAMPTZ NOT NULL,
+    deleted_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX user_locations_location_gist_idx
