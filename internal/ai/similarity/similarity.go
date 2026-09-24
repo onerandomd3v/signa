@@ -22,10 +22,10 @@ const (
 )
 
 type ReportEvidence struct {
-	EventType     extraction.Field      `json:"event_type"`
-	TimeReference extraction.Field      `json:"time_reference"`
+	EventType     extraction.Field       `json:"event_type"`
+	TimeReference extraction.Field       `json:"time_reference"`
 	Location      location.Normalization `json:"location"`
-	Text          string                `json:"text"`
+	Text          string                 `json:"text"`
 }
 
 type CandidateIncident struct {
@@ -83,8 +83,12 @@ func (p Processor) Assess(ctx context.Context, report ReportEvidence, candidate 
 	if err != nil {
 		return nil, fmt.Errorf("assess candidate similarity: %w", err)
 	}
-	if _, err := p.Validator.Validate(data); err != nil {
+	assessment, err := p.Validator.Validate(data)
+	if err != nil {
 		return nil, err
+	}
+	if assessment.CandidateIncidentID != candidate.ID {
+		return nil, fmt.Errorf("similarity assessment candidate id %q does not match requested candidate %q", assessment.CandidateIncidentID, candidate.ID)
 	}
 	return data, nil
 }

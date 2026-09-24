@@ -1,1 +1,126 @@
-{"fixture_id":"same-event","report_evidence":{"event_type":{"status":"identified","value":"fire","candidates":[],"evidence_quotes":["fire"]},"time_reference":{"status":"identified","value":"10 minutes ago","candidates":[],"evidence_quotes":["10 minutes ago"]},"location":{"contract_version":"signa.location-normalization.v0","input_contract_version":"signa.ai.report-extraction.v0","location_state":"identified","source_location_reference":{"status":"identified","value":"Ikeja","candidates":[],"evidence_quotes":["Ikeja"]},"candidates":[{"reported_text":"Ikeja","normalized_text":"Ikeja","reference_kind":"area","qualifier":null,"evidence_quotes":["Ikeja"]}]},"text":"fire at Ikeja"},"candidates":[{"candidate_incident":{"id":"incident-1","evidence":{"event_type":{"status":"identified","value":"fire","candidates":[],"evidence_quotes":["fire"]},"time_reference":{"status":"identified","value":"10 minutes ago","candidates":[],"evidence_quotes":["10 minutes ago"]},"location":{"contract_version":"signa.location-normalization.v0","input_contract_version":"signa.ai.report-extraction.v0","location_state":"identified","source_location_reference":{"status":"identified","value":"Ikeja","candidates":[],"evidence_quotes":["Ikeja"]},"candidates":[{"reported_text":"Ikeja","normalized_text":"Ikeja","reference_kind":"area","qualifier":null,"evidence_quotes":["Ikeja"]}]},"text":"fire at Ikeja"},"distance_meters":0,"search_radius_meters":1000},"expected_assessment":{"similarity_state":"assessed","similarity_score":1,"factors":{"event_type":{"status":"informative","score":1},"time_reference":{"status":"informative","score":1},"location_reference":{"status":"informative","score":1},"text_similarity":{"status":"informative","score":1},"spatial_proximity":{"status":"informative","score":1}}}}]}
+{
+  "fixture_id": "same-event",
+  "report_evidence": {
+    "event_type": {
+      "status": "identified",
+      "value": "fire",
+      "candidates": [],
+      "evidence_quotes": [
+        "fire"
+      ]
+    },
+    "time_reference": {
+      "status": "identified",
+      "value": "10 minutes ago",
+      "candidates": [],
+      "evidence_quotes": [
+        "10 minutes ago"
+      ]
+    },
+    "location": {
+      "contract_version": "signa.location-normalization.v0",
+      "input_contract_version": "signa.ai.report-extraction.v0",
+      "location_state": "identified",
+      "source_location_reference": {
+        "status": "identified",
+        "value": "Ikeja",
+        "candidates": [],
+        "evidence_quotes": [
+          "Ikeja"
+        ]
+      },
+      "candidates": [
+        {
+          "reported_text": "Ikeja",
+          "normalized_text": "Ikeja",
+          "reference_kind": "area",
+          "qualifier": null,
+          "evidence_quotes": [
+            "Ikeja"
+          ]
+        }
+      ]
+    },
+    "text": "fire at Ikeja"
+  },
+  "candidates": [
+    {
+      "candidate_incident": {
+        "id": "incident-1",
+        "evidence": {
+          "event_type": {
+            "status": "identified",
+            "value": "fire",
+            "candidates": [],
+            "evidence_quotes": [
+              "fire"
+            ]
+          },
+          "time_reference": {
+            "status": "identified",
+            "value": "10 minutes ago",
+            "candidates": [],
+            "evidence_quotes": [
+              "10 minutes ago"
+            ]
+          },
+          "location": {
+            "contract_version": "signa.location-normalization.v0",
+            "input_contract_version": "signa.ai.report-extraction.v0",
+            "location_state": "identified",
+            "source_location_reference": {
+              "status": "identified",
+              "value": "Ikeja",
+              "candidates": [],
+              "evidence_quotes": [
+                "Ikeja"
+              ]
+            },
+            "candidates": [
+              {
+                "reported_text": "Ikeja",
+                "normalized_text": "Ikeja",
+                "reference_kind": "area",
+                "qualifier": null,
+                "evidence_quotes": [
+                  "Ikeja"
+                ]
+              }
+            ]
+          },
+          "text": "fire at Ikeja"
+        },
+        "distance_meters": 0,
+        "search_radius_meters": 1000
+      },
+      "expected_assessment": {
+        "similarity_state": "assessed",
+        "similarity_score": 1,
+        "factors": {
+          "event_type": {
+            "status": "informative",
+            "score": 1,
+            "reason": "identified event types agree"
+          },
+          "time_reference": {
+            "status": "informative",
+            "score": 1
+          },
+          "location_reference": {
+            "status": "informative",
+            "score": 1
+          },
+          "text_similarity": {
+            "status": "informative",
+            "score": 1,
+            "reason": "word-set Jaccard overlap computed from supplied evidence text"
+          },
+          "spatial_proximity": {
+            "status": "informative",
+            "score": 1
+          }
+        }
+      }
+    }
+  ]
+}

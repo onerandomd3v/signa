@@ -22,26 +22,27 @@ type Suite struct {
 }
 
 type Case struct {
-	ID string
+	ID         string
 	Categories []string
-	Report similarity.ReportEvidence
+	Report     similarity.ReportEvidence
 	Candidates []CandidateCase
 }
 
 type CandidateCase struct {
-	Input similarity.CandidateIncident
+	Input    similarity.CandidateIncident
 	Expected ExpectedAssessment
 }
 
 type ExpectedAssessment struct {
-	SimilarityState string `json:"similarity_state"`
-	SimilarityScore *float64 `json:"similarity_score"`
-	Factors map[string]ExpectedFactor `json:"factors"`
+	SimilarityState string                    `json:"similarity_state"`
+	SimilarityScore *float64                  `json:"similarity_score"`
+	Factors         map[string]ExpectedFactor `json:"factors"`
 }
 
 type ExpectedFactor struct {
-	Status string `json:"status"`
-	Score *float64 `json:"score"`
+	Status string   `json:"status"`
+	Score  *float64 `json:"score"`
+	Reason string   `json:"reason,omitempty"`
 }
 
 type Failure struct {
@@ -88,11 +89,11 @@ type manifest struct {
 }
 
 type fixture struct {
-	FixtureID  string                      `json:"fixture_id"`
-	Report     similarity.ReportEvidence   `json:"report_evidence"`
+	FixtureID  string                    `json:"fixture_id"`
+	Report     similarity.ReportEvidence `json:"report_evidence"`
 	Candidates []struct {
-		Input similarity.CandidateIncident `json:"candidate_incident"`
-		Expected ExpectedAssessment `json:"expected_assessment"`
+		Input    similarity.CandidateIncident `json:"candidate_incident"`
+		Expected ExpectedAssessment           `json:"expected_assessment"`
 	} `json:"candidates"`
 }
 
@@ -108,7 +109,7 @@ func LoadSuite(manifestPath string, validator *similarity.Validator) (Suite, err
 	if err := json.Unmarshal(data, &definition); err != nil {
 		return Suite{}, fmt.Errorf("decode similarity evaluation manifest: %w", err)
 	}
-	if definition.EvaluationVersion == "" || definition.ContractVersion != similarity.ContractVersion || definition.ToleranceVersion == "" || definition.Comparison != "exact_scores_and_factor_statuses" || len(definition.Cases) == 0 {
+	if definition.EvaluationVersion == "" || definition.ContractVersion != similarity.ContractVersion || definition.ToleranceVersion == "" || definition.Comparison != "exact_scores_statuses_and_selected_reasons" || len(definition.Cases) == 0 {
 		return Suite{}, errors.New("similarity evaluation manifest must declare versions and cases")
 	}
 	suite := Suite{
@@ -177,7 +178,9 @@ func Evaluate(ctx context.Context, suite Suite, scorer provider, validator *simi
 				report.Passed++
 				continue
 			}
-			for _, message := range failures { report.add(testCase, message) }
+			for _, message := range failures {
+				report.add(testCase, message)
+			}
 		}
 	}
 	return report, nil
@@ -222,6 +225,9 @@ func compare(candidateID string, expected ExpectedAssessment, actual similarity.
 		}
 		if !sameFloat(want.Score, got.Score) {
 			failures = append(failures, fmt.Sprintf("factor %s score mismatch: got %s, want %s", name, floatString(got.Score), floatString(want.Score)))
+		}
+		if want.Reason != "" && got.Reason != want.Reason {
+			failures = append(failures, fmt.Sprintf("factor %s reason mismatch: got %q, want %q", name, got.Reason, want.Reason))
 		}
 	}
 	return failures

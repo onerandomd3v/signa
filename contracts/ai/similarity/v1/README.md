@@ -11,7 +11,7 @@ component does not geocode or calculate coordinates. No persistence,
 attachment, incident creation, severity, or alert decision is made.
 
 `evaluation.json` versions the fixture suite and exact numeric/status
-tolerances. Run it with:
+tolerances plus selected field-level reason expectations. Run it with:
 
 ```powershell
 go test ./internal/ai/similarity/evaluation -run '^TestVersionedV1SimilaritySuite$' -count=1 -v

@@ -1,1 +1,57 @@
-{"fixture_id":"different-type","report_evidence":{"event_type":{"status":"identified","value":"fire","candidates":[],"evidence_quotes":["fire"]}},"candidates":[{"candidate_incident":{"id":"incident-2","evidence":{"event_type":{"status":"identified","value":"flooding","candidates":[],"evidence_quotes":["flood"]}}},"expected_assessment":{"similarity_state":"assessed","similarity_score":0,"factors":{"event_type":{"status":"informative","score":0},"time_reference":{"status":"indeterminate","score":null},"location_reference":{"status":"indeterminate","score":null},"text_similarity":{"status":"indeterminate","score":null},"spatial_proximity":{"status":"indeterminate","score":null}}}}]}
+{
+  "fixture_id": "different-type",
+  "report_evidence": {
+    "event_type": {
+      "status": "identified",
+      "value": "fire",
+      "candidates": [],
+      "evidence_quotes": [
+        "fire"
+      ]
+    }
+  },
+  "candidates": [
+    {
+      "candidate_incident": {
+        "id": "incident-2",
+        "evidence": {
+          "event_type": {
+            "status": "identified",
+            "value": "flooding",
+            "candidates": [],
+            "evidence_quotes": [
+              "flood"
+            ]
+          }
+        }
+      },
+      "expected_assessment": {
+        "similarity_state": "assessed",
+        "similarity_score": 0,
+        "factors": {
+          "event_type": {
+            "status": "informative",
+            "score": 0,
+            "reason": "identified event types differ"
+          },
+          "time_reference": {
+            "status": "indeterminate",
+            "score": null
+          },
+          "location_reference": {
+            "status": "indeterminate",
+            "score": null
+          },
+          "text_similarity": {
+            "status": "indeterminate",
+            "score": null
+          },
+          "spatial_proximity": {
+            "status": "indeterminate",
+            "score": null
+          }
+        }
+      }
+    }
+  ]
+}

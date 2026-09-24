@@ -61,13 +61,21 @@ func (v *Validator) Validate(data []byte) (Assessment, error) {
 	}
 	var sum float64
 	count := 0
+	expectedSupporting := make([]string, 0)
+	expectedLimiting := make([]string, 0)
 	for _, factor := range result.Factors {
 		if factor.Score != nil {
 			sum += *factor.Score
 			count++
+			if *factor.Score > 0 {
+				expectedSupporting = append(expectedSupporting, factor.Name+": "+factor.Reason)
+			}
+		} else {
+			expectedLimiting = append(expectedLimiting, factor.Name+": "+factor.Reason)
 		}
 	}
 	if count == 0 {
+		expectedLimiting = append(expectedLimiting, "no comparable evidence was available")
 		if result.SimilarityState != "insufficient_evidence" || result.SimilarityScore != nil {
 			return Assessment{}, fmt.Errorf("assessment without informative factors requires insufficient_evidence and a null score")
 		}
@@ -77,7 +85,25 @@ func (v *Validator) Validate(data []byte) (Assessment, error) {
 			return Assessment{}, fmt.Errorf("assessment score must be the arithmetic mean of informative factors: want %g", want)
 		}
 	}
+	if !equalStrings(result.SupportingReasons, expectedSupporting) {
+		return Assessment{}, fmt.Errorf("supporting_reasons must correspond to informative positive factors")
+	}
+	if !equalStrings(result.LimitingReasons, expectedLimiting) {
+		return Assessment{}, fmt.Errorf("limiting_reasons must correspond to indeterminate factors")
+	}
 	return result, nil
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func sortedFactorNames(names map[string]bool) []string {

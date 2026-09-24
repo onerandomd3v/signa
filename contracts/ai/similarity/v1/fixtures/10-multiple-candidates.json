@@ -1,1 +1,103 @@
-{"fixture_id":"multiple-candidates","report_evidence":{"event_type":{"status":"identified","value":"fire","candidates":[],"evidence_quotes":["fire"]}},"candidates":[{"candidate_incident":{"id":"near","evidence":{"event_type":{"status":"identified","value":"fire","candidates":[],"evidence_quotes":["fire"]}},"distance_meters":100,"search_radius_meters":1000},"expected_assessment":{"similarity_state":"assessed","similarity_score":0.95,"factors":{"event_type":{"status":"informative","score":1},"time_reference":{"status":"indeterminate","score":null},"location_reference":{"status":"indeterminate","score":null},"text_similarity":{"status":"indeterminate","score":null},"spatial_proximity":{"status":"informative","score":0.9}}}},{"candidate_incident":{"id":"far","evidence":{"event_type":{"status":"identified","value":"fire","candidates":[],"evidence_quotes":["fire"]}},"distance_meters":800,"search_radius_meters":1000},"expected_assessment":{"similarity_state":"assessed","similarity_score":0.6,"factors":{"event_type":{"status":"informative","score":1},"time_reference":{"status":"indeterminate","score":null},"location_reference":{"status":"indeterminate","score":null},"text_similarity":{"status":"indeterminate","score":null},"spatial_proximity":{"status":"informative","score":0.2}}}}]}
+{
+  "fixture_id": "multiple-candidates",
+  "report_evidence": {
+    "event_type": {
+      "status": "identified",
+      "value": "fire",
+      "candidates": [],
+      "evidence_quotes": [
+        "fire"
+      ]
+    }
+  },
+  "candidates": [
+    {
+      "candidate_incident": {
+        "id": "near",
+        "evidence": {
+          "event_type": {
+            "status": "identified",
+            "value": "fire",
+            "candidates": [],
+            "evidence_quotes": [
+              "fire"
+            ]
+          }
+        },
+        "distance_meters": 100,
+        "search_radius_meters": 1000
+      },
+      "expected_assessment": {
+        "similarity_state": "assessed",
+        "similarity_score": 0.95,
+        "factors": {
+          "event_type": {
+            "status": "informative",
+            "score": 1
+          },
+          "time_reference": {
+            "status": "indeterminate",
+            "score": null
+          },
+          "location_reference": {
+            "status": "indeterminate",
+            "score": null
+          },
+          "text_similarity": {
+            "status": "indeterminate",
+            "score": null
+          },
+          "spatial_proximity": {
+            "status": "informative",
+            "score": 0.9,
+            "reason": "continuous distance-to-search-radius ratio from candidate lookup; no attachment threshold is applied"
+          }
+        }
+      }
+    },
+    {
+      "candidate_incident": {
+        "id": "far",
+        "evidence": {
+          "event_type": {
+            "status": "identified",
+            "value": "fire",
+            "candidates": [],
+            "evidence_quotes": [
+              "fire"
+            ]
+          }
+        },
+        "distance_meters": 800,
+        "search_radius_meters": 1000
+      },
+      "expected_assessment": {
+        "similarity_state": "assessed",
+        "similarity_score": 0.6,
+        "factors": {
+          "event_type": {
+            "status": "informative",
+            "score": 1
+          },
+          "time_reference": {
+            "status": "indeterminate",
+            "score": null
+          },
+          "location_reference": {
+            "status": "indeterminate",
+            "score": null
+          },
+          "text_similarity": {
+            "status": "indeterminate",
+            "score": null
+          },
+          "spatial_proximity": {
+            "status": "informative",
+            "score": 0.2,
+            "reason": "continuous distance-to-search-radius ratio from candidate lookup; no attachment threshold is applied"
+          }
+        }
+      }
+    }
+  ]
+}

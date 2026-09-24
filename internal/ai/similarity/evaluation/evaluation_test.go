@@ -29,14 +29,14 @@ func TestEvaluateReportsFieldLevelSimilarityFailures(t *testing.T) {
 	suite, processor := loadTestSuite(t)
 	target := suite.Cases[0]
 	provider := similarity.ProviderFunc(func(_ context.Context, _ similarity.ReportEvidence, _ similarity.CandidateIncident) ([]byte, error) {
-		return []byte(`{"contract_version":"signa.ai.same-event-similarity.v1","input_contract_version":"signa.ai.report-extraction.v0","candidate_incident_id":"incident-1","similarity_state":"assessed","similarity_score":0.25,"scoring_method":"arithmetic_mean_of_informative_factors.v1","factors":[{"name":"event_type","status":"informative","score":0.25,"reason":"test"},{"name":"time_reference","status":"informative","score":0.25,"reason":"test"},{"name":"location_reference","status":"informative","score":0.25,"reason":"test"},{"name":"text_similarity","status":"informative","score":0.25,"reason":"test"},{"name":"spatial_proximity","status":"informative","score":0.25,"reason":"test"}],"supporting_reasons":[],"limiting_reasons":[]}`), nil
+		return []byte(`{"contract_version":"signa.ai.same-event-similarity.v1","input_contract_version":"signa.ai.report-extraction.v0","candidate_incident_id":"incident-1","similarity_state":"assessed","similarity_score":0.25,"scoring_method":"arithmetic_mean_of_informative_factors.v1","factors":[{"name":"event_type","status":"informative","score":0.25,"reason":"test"},{"name":"time_reference","status":"informative","score":0.25,"reason":"test"},{"name":"location_reference","status":"informative","score":0.25,"reason":"test"},{"name":"text_similarity","status":"informative","score":0.25,"reason":"test"},{"name":"spatial_proximity","status":"informative","score":0.25,"reason":"test"}],"supporting_reasons":["event_type: test","time_reference: test","location_reference: test","text_similarity: test","spatial_proximity: test"],"limiting_reasons":[]}`), nil
 	})
 	report, err := Evaluate(context.Background(), Suite{EvaluationVersion: suite.EvaluationVersion, ContractVersion: suite.ContractVersion, Cases: []Case{target}}, provider, processor.Validator)
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
 	}
 	message := report.String()
-	for _, field := range []string{"similarity_score mismatch", "factor event_type score mismatch"} {
+	for _, field := range []string{"similarity_score mismatch", "factor event_type score mismatch", "factor event_type reason mismatch"} {
 		if !strings.Contains(message, field) {
 			t.Errorf("report = %s, want %q", message, field)
 		}
@@ -57,6 +57,20 @@ func TestEvaluateRejectsInvalidProviderOutputBeforeScoring(t *testing.T) {
 	}
 	if strings.Contains(report.String(), "similarity_score mismatch") {
 		t.Fatalf("invalid output was compared: %s", report)
+	}
+}
+
+func TestProcessorRejectsAssessmentForDifferentCandidate(t *testing.T) {
+	suite, processor := loadTestSuite(t)
+	testCase := suite.Cases[0]
+	provider := similarity.ProviderFunc(func(ctx context.Context, report similarity.ReportEvidence, candidate similarity.CandidateIncident) ([]byte, error) {
+		candidate.ID = "another-incident"
+		return (similarity.RuleBasedScorer{}).Assess(ctx, report, candidate)
+	})
+	processor.Provider = provider
+	_, err := processor.Assess(context.Background(), testCase.Report, testCase.Candidates[0].Input)
+	if err == nil || !strings.Contains(err.Error(), "does not match requested candidate") {
+		t.Fatalf("Processor.Assess() error = %v, want candidate identity mismatch", err)
 	}
 }
 

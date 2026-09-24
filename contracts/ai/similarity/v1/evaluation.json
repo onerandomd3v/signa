@@ -2,7 +2,7 @@
   "evaluation_version": "signa.ai.same-event-evaluation.v1",
   "contract_version": "signa.ai.same-event-similarity.v1",
   "tolerance_version": "signa.ai.same-event-tolerances.v1",
-  "comparison": "exact_scores_and_factor_statuses",
+  "comparison": "exact_scores_statuses_and_selected_reasons",
   "cases": [
     {"case_id":"same-event","fixture":"fixtures/01-same-event.json","categories":["clearly_same_event","compatible_time_location"]},
     {"case_id":"different-type","fixture":"fixtures/02-different-type.json","categories":["different_event_type"]},
