@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:signa:ai-contradiction-assessment:v1",
+  "title": "Signa contradiction assessment v1",
+  "description": "An interpretation signal over explicit evidence. It does not determine truth, confidence, verification, lifecycle, severity, priority, or alerts.",
+  "type": "object",
+  "properties": {
+    "contract_version": {"const": "signa.ai.contradiction-assessment.v1"},
+    "input_contract_version": {"const": "signa.ai.report-extraction.v0"},
+    "left_evidence_id": {"type": "string", "minLength": 1},
+    "right_evidence_id": {"type": "string", "minLength": 1},
+    "contradiction_state": {"enum": ["contradiction_signal", "no_signal", "not_comparable", "indeterminate"]},
+    "recency_order": {"enum": ["left_newer", "right_newer", "same_time", "unknown"]},
+    "factors": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"oneOf": [{"$ref": "#/$defs/event_type_factor"}, {"$ref": "#/$defs/location_factor"}, {"$ref": "#/$defs/claim_factor"}]}}
+  },
+  "required": ["contract_version", "input_contract_version", "left_evidence_id", "right_evidence_id", "contradiction_state", "recency_order", "factors"],
+  "additionalProperties": false,
+  "$defs": {
+    "event_type_factor": {
+      "type": "object", "properties": {"name": {"const": "event_type"}, "outcome": {"enum": ["no_signal", "unknown", "not_comparable"]}, "reason": {"type": "string", "minLength": 1}}, "required": ["name", "outcome", "reason"], "additionalProperties": false
+    },
+    "location_factor": {
+      "type": "object", "properties": {"name": {"const": "location_reference"}, "outcome": {"enum": ["no_signal", "unknown", "not_comparable"]}, "reason": {"type": "string", "minLength": 1}}, "required": ["name", "outcome", "reason"], "additionalProperties": false
+    },
+    "claim_factor": {
+      "type": "object", "properties": {"name": {"const": "claim_state"}, "outcome": {"enum": ["contradiction", "no_signal", "unknown", "not_comparable"]}, "reason": {"type": "string", "minLength": 1}}, "required": ["name", "outcome", "reason"], "additionalProperties": false
+    }
+  }
+}
