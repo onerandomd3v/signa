@@ -16,6 +16,9 @@ describe("AppShell", () => {
 
     expect(screen.getByRole("banner")).toBeTruthy();
     expect(homeLink.getAttribute("href")).toBe("/");
+    expect(
+      screen.getByRole("navigation", { name: "Main navigation" }).textContent,
+    ).toContain("Incidents");
     expect(skipLink.getAttribute("href")).toBe("#main-content");
     expect(main.getAttribute("tabindex")).toBe("-1");
     expect(
