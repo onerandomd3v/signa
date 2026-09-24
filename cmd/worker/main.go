@@ -14,6 +14,7 @@ import (
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/incidents/confidence"
+	"github.com/onerandomd3v/signa/internal/incidents/lifecycle"
 	"github.com/onerandomd3v/signa/internal/logging"
 	"github.com/onerandomd3v/signa/internal/outbox"
 	"github.com/onerandomd3v/signa/internal/worker"
@@ -42,6 +43,10 @@ func run(parent context.Context, logger *slog.Logger) error {
 		return err
 	}
 	coordinationSyncWindow, err := config.LoadCoordinationSyncWindow()
+	if err != nil {
+		return err
+	}
+	lifecyclePolicyConfig, err := config.LoadIncidentLifecyclePolicy()
 	if err != nil {
 		return err
 	}
@@ -130,12 +135,23 @@ func run(parent context.Context, logger *slog.Logger) error {
 		return err
 	}
 	evidencePolicyConsumer := incidents.NewEvidencePolicyConsumer(streamClient, evidencePolicyProcessor, outbox.IncidentEventsStream, "signa-incident-confidence", consumerName, cfg.AIPollInterval).WithLogger(logger)
+	lifecycleProcessor, err := incidents.NewLifecycleProcessor(database, lifecycle.Policy{
+		ResolvingAfter: lifecyclePolicyConfig.ResolvingAfter,
+		ResolvedAfter:  lifecyclePolicyConfig.ResolvedAfter,
+		ExpiredAfter:   lifecyclePolicyConfig.ExpiredAfter,
+	})
+	if err != nil {
+		return err
+	}
+	lifecycleConsumer := incidents.NewLifecycleConsumer(streamClient, lifecycleProcessor, outbox.IncidentEventsStream, "signa-incident-lifecycle", consumerName, cfg.AIPollInterval).WithLogger(logger)
 
-	errCh := make(chan error, 4)
+	errCh := make(chan error, 6)
 	go func() { errCh <- worker.Run(ctx, logger, cfg.WorkerInterval, publisher) }()
 	go func() { errCh <- consumer.Run(ctx) }()
 	go func() { errCh <- incidentConsumer.Run(ctx) }()
 	go func() { errCh <- evidencePolicyConsumer.Run(ctx) }()
+	go func() { errCh <- lifecycleConsumer.Run(ctx) }()
+	go func() { errCh <- lifecycleProcessor.RunSweep(ctx, lifecyclePolicyConfig.SweepInterval, logger) }()
 
 	select {
 	case <-ctx.Done():

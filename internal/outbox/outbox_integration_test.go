@@ -81,6 +81,27 @@ func TestPublisherIntegrationAndConsumerGroupProof(t *testing.T) {
 		t.Fatal("published_at is nil after Redis success")
 	}
 
+	lifecycleEventID := insertOutboxEventType(t, ctx, pool, "incident.status_changed", "incident", `{"incident_id":"safe-incident","previous_status":"OPEN","new_status":"RESOLVING","policy_version":"signa.incident-lifecycle.v1","effective_at":"2026-09-24T12:00:00Z"}`)
+	publisher.stream = ReportEventsStream
+	if err := publisher.PublishCycle(ctx); err != nil {
+		t.Fatalf("publish lifecycle event: %v", err)
+	}
+	publisher.stream = stream
+	incidentMessages, err := redisClient.XRange(ctx, IncidentEventsStream, "-", "+").Result()
+	if err != nil {
+		t.Fatalf("read incident stream: %v", err)
+	}
+	foundLifecycle := false
+	for _, message := range incidentMessages {
+		if message.Values["event_id"] == lifecycleEventID {
+			foundLifecycle = message.Values["event_name"] == IncidentStatusChangedV1
+			break
+		}
+	}
+	if !foundLifecycle {
+		t.Fatalf("lifecycle event %s was not routed to %s", lifecycleEventID, IncidentEventsStream)
+	}
+
 	if err := redisClient.XGroupCreateMkStream(ctx, stream, group, "0").Err(); err != nil {
 		t.Fatalf("create consumer group: %v", err)
 	}
@@ -141,8 +162,13 @@ func TestPublisherIntegrationAndConsumerGroupProof(t *testing.T) {
 
 func insertOutboxEvent(t *testing.T, ctx context.Context, pool *pgxpool.Pool) string {
 	t.Helper()
+	return insertOutboxEventType(t, ctx, pool, "report.created", "report", `{"report_id":"safe-test-payload"}`)
+}
+
+func insertOutboxEventType(t *testing.T, ctx context.Context, pool *pgxpool.Pool, eventType, aggregateType, payload string) string {
+	t.Helper()
 	var id string
-	err := pool.QueryRow(ctx, `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ('report.created', 'report', gen_random_uuid(), '{"report_id":"safe-test-payload"}') RETURNING id::text`).Scan(&id)
+	err := pool.QueryRow(ctx, `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ($1, $2, gen_random_uuid(), $3::jsonb) RETURNING id::text`, eventType, aggregateType, payload).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert outbox event: %v", err)
 	}

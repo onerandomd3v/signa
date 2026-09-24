@@ -67,6 +67,13 @@ type ConfidencePolicy struct {
 	HighMinEvidence         int
 }
 
+type IncidentLifecyclePolicy struct {
+	ResolvingAfter time.Duration
+	ResolvedAfter  time.Duration
+	ExpiredAfter   time.Duration
+	SweepInterval  time.Duration
+}
+
 func LoadIncidentPolicy() (IncidentPolicy, error) {
 	radius, err := requiredFloat("SIGNA_INCIDENT_CANDIDATE_RADIUS_METERS", func(v float64) bool { return v > 0 })
 	if err != nil {
@@ -121,6 +128,29 @@ func LoadCoordinationSyncWindow() (time.Duration, error) {
 		return 0, fmt.Errorf("SIGNA_COORDINATION_SYNC_WINDOW must be a duration of at least one second")
 	}
 	return parsed, nil
+}
+
+func LoadIncidentLifecyclePolicy() (IncidentLifecyclePolicy, error) {
+	resolvingAfter, err := requiredDuration("SIGNA_INCIDENT_RESOLVING_AFTER")
+	if err != nil {
+		return IncidentLifecyclePolicy{}, err
+	}
+	resolvedAfter, err := requiredDuration("SIGNA_INCIDENT_RESOLVED_AFTER")
+	if err != nil {
+		return IncidentLifecyclePolicy{}, err
+	}
+	expiredAfter, err := requiredDuration("SIGNA_INCIDENT_EXPIRED_AFTER")
+	if err != nil {
+		return IncidentLifecyclePolicy{}, err
+	}
+	sweepInterval, err := requiredDuration("SIGNA_INCIDENT_LIFECYCLE_SWEEP_INTERVAL")
+	if err != nil {
+		return IncidentLifecyclePolicy{}, err
+	}
+	if resolvingAfter >= resolvedAfter || resolvedAfter >= expiredAfter {
+		return IncidentLifecyclePolicy{}, fmt.Errorf("incident lifecycle durations must be strictly increasing")
+	}
+	return IncidentLifecyclePolicy{resolvingAfter, resolvedAfter, expiredAfter, sweepInterval}, nil
 }
 
 func requiredFloat(name string, valid func(float64) bool) (float64, error) {
