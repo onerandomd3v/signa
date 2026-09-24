@@ -22,8 +22,8 @@ func TestVersionedV1EvidenceIndependenceSuite(t *testing.T) {
 	if report.Failed() {
 		t.Fatalf("evidence independence evaluation failed:\n%s", report)
 	}
-	if report.Total != 14 || report.Passed != 14 {
-		t.Fatalf("evaluation counts = %d total, %d passed; want 14 comparisons, 14 passed", report.Total, report.Passed)
+	if report.Total != 15 || report.Passed != 15 {
+		t.Fatalf("evaluation counts = %d total, %d passed; want 15 comparisons, 15 passed", report.Total, report.Passed)
 	}
 }
 
@@ -44,6 +44,7 @@ func TestVersionedSuiteCoversRequiredCategories(t *testing.T) {
 		"similar_reports_distinct_sources",
 		"incomplete_evidence",
 		"mixed_repetition_and_origin_signals",
+		"unclear_provenance_remains_unknown",
 	}
 	seen := map[string]bool{}
 	for _, testCase := range suite.Cases {

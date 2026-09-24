@@ -18,6 +18,7 @@
     {"case_id":"duplicate-text-same-source","fixture":"fixtures/11-duplicate-text-same-source.json","categories":["duplicate_text_and_same_source"]},
     {"case_id":"similar-distinct-sources","fixture":"fixtures/12-similar-distinct-sources.json","categories":["similar_reports_distinct_sources"]},
     {"case_id":"incomplete-evidence","fixture":"fixtures/13-incomplete-evidence.json","categories":["incomplete_evidence"]},
-    {"case_id":"mixed-signals","fixture":"fixtures/14-mixed-signals.json","categories":["mixed_repetition_and_origin_signals"]}
+    {"case_id":"mixed-signals","fixture":"fixtures/14-mixed-signals.json","categories":["mixed_repetition_and_origin_signals"]},
+    {"case_id":"unclear-provenance","fixture":"fixtures/15-unclear-provenance.json","categories":["unclear_provenance_remains_unknown"]}
   ]
 }
