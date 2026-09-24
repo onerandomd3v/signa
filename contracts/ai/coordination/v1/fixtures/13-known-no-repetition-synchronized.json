@@ -7,7 +7,7 @@
     ]
   },
   "expected": {
-    "coordination_state": "no_signal",
+    "coordination_state": "possible_coordination",
     "factors": {
       "text_similarity": {"outcome": "no_signal", "weight": 0, "pair_count": 1, "known_pair_count": 1, "supporting_pair_count": 0},
       "media_fingerprint": {"outcome": "no_signal", "weight": 0, "pair_count": 1, "known_pair_count": 1, "supporting_pair_count": 0},

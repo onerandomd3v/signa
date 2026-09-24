@@ -202,6 +202,7 @@ func validateAssessment(result Assessment) error {
 	}
 	var timing string
 	repeated := false
+	distinctOrigins := false
 	hasUnknown := false
 	for _, factor := range result.Factors {
 		if !wanted[factor.Name] {
@@ -229,6 +230,9 @@ func validateAssessment(result Assessment) error {
 		if factor.Name != "submission_timing" && factor.Outcome == "unknown" {
 			hasUnknown = true
 		}
+		if factor.Name == "source_origin" && factor.Outcome == "independence_support" {
+			distinctOrigins = true
+		}
 	}
 	if len(wanted) > 0 {
 		return fmt.Errorf("missing required coordination factors: %v", sortedNames(wanted))
@@ -238,7 +242,7 @@ func validateAssessment(result Assessment) error {
 	case "unsynchronized":
 		wantState = "no_signal"
 	case "synchronized":
-		if repeated {
+		if repeated || distinctOrigins {
 			wantState = "possible_coordination"
 		} else if !hasUnknown {
 			wantState = "no_signal"

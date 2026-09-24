@@ -28,6 +28,71 @@ func TestEvaluateConfidenceThresholds(t *testing.T) {
 	}
 }
 
+func TestEvaluateCoordinationSuppressesAdditionalEvidence(t *testing.T) {
+	policy := Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3}
+	evidence := []Evidence{
+		{ID: "a"},
+		{ID: "b", IndependenceState: "independence_supported"},
+		{ID: "c", IndependenceState: "independence_supported"},
+	}
+
+	noSignal, err := EvaluateWithCoordination(policy, evidence[:2], "no_signal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noSignal.ConfidenceState != Corroborated || noSignal.EffectiveIndependentCount != 2 {
+		t.Fatalf("no-signal result = %+v", noSignal)
+	}
+
+	noSignal, err = EvaluateWithCoordination(policy, evidence, "no_signal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noSignal.ConfidenceState != HighConfidence || noSignal.EffectiveIndependentCount != 3 {
+		t.Fatalf("no-signal high result = %+v", noSignal)
+	}
+
+	coordinated, err := EvaluateWithCoordination(policy, evidence, "possible_coordination")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coordinated.ConfidenceState != Emerging || coordinated.EffectiveIndependentCount != 1 || coordinated.RepeatedEvidenceCount != 2 {
+		t.Fatalf("coordinated result = %+v", coordinated)
+	}
+	if coordinated.CoordinationState != "possible_coordination" {
+		t.Fatalf("coordination state = %q", coordinated.CoordinationState)
+	}
+}
+
+func TestEvaluateCoordinationDoesNotDisputeOrChangeSeverity(t *testing.T) {
+	policy := Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3}
+	got, err := EvaluateWithCoordination(policy, []Evidence{
+		{ID: "a", SeverityStatus: "identified", SeverityCandidate: "CRITICAL"},
+		{ID: "b", IndependenceState: "independence_supported", SeverityStatus: "identified", SeverityCandidate: "LOW"},
+	}, "possible_coordination")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ConfidenceState != Emerging || got.ConfidenceState == Disputed || got.Severity == nil || *got.Severity != Critical {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestEvaluateIndeterminateCoordinationDoesNotFabricateIndependence(t *testing.T) {
+	policy := Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3}
+	got, err := EvaluateWithCoordination(policy, []Evidence{
+		{ID: "a"},
+		{ID: "b", IndependenceState: "indeterminate"},
+		{ID: "c", IndependenceState: "no_signal"},
+	}, "indeterminate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ConfidenceState != Emerging || got.EffectiveIndependentCount != 1 {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
 func TestEvaluateSignalsPreserveUncertainty(t *testing.T) {
 	policy := Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3}
 	got, err := Evaluate(policy, []Evidence{

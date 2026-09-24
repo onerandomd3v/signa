@@ -84,6 +84,12 @@ func EvaluateWithCoordination(policy Policy, evidence []Evidence, coordinationSt
 
 		if len(seen) == 1 {
 			result.EffectiveIndependentCount++
+		} else if coordinationState == "possible_coordination" {
+			// A coordination signal makes every additional report part of the
+			// coordinated cluster for this evaluation. Keep only the base
+			// evidence contribution; synchronized reports must not corroborate
+			// an incident merely because their reporter IDs differ.
+			result.RepeatedEvidenceCount++
 		} else {
 			switch item.IndependenceState {
 			case "independence_supported":
