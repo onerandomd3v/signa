@@ -15,10 +15,13 @@ vi.mock("./push", () => ({
   disablePush: vi.fn(),
 }));
 
-import { enablePush, readPushState } from "./push";
+import { enablePush, getVapidPublicKey, readPushState } from "./push";
 
 describe("PushSettings", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getVapidPublicKey).mockReturnValue(undefined);
+  });
   afterEach(() => cleanup());
 
   it("does not prompt automatically and explains missing configuration", async () => {
@@ -48,5 +51,34 @@ describe("PushSettings", () => {
     });
     fireEvent(document, new Event("visibilitychange"));
     await waitFor(() => expect(readPushState).toHaveBeenCalledTimes(2));
+  });
+
+  it("announces pending work and allows retry after a subscription failure", async () => {
+    vi.mocked(getVapidPublicKey).mockReturnValue("public-key");
+    vi.mocked(enablePush)
+      .mockRejectedValueOnce(new Error("subscription failed"))
+      .mockResolvedValueOnce("subscribed");
+    render(<PushSettings />);
+
+    const button = await screen.findByRole("button", {
+      name: "Enable notifications",
+    });
+    fireEvent.click(button);
+    expect(
+      await screen.findByText("Updating notification settings…"),
+    ).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "Couldn’t enable push. Check the browser and public key settings.",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(button);
+    expect(
+      await screen.findByText(
+        "This browser is subscribed. Server delivery is not connected yet.",
+      ),
+    ).toBeTruthy();
+    expect(enablePush).toHaveBeenCalledTimes(2);
   });
 });

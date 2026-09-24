@@ -126,8 +126,13 @@ export function PushSettings() {
         </p>
       </div>
 
-      <p className="text-sm font-medium" role="status" aria-live="polite">
-        {stateLabels[state]}
+      <p
+        className="text-sm font-medium"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {busy ? "Updating notification settings…" : stateLabels[state]}
       </p>
 
       {message && (

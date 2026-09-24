@@ -112,6 +112,61 @@ describe("browser push settings", () => {
     expect(subscribe).not.toHaveBeenCalled();
   });
 
+  it("creates a visible subscription with the public key after opt-in", async () => {
+    const subscribe = vi.fn().mockResolvedValue({ endpoint: "browser-local" });
+    const registration = {
+      pushManager: {
+        getSubscription: vi.fn().mockResolvedValue(null),
+        subscribe,
+      },
+    };
+    const register = vi.fn().mockResolvedValue(registration);
+    setBrowser();
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: { getRegistration: vi.fn(), register },
+    });
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: {
+        permission: "default",
+        requestPermission: vi.fn().mockResolvedValue("granted"),
+      },
+    });
+
+    expect(await enablePush(publicKey)).toBe("subscribed");
+    expect(subscribe).toHaveBeenCalledOnce();
+    expect(subscribe.mock.calls[0][0]).toMatchObject({ userVisibleOnly: true });
+    expect(subscribe.mock.calls[0][0].applicationServerKey).toHaveLength(65);
+  });
+
+  it("surfaces subscription failures so the user can retry", async () => {
+    const subscribe = vi
+      .fn()
+      .mockRejectedValue(new Error("subscription failed"));
+    const register = vi.fn().mockResolvedValue({
+      pushManager: {
+        getSubscription: vi.fn().mockResolvedValue(null),
+        subscribe,
+      },
+    });
+    setBrowser();
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: { getRegistration: vi.fn(), register },
+    });
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: {
+        permission: "granted",
+        requestPermission: vi.fn().mockResolvedValue("granted"),
+      },
+    });
+
+    await expect(enablePush(publicKey)).rejects.toThrow("subscription failed");
+    expect(subscribe).toHaveBeenCalledOnce();
+  });
+
   it("does not register a worker when the user denies permission", async () => {
     setBrowser();
     Object.defineProperty(window, "Notification", {
