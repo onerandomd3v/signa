@@ -134,9 +134,10 @@ func expand(input compactEvidence) (contradiction.Evidence, error) {
 	placeField := extractionField(input.Location)
 	locationState := input.LocationState
 	locationValue := location.Normalization{ContractVersion: location.ContractVersion, InputContractVersion: location.InputContractVersion, LocationState: locationState, SourceLocationReference: placeField, Candidates: []location.Candidate{}}
-	if locationState == "identified" {
+	switch locationState {
+	case "identified":
 		locationValue.Candidates = []location.Candidate{{ReportedText: input.Location, NormalizedText: input.Location, ReferenceKind: "place", Qualifier: nil, EvidenceQuotes: []string{input.Location}}}
-	} else if locationState == "ambiguous" {
+	case "ambiguous":
 		locationValue.SourceLocationReference = extraction.Field{Status: "ambiguous", Value: nil, Candidates: []string{input.Location, input.Location + " (alternate)"}, EvidenceQuotes: []string{input.Location}}
 		locationValue.Candidates = []location.Candidate{{ReportedText: input.Location, NormalizedText: input.Location, ReferenceKind: "place", Qualifier: nil, EvidenceQuotes: []string{input.Location}}, {ReportedText: input.Location + " (alternate)", NormalizedText: input.Location + " (alternate)", ReferenceKind: "place", Qualifier: nil, EvidenceQuotes: []string{input.Location}}}
 	}
