@@ -1,0 +1,18 @@
+{
+  "evaluation_version": "signa.ai.same-event-evaluation.v1",
+  "contract_version": "signa.ai.same-event-similarity.v1",
+  "tolerance_version": "signa.ai.same-event-tolerances.v1",
+  "comparison": "exact_scores_statuses_and_selected_reasons",
+  "cases": [
+    {"case_id":"same-event","fixture":"fixtures/01-same-event.json","categories":["clearly_same_event","compatible_time_location"]},
+    {"case_id":"different-type","fixture":"fixtures/02-different-type.json","categories":["different_event_type"]},
+    {"case_id":"distant-context","fixture":"fixtures/03-distant-context.json","categories":["same_type_distant_context"]},
+    {"case_id":"compatible-context","fixture":"fixtures/04-compatible-context.json","categories":["compatible_time_location"]},
+    {"case_id":"conflicting-time","fixture":"fixtures/05-conflicting-time.json","categories":["conflicting_time"]},
+    {"case_id":"ambiguous-location","fixture":"fixtures/06-ambiguous-location.json","categories":["ambiguous_unknown_location"]},
+    {"case_id":"sparse-evidence","fixture":"fixtures/07-sparse-evidence.json","categories":["sparse_evidence"]},
+    {"case_id":"near-duplicate","fixture":"fixtures/08-near-duplicate.json","categories":["near_duplicate_wording"]},
+    {"case_id":"unrelated-report","fixture":"fixtures/09-unrelated-report.json","categories":["unrelated_report"]},
+    {"case_id":"multiple-candidates","fixture":"fixtures/10-multiple-candidates.json","categories":["multiple_candidates"]}
+  ]
+}
