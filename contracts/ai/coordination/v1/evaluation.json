@@ -1,0 +1,23 @@
+{
+  "evaluation_version": "signa.ai.source-coordination-evaluation.v1",
+  "contract_version": "signa.ai.source-coordination.v1",
+  "tolerance_version": "signa.ai.source-coordination-tolerances.v1",
+  "comparison": "exact_states_outcomes_counts_and_tolerant_weights",
+  "weight_tolerance": 0.000000000001,
+  "config": {"config_version":"signa.ai.source-coordination-config.v1", "synchronization_window_seconds":300},
+  "cases": [
+    {"case_id":"exact-text-synchronized","fixture":"fixtures/01-exact-text-synchronized.json","categories":["exact_duplicate_text","synchronized_submissions"]},
+    {"case_id":"near-text-unsynchronized","fixture":"fixtures/02-near-text-unsynchronized.json","categories":["near_duplicate_text","unsynchronized_submissions"]},
+    {"case_id":"shared-media","fixture":"fixtures/03-shared-media.json","categories":["shared_media_fingerprint","synchronized_submissions"]},
+    {"case_id":"same-origin","fixture":"fixtures/04-same-origin.json","categories":["same_source_origin"]},
+    {"case_id":"distinct-origins-similar-reports","fixture":"fixtures/05-distinct-origins-similar-reports.json","categories":["distinct_source_origins","near_duplicate_text"]},
+    {"case_id":"forwarded-cluster","fixture":"fixtures/06-forwarded-cluster.json","categories":["forwarded_or_reposted_cluster"]},
+    {"case_id":"distinct-unique-unsynchronized","fixture":"fixtures/07-distinct-unique-unsynchronized.json","categories":["unsynchronized_submissions"]},
+    {"case_id":"mixed-duplicate-distinct-origin","fixture":"fixtures/08-mixed-duplicate-distinct-origin.json","categories":["mixed_duplicate_and_distinct_origin"]},
+    {"case_id":"sparse-provenance","fixture":"fixtures/09-sparse-provenance.json","categories":["sparse_or_unknown_provenance"]},
+    {"case_id":"missing-timestamps-repeated","fixture":"fixtures/10-missing-timestamps-repeated.json","categories":["missing_timestamps","repeated_without_timing"]},
+    {"case_id":"repeat-outside-window","fixture":"fixtures/11-repeat-outside-window.json","categories":["repeated_without_timing","unsynchronized_submissions"]},
+    {"case_id":"repeated-three-observations","fixture":"fixtures/12-repeated-three-observations.json","categories":["exact_duplicate_text","several_observations","synchronized_submissions"]},
+    {"case_id":"known-no-repetition-synchronized","fixture":"fixtures/13-known-no-repetition-synchronized.json","categories":["synchronized_submissions","all_known_no_repetition"]}
+  ]
+}
