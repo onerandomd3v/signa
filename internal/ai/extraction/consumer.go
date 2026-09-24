@@ -66,9 +66,6 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return fmt.Errorf("ensure extraction consumer group: %w", err)
 	}
 
-	// This process-local quarantine prevents a validated result with no
-	// approved durable destination from triggering another provider call. The
-	// message intentionally remains pending; no new persistence state is added.
 	blockedMessageIDs := make(map[string]struct{})
 	for {
 		if ctx.Err() != nil {
@@ -101,9 +98,6 @@ func (c *Consumer) Run(ctx context.Context) error {
 			if err := c.processor.Process(ctx, message); err != nil {
 				if errors.Is(err, ErrDurableExtractionDestinationUnresolved) {
 					blockedMessageIDs[message.ID] = struct{}{}
-					if c.logger != nil {
-						c.logger.Warn("report extraction blocked; message remains pending until durable destination is resolved", "stream_message_id", message.ID, "error", err)
-					}
 					continue
 				}
 				if c.logger != nil {
@@ -119,15 +113,14 @@ func (c *Consumer) Run(ctx context.Context) error {
 }
 
 func filterBlockedMessages(messages []StreamMessage, blocked map[string]struct{}) []StreamMessage {
-	if len(messages) == 0 || len(blocked) == 0 {
+	if len(blocked) == 0 {
 		return messages
 	}
 	filtered := make([]StreamMessage, 0, len(messages))
 	for _, message := range messages {
-		if _, ok := blocked[message.ID]; ok {
-			continue
+		if _, ok := blocked[message.ID]; !ok {
+			filtered = append(filtered, message)
 		}
-		filtered = append(filtered, message)
 	}
 	return filtered
 }

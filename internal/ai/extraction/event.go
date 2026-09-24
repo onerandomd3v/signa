@@ -8,6 +8,7 @@ import (
 )
 
 const ReportCreatedV1 = "report.created.v1"
+const ReportAIProcessedV1 = "report.ai_processed.v1"
 
 type StreamMessage struct {
 	ID     string
@@ -20,38 +21,52 @@ type ReportCreatedEvent struct {
 }
 
 func ParseReportCreated(fields map[string]any) (ReportCreatedEvent, error) {
-	eventID, err := stringField(fields, "event_id")
+	event, err := ParseReportEvent(fields)
 	if err != nil {
 		return ReportCreatedEvent{}, err
+	}
+	if event.Name != ReportCreatedV1 {
+		return ReportCreatedEvent{}, fmt.Errorf("unsupported stream event %q", event.Name)
+	}
+	return ReportCreatedEvent{EventID: event.ID, ReportID: event.ReportID}, nil
+}
+
+type ReportEvent struct {
+	ID       string
+	Name     string
+	ReportID string
+}
+
+func ParseReportEvent(fields map[string]any) (ReportEvent, error) {
+	eventID, err := stringField(fields, "event_id")
+	if err != nil {
+		return ReportEvent{}, err
 	}
 	eventName, err := stringField(fields, "event_name")
 	if err != nil {
-		return ReportCreatedEvent{}, err
-	}
-	if eventName != ReportCreatedV1 {
-		return ReportCreatedEvent{}, fmt.Errorf("unsupported stream event %q", eventName)
+		return ReportEvent{}, err
 	}
 	aggregateType, err := stringField(fields, "aggregate_type")
 	if err != nil {
-		return ReportCreatedEvent{}, err
+		return ReportEvent{}, err
 	}
 	if aggregateType != "report" {
-		return ReportCreatedEvent{}, fmt.Errorf("unexpected aggregate type %q", aggregateType)
+		return ReportEvent{}, fmt.Errorf("unexpected aggregate type %q", aggregateType)
 	}
 	payload, err := stringField(fields, "payload")
 	if err != nil {
-		return ReportCreatedEvent{}, err
+		return ReportEvent{}, err
 	}
 	var body struct {
 		ReportID string `json:"report_id"`
 	}
 	if err := json.Unmarshal([]byte(payload), &body); err != nil {
-		return ReportCreatedEvent{}, fmt.Errorf("decode report.created payload: %w", err)
+		return ReportEvent{}, fmt.Errorf("decode report event payload: %w", err)
 	}
 	if _, err := uuid.Parse(body.ReportID); err != nil {
-		return ReportCreatedEvent{}, fmt.Errorf("invalid report_id: %w", err)
+		return ReportEvent{}, fmt.Errorf("invalid report_id: %w", err)
 	}
-	return ReportCreatedEvent{EventID: eventID, ReportID: body.ReportID}, nil
+	return ReportEvent{ID: eventID, Name: eventName, ReportID: body.ReportID}, nil
 }
 
 func stringField(fields map[string]any, name string) (string, error) {

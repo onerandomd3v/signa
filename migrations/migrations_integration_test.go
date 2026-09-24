@@ -63,6 +63,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	assertTableExists(t, ctx, connection, testSchema, "incidents")
 	assertTableExists(t, ctx, connection, testSchema, "incident_reports")
 	assertTableExists(t, ctx, connection, testSchema, "incident_state_history")
+	assertTableExists(t, ctx, connection, testSchema, "report_ai_extractions")
 
 	t.Run("report columns", func(t *testing.T) {
 		rows, err := connection.Query(ctx, `
@@ -282,9 +283,12 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
+	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	assertTableMissing(t, ctx, connection, testSchema, "reports")
 	assertTableMissing(t, ctx, connection, testSchema, "outbox_events")
 	assertTableMissing(t, ctx, connection, testSchema, "report_media")
+	assertTableMissing(t, ctx, connection, testSchema, "report_ai_extractions")
+	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
@@ -293,6 +297,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	assertTableExists(t, ctx, connection, testSchema, "reports")
 	assertTableExists(t, ctx, connection, testSchema, "outbox_events")
 	assertTableExists(t, ctx, connection, testSchema, "report_media")
+	assertTableExists(t, ctx, connection, testSchema, "report_ai_extractions")
 }
 
 func runGoose(t *testing.T, ctx context.Context, databaseURL string, command string) {

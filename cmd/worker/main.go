@@ -10,7 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/ai/extraction"
+	"github.com/onerandomd3v/signa/internal/ai/similarity"
 	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/logging"
 	"github.com/onerandomd3v/signa/internal/outbox"
 	"github.com/onerandomd3v/signa/internal/worker"
@@ -27,6 +29,10 @@ func main() {
 
 func run(parent context.Context, logger *slog.Logger) error {
 	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	incidentPolicy, err := config.LoadIncidentPolicy()
 	if err != nil {
 		return err
 	}
@@ -73,7 +79,7 @@ func run(parent context.Context, logger *slog.Logger) error {
 	}
 
 	streamClient := extraction.NewRedisStreamClient(redisClient)
-	observer := extraction.LoggingObserver{Logger: logger}
+	observer := extraction.NewDurableStore(database)
 	processor := extraction.NewProcessor(
 		extraction.NewPostgresReportReader(database),
 		provider,
@@ -100,9 +106,21 @@ func run(parent context.Context, logger *slog.Logger) error {
 		cfg.AIPollInterval,
 	).WithLogger(logger)
 
-	errCh := make(chan error, 2)
+	similaritySchema, err := os.ReadFile("contracts/ai/similarity/v1/schema.json")
+	if err != nil {
+		return fmt.Errorf("read similarity schema: %w", err)
+	}
+	similarityValidator, err := similarity.NewValidator(similaritySchema)
+	if err != nil {
+		return err
+	}
+	incidentProcessor := incidents.NewProcessor(database, incidents.NewStore(database), similarity.Processor{Provider: similarity.RuleBasedScorer{}, Validator: similarityValidator}, similarityValidator, incidentPolicy)
+	incidentConsumer := incidents.NewConsumer(streamClient, incidentProcessor, outbox.ReportEventsStream, "signa-incident-processing", consumerName, cfg.AIPollInterval)
+
+	errCh := make(chan error, 3)
 	go func() { errCh <- worker.Run(ctx, logger, cfg.WorkerInterval, publisher) }()
 	go func() { errCh <- consumer.Run(ctx) }()
+	go func() { errCh <- incidentConsumer.Run(ctx) }()
 
 	select {
 	case <-ctx.Done():
