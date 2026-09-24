@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://signa.local/contracts/ai/coordination/v1/schema.json",
+  "title": "Signa source coordination assessment v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "config", "observation_count", "coordination_state", "factors"],
+  "properties": {
+    "contract_version": {"const": "signa.ai.source-coordination.v1"},
+    "config": {
+      "type": "object", "additionalProperties": false,
+      "required": ["config_version", "synchronization_window_seconds"],
+      "properties": {
+        "config_version": {"const": "signa.ai.source-coordination-config.v1"},
+        "synchronization_window_seconds": {"type": "integer", "minimum": 1, "maximum": 9223372036}
+      }
+    },
+    "observation_count": {"type": "integer", "minimum": 2},
+    "coordination_state": {"enum": ["possible_coordination", "no_signal", "indeterminate"]},
+    "factors": {
+      "type": "array", "minItems": 5, "maxItems": 5,
+      "items": {"$ref": "#/$defs/factor"}
+    }
+  },
+  "$defs": {
+    "factor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "outcome", "weight", "pair_count", "known_pair_count", "supporting_pair_count", "reason"],
+      "properties": {
+        "name": {"enum": ["text_similarity", "media_fingerprint", "source_origin", "source_claim", "submission_timing"]},
+        "outcome": {"enum": ["repetition_risk", "independence_support", "no_signal", "unknown", "mixed_signals", "synchronized", "unsynchronized"]},
+        "weight": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "pair_count": {"type": "integer", "minimum": 0},
+        "known_pair_count": {"type": "integer", "minimum": 0},
+        "supporting_pair_count": {"type": "integer", "minimum": 0},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

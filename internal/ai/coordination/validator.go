@@ -1,0 +1,185 @@
+package coordination
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+)
+
+const schemaResource = "https://signa.local/contracts/ai/coordination/v1/schema.json"
+
+type Validator struct{ schema *jsonschema.Schema }
+
+func NewValidator(schemaBytes []byte) (*Validator, error) {
+	var document any
+	if err := json.Unmarshal(schemaBytes, &document); err != nil {
+		return nil, fmt.Errorf("decode coordination schema: %w", err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource(schemaResource, document); err != nil {
+		return nil, fmt.Errorf("register coordination schema: %w", err)
+	}
+	schema, err := compiler.Compile(schemaResource)
+	if err != nil {
+		return nil, fmt.Errorf("compile coordination schema: %w", err)
+	}
+	return &Validator{schema: schema}, nil
+}
+
+func (v *Validator) Validate(data []byte) (Assessment, error) {
+	if v == nil || v.schema == nil {
+		return Assessment{}, fmt.Errorf("coordination validator is not initialized")
+	}
+	var document any
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&document); err != nil {
+		return Assessment{}, fmt.Errorf("decode coordination assessment: %w", err)
+	}
+	if err := v.schema.Validate(document); err != nil {
+		return Assessment{}, fmt.Errorf("validate coordination assessment schema: %w", err)
+	}
+	var result Assessment
+	if err := json.Unmarshal(data, &result); err != nil {
+		return Assessment{}, fmt.Errorf("decode validated coordination assessment: %w", err)
+	}
+	if err := validateAssessment(result); err != nil {
+		return Assessment{}, err
+	}
+	return result, nil
+}
+
+func (v *Validator) ValidateForInput(data []byte, input Input, config Config) (Assessment, error) {
+	assessment, err := v.Validate(data)
+	if err != nil {
+		return Assessment{}, err
+	}
+	if err := ValidateInput(input, config); err != nil {
+		return Assessment{}, err
+	}
+	if assessment.Config != config {
+		return Assessment{}, fmt.Errorf("assessment config does not match supplied configuration")
+	}
+	if assessment.ObservationCount != len(input.Observations) {
+		return Assessment{}, fmt.Errorf("observation_count does not match supplied input")
+	}
+	var document any
+	if err := json.Unmarshal(data, &document); err != nil {
+		return Assessment{}, fmt.Errorf("decode coordination assessment: %w", err)
+	}
+	for _, observation := range input.Observations {
+		private := append([]string(nil), observation.Evidence.MediaFingerprints...)
+		if observation.Evidence.SourceOrigin != nil {
+			private = append(private, *observation.Evidence.SourceOrigin)
+		}
+		for _, value := range private {
+			if value != "" && containsOpaque(document, value) {
+				return Assessment{}, fmt.Errorf("coordination assessment echoes an opaque input identifier")
+			}
+		}
+	}
+	return assessment, nil
+}
+
+func validateAssessment(result Assessment) error {
+	if result.ContractVersion != ContractVersion {
+		return fmt.Errorf("unsupported coordination contract version %q", result.ContractVersion)
+	}
+	if result.Config.ConfigVersion != ConfigVersion || result.Config.SynchronizationWindowSeconds <= 0 {
+		return fmt.Errorf("assessment has invalid configuration")
+	}
+	if result.ObservationCount < 2 {
+		return fmt.Errorf("assessment requires at least two observations")
+	}
+	wanted := map[string]bool{"text_similarity": true, "media_fingerprint": true, "source_origin": true, "source_claim": true, "submission_timing": true}
+	allowed := map[string]map[string]bool{
+		"text_similarity":   {"repetition_risk": true, "no_signal": true, "unknown": true},
+		"media_fingerprint": {"repetition_risk": true, "no_signal": true, "unknown": true, "mixed_signals": true},
+		"source_origin":     {"repetition_risk": true, "independence_support": true, "unknown": true, "mixed_signals": true},
+		"source_claim":      {"repetition_risk": true, "no_signal": true, "unknown": true, "mixed_signals": true},
+		"submission_timing": {"synchronized": true, "unsynchronized": true, "unknown": true},
+	}
+	var timing string
+	repeated := false
+	hasUnknown := false
+	for _, factor := range result.Factors {
+		if !wanted[factor.Name] {
+			return fmt.Errorf("duplicate or unsupported coordination factor %q", factor.Name)
+		}
+		if !allowed[factor.Name][factor.Outcome] {
+			return fmt.Errorf("factor %s cannot have outcome %s", factor.Name, factor.Outcome)
+		}
+		delete(wanted, factor.Name)
+		if factor.PairCount < 0 || factor.KnownPairCount < 0 || factor.SupportingPairCount < 0 || factor.KnownPairCount > factor.PairCount || factor.SupportingPairCount > factor.KnownPairCount {
+			return fmt.Errorf("factor %s has inconsistent pair counts", factor.Name)
+		}
+		if factor.Weight != nil && (*factor.Weight < 0 || *factor.Weight > 1) {
+			return fmt.Errorf("factor %s weight must be in [0,1]", factor.Name)
+		}
+		if factor.Reason == "" {
+			return fmt.Errorf("factor %s requires a reason", factor.Name)
+		}
+		if factor.Name == "submission_timing" {
+			timing = factor.Outcome
+		}
+		if factor.Outcome == "repetition_risk" || factor.Outcome == "mixed_signals" {
+			repeated = true
+		}
+		if factor.Name != "submission_timing" && factor.Outcome == "unknown" {
+			hasUnknown = true
+		}
+	}
+	if len(wanted) > 0 {
+		return fmt.Errorf("missing required coordination factors: %v", sortedNames(wanted))
+	}
+	wantState := "indeterminate"
+	switch timing {
+	case "unsynchronized":
+		wantState = "no_signal"
+	case "synchronized":
+		if repeated {
+			wantState = "possible_coordination"
+		} else if !hasUnknown {
+			wantState = "no_signal"
+		}
+	}
+	if result.CoordinationState != wantState {
+		return fmt.Errorf("coordination_state %q does not match factors; want %q", result.CoordinationState, wantState)
+	}
+	return nil
+}
+
+func containsOpaque(value any, needle string) bool {
+	switch current := value.(type) {
+	case string:
+		if len(needle) < 4 {
+			return current == needle
+		}
+		return strings.Contains(current, needle)
+	case []any:
+		for _, item := range current {
+			if containsOpaque(item, needle) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, item := range current {
+			if containsOpaque(item, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+func sortedNames(values map[string]bool) []string {
+	result := make([]string, 0, len(values))
+	for name := range values {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
+}
