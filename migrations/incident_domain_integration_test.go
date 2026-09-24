@@ -122,6 +122,12 @@ func TestIncidentDomainMigration(t *testing.T) {
 		if !exists {
 			t.Fatal("missing incidents_lifecycle_due_idx")
 		}
+		if err := connection.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'incidents_affected_geometry_gist_idx')`).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if !exists {
+			t.Fatal("missing incidents_affected_geometry_gist_idx")
+		}
 	})
 
 	t.Run("links, nullable report relationship, and history", func(t *testing.T) {
@@ -264,8 +270,10 @@ func TestIncidentDomainMigration(t *testing.T) {
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
+	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	assertTableMissing(t, ctx, connection, "public", "incidents")
 	assertTableExists(t, ctx, connection, "public", "reports")
+	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")

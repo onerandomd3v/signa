@@ -48,6 +48,21 @@ func TestCreateReportAcceptsTextOnly(t *testing.T) {
 	}
 }
 
+func TestCreateReportAcknowledgementOmitsRestrictedLocation(t *testing.T) {
+	ingestor := &fakeIngestor{acknowledgement: reports.Acknowledgement{ReportID: "report-1", SubmittedAt: "2026-09-23T00:00:00Z"}}
+	recorder := performReportRequest(t, ingestor, "key-1", `{"raw_text":"Report with private device location","device_location":{"latitude":6.5244,"longitude":3.3792,"accuracy":12.5}}`)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusAccepted)
+	}
+	response := recorder.Body.String()
+	for _, restrictedField := range []string{"device_location", "claimed_location", "location_accuracy", "6.5244", "3.3792"} {
+		if strings.Contains(response, restrictedField) {
+			t.Fatalf("acknowledgement contains restricted field/value %q: %s", restrictedField, response)
+		}
+	}
+}
+
 func TestCreateReportAcceptsDeviceLocation(t *testing.T) {
 	ingestor := &fakeIngestor{}
 	recorder := performReportRequest(t, ingestor, "key-1", `{"raw_text":"Incident near the junction","device_location":{"latitude":6.5244,"longitude":3.3792,"accuracy":12.5}}`)

@@ -162,22 +162,12 @@ components:
           type: [string, 'null']
         eyewitness_claim:
           type: [string, 'null']
-        claimed_location:
-          anyOf:
-            - $ref: '#/components/schemas/ReportLocation'
-            - type: 'null'
         observed_at:
           type: [string, 'null']
           format: date-time
         submitted_at:
           type: string
           format: date-time
-        device_location:
-          anyOf:
-            - $ref: '#/components/schemas/ReportLocation'
-            - type: 'null'
-        location_accuracy:
-          type: [number, 'null']
         language:
           type: [string, 'null']
         evidence_state:
