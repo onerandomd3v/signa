@@ -1,0 +1,17 @@
+{
+  "evaluation_version": "signa.ai.alert-summarization-evaluation.v1",
+  "contract_version": "signa.ai.alert-summarization.v1",
+  "cases": [
+    {"case_id":"critical-unverified","categories":["high_severity_low_confidence","false_certainty"],"state":{"event_label":"Possible armed robbery","confidence_state":"UNVERIFIED","severity":"CRITICAL","freshness":"CURRENT","lifecycle_status":"OPEN","location":{"status":"APPROXIMATE","label":"near a market junction"}}},
+    {"case_id":"critical-high-confidence","categories":["high_severity_high_confidence"],"state":{"event_label":"Major road crash","confidence_state":"HIGH_CONFIDENCE","severity":"CRITICAL","freshness":"CURRENT","lifecycle_status":"OPEN","location":{"status":"KNOWN","label":"Third Mainland Bridge area"}}},
+    {"case_id":"disputed","categories":["disputed_incident","overclaiming_attempt"],"state":{"event_label":"Reported gunfire","confidence_state":"DISPUTED","severity":"HIGH","freshness":"CURRENT","lifecycle_status":"OPEN","location":{"status":"APPROXIMATE","label":"near Ikeja"}}},
+    {"case_id":"emerging","categories":["emerging_incident"],"state":{"event_label":"Flooding","confidence_state":"EMERGING","severity":"MODERATE","freshness":"CURRENT","lifecycle_status":"OPEN","location":{"status":"APPROXIMATE","label":"around a local market"}}},
+    {"case_id":"corroborated","categories":["corroborated_incident"],"state":{"event_label":"Road closure","confidence_state":"CORROBORATED","severity":"HIGH","freshness":"CURRENT","lifecycle_status":"OPEN","location":{"status":"KNOWN","label":"Ojuelegba"}}},
+    {"case_id":"stale","categories":["stale_context","false_certainty"],"state":{"event_label":"Smoke reported","confidence_state":"CORROBORATED","severity":"HIGH","freshness":"STALE","lifecycle_status":"OPEN","location":{"status":"APPROXIMATE","label":"near a bus stop"}}},
+    {"case_id":"resolving","categories":["resolving_context"],"state":{"event_label":"Traffic obstruction","confidence_state":"CORROBORATED","severity":"MODERATE","freshness":"AGING","lifecycle_status":"RESOLVING","location":{"status":"KNOWN","label":"Lekki Phase 1"}}},
+    {"case_id":"vague-location","categories":["vague_unknown_location"],"state":{"event_label":"Loud bang","confidence_state":"UNVERIFIED","severity":null,"freshness":"CURRENT","lifecycle_status":"UNKNOWN","location":{"status":"UNKNOWN","label":null}}},
+    {"case_id":"missing-freshness","categories":["missing_freshness"],"state":{"event_label":"Power outage","confidence_state":"EMERGING","severity":"LOW","freshness":"UNKNOWN","lifecycle_status":"UNKNOWN","location":{"status":"UNKNOWN","label":null}}},
+    {"case_id":"unknown-severity","categories":["unknown_severity"],"state":{"event_label":"Crowd gathering","confidence_state":"CORROBORATED","severity":null,"freshness":"CURRENT","lifecycle_status":"OPEN","location":{"status":"APPROXIMATE","label":"near a junction"}}},
+    {"case_id":"pidgin-source","categories":["nigerian_pidgin_source_context"],"state":{"event_label":"Possible road blockage","confidence_state":"EMERGING","severity":"MODERATE","freshness":"CURRENT","lifecycle_status":"OPEN","location":{"status":"APPROXIMATE","label":"near Oshodi"}}}
+  ]
+}

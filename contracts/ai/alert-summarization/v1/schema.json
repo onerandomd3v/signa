@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://signa.local/contracts/ai/alert-summarization/v1/schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "title", "message", "uncertainty_qualifier", "confidence_state", "severity", "freshness", "lifecycle_status", "location"],
+  "properties": {
+    "contract_version": {"const": "signa.ai.alert-summarization.v1"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 120},
+    "message": {"type": "string", "minLength": 1, "maxLength": 500},
+    "uncertainty_qualifier": {"type": "string", "minLength": 1, "maxLength": 160},
+    "confidence_state": {"enum": ["UNVERIFIED", "EMERGING", "CORROBORATED", "HIGH_CONFIDENCE", "DISPUTED"]},
+    "severity": {"type": ["string", "null"], "enum": ["LOW", "MODERATE", "HIGH", "CRITICAL", null]},
+    "freshness": {"enum": ["CURRENT", "AGING", "STALE", "UNKNOWN"]},
+    "lifecycle_status": {"enum": ["OPEN", "RESOLVING", "RESOLVED", "EXPIRED", "UNKNOWN"]},
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "label"],
+      "properties": {
+        "status": {"enum": ["KNOWN", "APPROXIMATE", "UNKNOWN"]},
+        "label": {"type": ["string", "null"], "maxLength": 120}
+      }
+    }
+  }
+}
