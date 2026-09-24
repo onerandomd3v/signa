@@ -13,6 +13,7 @@ import (
 	"github.com/onerandomd3v/signa/internal/ai/similarity"
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/incidents"
+	"github.com/onerandomd3v/signa/internal/incidents/confidence"
 	"github.com/onerandomd3v/signa/internal/logging"
 	"github.com/onerandomd3v/signa/internal/outbox"
 	"github.com/onerandomd3v/signa/internal/worker"
@@ -33,6 +34,14 @@ func run(parent context.Context, logger *slog.Logger) error {
 		return err
 	}
 	incidentPolicy, err := config.LoadIncidentPolicy()
+	if err != nil {
+		return err
+	}
+	confidencePolicyConfig, err := config.LoadConfidencePolicy()
+	if err != nil {
+		return err
+	}
+	coordinationSyncWindow, err := config.LoadCoordinationSyncWindow()
 	if err != nil {
 		return err
 	}
@@ -116,11 +125,17 @@ func run(parent context.Context, logger *slog.Logger) error {
 	}
 	incidentProcessor := incidents.NewProcessor(database, incidents.NewStore(database), similarity.Processor{Provider: similarity.RuleBasedScorer{}, Validator: similarityValidator}, similarityValidator, incidentPolicy)
 	incidentConsumer := incidents.NewConsumer(streamClient, incidentProcessor, outbox.ReportEventsStream, "signa-incident-processing", consumerName, cfg.AIPollInterval)
+	evidencePolicyProcessor, err := incidents.NewEvidencePolicyProcessor(database, confidence.Policy{EmergingMin: confidencePolicyConfig.EmergingMinEvidence, CorroboratedMin: confidencePolicyConfig.CorroboratedMinEvidence, HighMin: confidencePolicyConfig.HighMinEvidence}, coordinationSyncWindow)
+	if err != nil {
+		return err
+	}
+	evidencePolicyConsumer := incidents.NewEvidencePolicyConsumer(streamClient, evidencePolicyProcessor, outbox.IncidentEventsStream, "signa-incident-confidence", consumerName, cfg.AIPollInterval).WithLogger(logger)
 
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
 	go func() { errCh <- worker.Run(ctx, logger, cfg.WorkerInterval, publisher) }()
 	go func() { errCh <- consumer.Run(ctx) }()
 	go func() { errCh <- incidentConsumer.Run(ctx) }()
+	go func() { errCh <- evidencePolicyConsumer.Run(ctx) }()
 
 	select {
 	case <-ctx.Done():

@@ -93,6 +93,7 @@ func TestIncidentDomainMigration(t *testing.T) {
 			"incidents.created_at": {"NO", "timestamp with time zone"}, "incidents.updated_at": {"NO", "timestamp with time zone"},
 			"incident_reports.incident_id": {"NO", "uuid"}, "incident_reports.report_id": {"NO", "uuid"},
 			"incident_reports.similarity": {"YES", "double precision"}, "incident_reports.independence_weight": {"YES", "double precision"},
+			"incident_reports.independence_state":  {"YES", "text"},
 			"incident_reports.contradiction_state": {"YES", "text"}, "incident_reports.attached_at": {"NO", "timestamp with time zone"},
 			"incident_state_history.id": {"NO", "uuid"}, "incident_state_history.incident_id": {"NO", "uuid"},
 			"incident_state_history.changed_field": {"NO", "text"}, "incident_state_history.previous_value": {"YES", "text"},
@@ -251,8 +252,10 @@ func TestIncidentDomainMigration(t *testing.T) {
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
+	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	assertTableMissing(t, ctx, connection, "public", "incidents")
 	assertTableExists(t, ctx, connection, "public", "reports")
+	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")

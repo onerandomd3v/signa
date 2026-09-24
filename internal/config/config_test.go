@@ -98,6 +98,35 @@ func TestLoadRejectsInvalidDuration(t *testing.T) {
 	}
 }
 
+func TestLoadConfidencePolicyRequiresStrictlyIncreasingThresholds(t *testing.T) {
+	t.Setenv("SIGNA_CONFIDENCE_EMERGING_MIN_EVIDENCE", "1")
+	t.Setenv("SIGNA_CONFIDENCE_CORROBORATED_MIN_EVIDENCE", "2")
+	t.Setenv("SIGNA_CONFIDENCE_HIGH_MIN_EVIDENCE", "3")
+	got, err := LoadConfidencePolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.EmergingMinEvidence != 1 || got.CorroboratedMinEvidence != 2 || got.HighMinEvidence != 3 {
+		t.Fatalf("policy = %+v", got)
+	}
+	t.Setenv("SIGNA_CONFIDENCE_HIGH_MIN_EVIDENCE", "2")
+	if _, err := LoadConfidencePolicy(); err == nil {
+		t.Fatal("expected non-increasing threshold error")
+	}
+}
+
+func TestLoadCoordinationSyncWindowRequiresExplicitDuration(t *testing.T) {
+	t.Setenv("SIGNA_COORDINATION_SYNC_WINDOW", "5m")
+	got, err := LoadCoordinationSyncWindow()
+	if err != nil || got != 5*time.Minute {
+		t.Fatalf("window = %s, err = %v", got, err)
+	}
+	t.Setenv("SIGNA_COORDINATION_SYNC_WINDOW", "500ms")
+	if _, err := LoadCoordinationSyncWindow(); err == nil {
+		t.Fatal("expected sub-second coordination window error")
+	}
+}
+
 func TestLoadRejectsMalformedRateLimit(t *testing.T) {
 	t.Setenv("SIGNA_REPORT_RATE_PER_MINUTE", "6oops")
 	if _, err := Load(); err == nil {

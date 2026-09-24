@@ -14,16 +14,18 @@ import (
 )
 
 const (
-	ReportEventsStream       = "signa:report-events"
-	IncidentEventsStream     = "signa:incident-events"
-	MediaEventsStream        = "signa:media-events"
-	ReportCreatedV1          = "report.created.v1"
-	MediaAttachedV1          = "report.media_attached.v1"
-	ReportAIProcessedV1      = "report.ai_processed.v1"
-	IncidentCreatedV1        = "incident.created.v1"
-	IncidentReportAttachedV1 = "incident.report_attached.v1"
-	DefaultBatchSize         = 100
-	maxErrorLength           = 1000
+	ReportEventsStream          = "signa:report-events"
+	IncidentEventsStream        = "signa:incident-events"
+	MediaEventsStream           = "signa:media-events"
+	ReportCreatedV1             = "report.created.v1"
+	MediaAttachedV1             = "report.media_attached.v1"
+	ReportAIProcessedV1         = "report.ai_processed.v1"
+	IncidentCreatedV1           = "incident.created.v1"
+	IncidentReportAttachedV1    = "incident.report_attached.v1"
+	IncidentConfidenceChangedV1 = "incident.confidence_changed.v1"
+	IncidentSeverityChangedV1   = "incident.severity_changed.v1"
+	DefaultBatchSize            = 100
+	maxErrorLength              = 1000
 )
 
 type RedisStream interface {
@@ -101,7 +103,7 @@ func (p *Publisher) publishOne(ctx context.Context, attempted map[string]struct{
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	query := `SELECT id::text, event_type, aggregate_type, aggregate_id::text, payload, created_at
-		FROM outbox_events WHERE published_at IS NULL AND event_type IN ('report.created', 'report.media_attached', 'report.ai_processed', 'incident.created', 'incident.report_attached')`
+		FROM outbox_events WHERE published_at IS NULL AND event_type IN ('report.created', 'report.media_attached', 'report.ai_processed', 'incident.created', 'incident.report_attached', 'incident.confidence_changed', 'incident.severity_changed')`
 	args := make([]any, 0, len(attempted))
 	if len(attempted) > 0 {
 		placeholders := make([]string, 0, len(attempted))
@@ -128,7 +130,7 @@ func (p *Publisher) publishOne(ctx context.Context, attempted map[string]struct{
 	if event.EventType == "report.media_attached" && stream == ReportEventsStream {
 		stream = MediaEventsStream
 	}
-	if (event.EventType == "incident.created" || event.EventType == "incident.report_attached") && stream == ReportEventsStream {
+	if (event.EventType == "incident.created" || event.EventType == "incident.report_attached" || event.EventType == "incident.confidence_changed" || event.EventType == "incident.severity_changed") && stream == ReportEventsStream {
 		stream = IncidentEventsStream
 	}
 	_, err = p.redis.XAdd(ctx, &goRedis.XAddArgs{Stream: stream, Values: map[string]any{
@@ -191,11 +193,13 @@ func (p *Publisher) recordFailure(ctx context.Context, tx pgx.Tx, event *Event, 
 
 func MapEvent(event Event) (StreamEvent, error) {
 	eventName := map[string]string{
-		"report.created":           ReportCreatedV1,
-		"report.media_attached":    MediaAttachedV1,
-		"report.ai_processed":      ReportAIProcessedV1,
-		"incident.created":         IncidentCreatedV1,
-		"incident.report_attached": IncidentReportAttachedV1,
+		"report.created":              ReportCreatedV1,
+		"report.media_attached":       MediaAttachedV1,
+		"report.ai_processed":         ReportAIProcessedV1,
+		"incident.created":            IncidentCreatedV1,
+		"incident.report_attached":    IncidentReportAttachedV1,
+		"incident.confidence_changed": IncidentConfidenceChangedV1,
+		"incident.severity_changed":   IncidentSeverityChangedV1,
 	}[event.EventType]
 	if eventName == "" {
 		return StreamEvent{}, fmt.Errorf("unsupported outbox event type %q", event.EventType)
@@ -215,6 +219,10 @@ func eventName(event *Event) string {
 		return IncidentCreatedV1
 	case "incident.report_attached":
 		return IncidentReportAttachedV1
+	case "incident.confidence_changed":
+		return IncidentConfidenceChangedV1
+	case "incident.severity_changed":
+		return IncidentSeverityChangedV1
 	}
 	return event.EventType
 }
