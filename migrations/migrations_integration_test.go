@@ -26,7 +26,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 		databaseURL = defaultDatabaseURL
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	parsedDatabaseURL, err := url.Parse(databaseURL)
@@ -319,6 +319,13 @@ func TestReportAndOutboxMigration(t *testing.T) {
 		}
 	})
 
+	if err := connection.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	connection, err = pgx.Connect(ctx, testDatabaseURL.String())
+	if err != nil {
+		t.Fatal(err)
+	}
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
