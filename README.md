@@ -53,7 +53,7 @@ npm run api:generate
 
 The generated client and types are committed under `apps/web/lib/api/generated/`. Run `npm run api:check` to lint the contract, regenerate the output, and verify that generation produces no diff.
 
-Local frontend settings belong in `apps/web/.env.local`, which is ignored by the root `.gitignore`; never commit local environment files or secrets. No frontend environment variables are needed yet. When a frontend feature introduces configuration, document its variable names and safe placeholders in an appropriate example environment file. Variables exposed to browser code must use Next.js's `NEXT_PUBLIC_` prefix and must never contain secrets.
+Local frontend settings belong in `apps/web/.env.local`, which is ignored by the root `.gitignore`; never commit local environment files or secrets. Copy `apps/web/.env.example` to `apps/web/.env.local` for local development. `NEXT_PUBLIC_API_BASE_URL` is the public Go API origin (defaults to `http://localhost:8080` in development); it is included in browser code and must never contain secrets.
 
 ## Go foundation
 
