@@ -111,6 +111,18 @@ func LoadConfidencePolicy() (ConfidencePolicy, error) {
 	return policy, nil
 }
 
+func LoadCoordinationSyncWindow() (time.Duration, error) {
+	value := os.Getenv("SIGNA_COORDINATION_SYNC_WINDOW")
+	if value == "" {
+		return 0, fmt.Errorf("SIGNA_COORDINATION_SYNC_WINDOW is required for incident processing")
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed < time.Second {
+		return 0, fmt.Errorf("SIGNA_COORDINATION_SYNC_WINDOW must be a duration of at least one second")
+	}
+	return parsed, nil
+}
+
 func requiredFloat(name string, valid func(float64) bool) (float64, error) {
 	value := os.Getenv(name)
 	if value == "" {

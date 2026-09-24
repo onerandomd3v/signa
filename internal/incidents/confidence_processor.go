@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/ai/coordination"
 	"github.com/onerandomd3v/signa/internal/ai/extraction"
 	"github.com/onerandomd3v/signa/internal/ai/independence"
 	"github.com/onerandomd3v/signa/internal/incidents/confidence"
@@ -24,18 +25,22 @@ const (
 )
 
 type EvidencePolicyProcessor struct {
-	pool   *pgxpool.Pool
-	policy confidence.Policy
+	pool                   *pgxpool.Pool
+	policy                 confidence.Policy
+	coordinationSyncWindow time.Duration
 }
 
-func NewEvidencePolicyProcessor(pool *pgxpool.Pool, policy confidence.Policy) (*EvidencePolicyProcessor, error) {
+func NewEvidencePolicyProcessor(pool *pgxpool.Pool, policy confidence.Policy, coordinationSyncWindow time.Duration) (*EvidencePolicyProcessor, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("confidence policy database is required")
 	}
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
-	return &EvidencePolicyProcessor{pool: pool, policy: policy}, nil
+	if coordinationSyncWindow <= 0 {
+		return nil, fmt.Errorf("coordination synchronization window must be greater than zero")
+	}
+	return &EvidencePolicyProcessor{pool: pool, policy: policy, coordinationSyncWindow: coordinationSyncWindow}, nil
 }
 
 func (p *EvidencePolicyProcessor) Process(ctx context.Context, message StreamMessage) error {
@@ -57,11 +62,12 @@ func (p *EvidencePolicyProcessor) Process(ctx context.Context, message StreamMes
 	if err := tx.QueryRow(ctx, `SELECT confidence_state, severity FROM incidents WHERE id = $1 FOR UPDATE`, incidentID).Scan(&previousConfidence, &previousSeverity); err != nil {
 		return fmt.Errorf("lock incident %s for confidence evaluation: %w", incidentID, err)
 	}
-	evidence, err := loadPolicyEvidence(ctx, tx, incidentID)
+	evidence, observations, err := loadPolicyEvidence(ctx, tx, incidentID)
 	if err != nil {
 		return err
 	}
-	result, err := confidence.Evaluate(p.policy, evidence)
+	coordinationState := evaluateCoordination(ctx, observations, p.coordinationSyncWindow)
+	result, err := confidence.EvaluateWithCoordination(p.policy, evidence, coordinationState)
 	if err != nil {
 		return fmt.Errorf("evaluate incident %s evidence: %w", incidentID, err)
 	}
@@ -143,18 +149,18 @@ func parseIncidentEvidenceTrigger(fields map[string]any) (string, bool, error) {
 type policyEvidenceRow struct {
 	ID                 string
 	RawText            string
+	ReporterID         *string
 	ObservedAt         *time.Time
 	SubmittedAt        time.Time
 	Extraction         extraction.Extraction
 	IndependenceState  *string
-	CoordinationState  *string
 	ContradictionState *string
 }
 
-func loadPolicyEvidence(ctx context.Context, tx pgx.Tx, incidentID string) ([]confidence.Evidence, error) {
+func loadPolicyEvidence(ctx context.Context, tx pgx.Tx, incidentID string) ([]confidence.Evidence, []coordination.Observation, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT r.id::text, r.raw_text, r.observed_at, r.submitted_at,
-		       e.result, ir.independence_state, ir.coordination_state, ir.contradiction_state
+		SELECT r.id::text, r.raw_text, r.reporter_id::text, r.observed_at, r.submitted_at,
+		       e.result, ir.independence_state, ir.contradiction_state
 		FROM incident_reports AS ir
 		JOIN reports AS r ON r.id = ir.report_id
 		LEFT JOIN report_ai_extractions AS e
@@ -162,25 +168,25 @@ func loadPolicyEvidence(ctx context.Context, tx pgx.Tx, incidentID string) ([]co
 		WHERE ir.incident_id = $1
 		ORDER BY ir.attached_at, ir.report_id`, incidentID, independence.InputContractVersion)
 	if err != nil {
-		return nil, fmt.Errorf("load incident evidence: %w", err)
+		return nil, nil, fmt.Errorf("load incident evidence: %w", err)
 	}
 	defer rows.Close()
 	items := make([]policyEvidenceRow, 0)
 	for rows.Next() {
 		var item policyEvidenceRow
 		var encoded []byte
-		if err := rows.Scan(&item.ID, &item.RawText, &item.ObservedAt, &item.SubmittedAt, &encoded, &item.IndependenceState, &item.CoordinationState, &item.ContradictionState); err != nil {
-			return nil, fmt.Errorf("scan incident evidence: %w", err)
+		if err := rows.Scan(&item.ID, &item.RawText, &item.ReporterID, &item.ObservedAt, &item.SubmittedAt, &encoded, &item.IndependenceState, &item.ContradictionState); err != nil {
+			return nil, nil, fmt.Errorf("scan incident evidence: %w", err)
 		}
 		if len(encoded) > 0 {
 			if err := json.Unmarshal(encoded, &item.Extraction); err != nil {
-				return nil, fmt.Errorf("decode incident evidence extraction: %w", err)
+				return nil, nil, fmt.Errorf("decode incident evidence extraction: %w", err)
 			}
 		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate incident evidence: %w", err)
+		return nil, nil, fmt.Errorf("iterate incident evidence: %w", err)
 	}
 
 	result := make([]confidence.Evidence, 0, len(items))
@@ -193,28 +199,61 @@ func loadPolicyEvidence(ctx context.Context, tx pgx.Tx, incidentID string) ([]co
 			independenceState = "first_evidence"
 		} else {
 			independenceState = compareToPriorEvidence(ctx, item, observations)
-		}
-		coordinationState := "indeterminate"
-		if item.CoordinationState != nil {
-			coordinationState = *item.CoordinationState
+			if _, err := tx.Exec(ctx, `UPDATE incident_reports SET independence_state = $3 WHERE incident_id = $1 AND report_id = $2 AND independence_state IS NULL`, incidentID, item.ID, independenceState); err != nil {
+				return nil, nil, fmt.Errorf("persist independence state for report %s: %w", item.ID, err)
+			}
 		}
 		contradictionState := "indeterminate"
 		if item.ContradictionState != nil {
 			contradictionState = *item.ContradictionState
 		}
 		result = append(result, confidence.Evidence{
-			ID: item.ID, IndependenceState: independenceState, CoordinationState: coordinationState,
+			ID: item.ID, IndependenceState: independenceState,
 			ContradictionState: contradictionState, SeverityStatus: item.Extraction.SeverityCandidate.Status,
 			SeverityCandidate: valueOf(item.Extraction.SeverityCandidate),
 		})
-		observations = append(observations, independence.Observation{EvidenceID: item.ID, Text: item.RawText, SourceClaim: item.Extraction.SourceClaim})
+		reporterID := ""
+		if item.ReporterID != nil {
+			reporterID = *item.ReporterID
+		}
+		observation := independence.Observation{EvidenceID: item.ID, Text: item.RawText, SourceClaim: item.Extraction.SourceClaim}
+		if reporterID != "" {
+			observation.SourceOrigin = &reporterID
+		}
+		observations = append(observations, observation)
 	}
-	return result, nil
+	return result, buildCoordinationObservations(items, observations), nil
+}
+
+func buildCoordinationObservations(items []policyEvidenceRow, observations []independence.Observation) []coordination.Observation {
+	result := make([]coordination.Observation, 0, len(observations))
+	for index, observation := range observations {
+		stamp := items[index].SubmittedAt.UTC()
+		result = append(result, coordination.Observation{Evidence: observation, SubmittedAt: &stamp})
+	}
+	return result
+}
+
+func evaluateCoordination(ctx context.Context, observations []coordination.Observation, syncWindow time.Duration) string {
+	if len(observations) < 2 || syncWindow < time.Second {
+		return "indeterminate"
+	}
+	seconds := int64(syncWindow / time.Second)
+	config := coordination.Config{ConfigVersion: coordination.ConfigVersion, SynchronizationWindowSeconds: seconds}
+	assessment, err := (coordination.RuleBasedEvaluator{}).Assess(ctx, coordination.Input{Observations: observations}, config)
+	if err != nil {
+		return "indeterminate"
+	}
+	return assessment.CoordinationState
 }
 
 func compareToPriorEvidence(ctx context.Context, item policyEvidenceRow, prior []independence.Observation) string {
 	state := "indeterminate"
 	current := independence.Observation{EvidenceID: item.ID, Text: item.RawText, SourceClaim: item.Extraction.SourceClaim}
+	if item.ReporterID != nil && *item.ReporterID != "" {
+		reporterID := *item.ReporterID
+		current.SourceOrigin = &reporterID
+	}
 	for _, previous := range prior {
 		data, err := (independence.RuleBasedEvaluator{}).Assess(ctx, independence.Input{Target: current, Related: previous})
 		if err != nil {

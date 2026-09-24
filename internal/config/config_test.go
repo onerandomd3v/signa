@@ -115,6 +115,18 @@ func TestLoadConfidencePolicyRequiresStrictlyIncreasingThresholds(t *testing.T) 
 	}
 }
 
+func TestLoadCoordinationSyncWindowRequiresExplicitDuration(t *testing.T) {
+	t.Setenv("SIGNA_COORDINATION_SYNC_WINDOW", "5m")
+	got, err := LoadCoordinationSyncWindow()
+	if err != nil || got != 5*time.Minute {
+		t.Fatalf("window = %s, err = %v", got, err)
+	}
+	t.Setenv("SIGNA_COORDINATION_SYNC_WINDOW", "500ms")
+	if _, err := LoadCoordinationSyncWindow(); err == nil {
+		t.Fatal("expected sub-second coordination window error")
+	}
+}
+
 func TestLoadRejectsMalformedRateLimit(t *testing.T) {
 	t.Setenv("SIGNA_REPORT_RATE_PER_MINUTE", "6oops")
 	if _, err := Load(); err == nil {

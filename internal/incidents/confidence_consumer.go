@@ -3,6 +3,7 @@ package incidents
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/onerandomd3v/signa/internal/ai/extraction"
@@ -15,6 +16,14 @@ type EvidencePolicyConsumer struct {
 	}
 	stream, group, consumer string
 	poll                    time.Duration
+	logger                  *slog.Logger
+}
+
+func (c *EvidencePolicyConsumer) WithLogger(logger *slog.Logger) *EvidencePolicyConsumer {
+	if c != nil {
+		c.logger = logger
+	}
+	return c
 }
 
 func NewEvidencePolicyConsumer(client StreamClient, processor interface {
@@ -64,6 +73,10 @@ func (c *EvidencePolicyConsumer) process(ctx context.Context, messages []StreamM
 		switch name {
 		case IncidentCreatedV1, IncidentReportAttachedV1:
 			if err := c.processor.Process(ctx, message); err != nil {
+				if c.logger != nil {
+					name, _ := streamString(message.Values, "event_name")
+					c.logger.Error("incident confidence evaluation failed; message remains pending", "stream_message_id", message.ID, "event_name", name, "error", err)
+				}
 				continue
 			}
 		case IncidentConfidenceChangedV1, IncidentSeverityChangedV1:

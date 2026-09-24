@@ -32,7 +32,7 @@ func TestEvaluateSignalsPreserveUncertainty(t *testing.T) {
 	policy := Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3}
 	got, err := Evaluate(policy, []Evidence{
 		{ID: "a", SeverityStatus: "identified", SeverityCandidate: "CRITICAL"},
-		{ID: "b", IndependenceState: "mixed_signals", CoordinationState: "possible_coordination", SeverityStatus: "ambiguous", SeverityCandidate: "HIGH"},
+		{ID: "b", IndependenceState: "mixed_signals", SeverityStatus: "ambiguous", SeverityCandidate: "HIGH"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -40,8 +40,12 @@ func TestEvaluateSignalsPreserveUncertainty(t *testing.T) {
 	if got.ConfidenceState != Emerging || got.Severity == nil || *got.Severity != Critical {
 		t.Fatalf("result = %+v", got)
 	}
-	if got.CoordinationState != "possible_coordination" || got.RepeatedEvidenceCount != 1 {
+	if got.RepeatedEvidenceCount != 1 {
 		t.Fatalf("signals = %+v", got)
+	}
+	coordinated, err := EvaluateWithCoordination(policy, []Evidence{{ID: "a"}, {ID: "b", IndependenceState: "repetition_risk"}}, "possible_coordination")
+	if err != nil || coordinated.ConfidenceState != Emerging || coordinated.CoordinationState != "possible_coordination" {
+		t.Fatalf("coordination result = %+v, err = %v", coordinated, err)
 	}
 }
 

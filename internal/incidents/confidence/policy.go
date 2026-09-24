@@ -37,7 +37,6 @@ type Policy struct {
 type Evidence struct {
 	ID                 string
 	IndependenceState  string
-	CoordinationState  string
 	ContradictionState string
 	SeverityStatus     string
 	SeverityCandidate  string
@@ -64,6 +63,10 @@ func (p Policy) Validate() error {
 }
 
 func Evaluate(policy Policy, evidence []Evidence) (Result, error) {
+	return EvaluateWithCoordination(policy, evidence, "indeterminate")
+}
+
+func EvaluateWithCoordination(policy Policy, evidence []Evidence, coordinationState string) (Result, error) {
 	if err := policy.Validate(); err != nil {
 		return Result{}, err
 	}
@@ -81,22 +84,17 @@ func Evaluate(policy Policy, evidence []Evidence) (Result, error) {
 
 		if len(seen) == 1 {
 			result.EffectiveIndependentCount++
-		} else if item.CoordinationState != "possible_coordination" {
+		} else {
 			switch item.IndependenceState {
 			case "independence_supported":
 				result.EffectiveIndependentCount++
 			case "repetition_risk", "mixed_signals", "indeterminate", "", "no_signal":
 				result.RepeatedEvidenceCount++
 			}
-		} else {
-			result.RepeatedEvidenceCount++
 		}
 
 		if item.ContradictionState == "contradiction_signal" {
 			result.ContradictionState = "contradiction_signal"
-		}
-		if item.CoordinationState == "possible_coordination" {
-			result.CoordinationState = "possible_coordination"
 		}
 		if item.SeverityStatus == "identified" {
 			if candidate, ok := parseSeverity(item.SeverityCandidate); ok && severityRank < candidate.rank() {
@@ -106,6 +104,7 @@ func Evaluate(policy Policy, evidence []Evidence) (Result, error) {
 			}
 		}
 	}
+	result.CoordinationState = coordinationState
 
 	switch {
 	case result.ContradictionState == "contradiction_signal":

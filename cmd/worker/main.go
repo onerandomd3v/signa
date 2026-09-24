@@ -41,6 +41,10 @@ func run(parent context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	coordinationSyncWindow, err := config.LoadCoordinationSyncWindow()
+	if err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -121,11 +125,11 @@ func run(parent context.Context, logger *slog.Logger) error {
 	}
 	incidentProcessor := incidents.NewProcessor(database, incidents.NewStore(database), similarity.Processor{Provider: similarity.RuleBasedScorer{}, Validator: similarityValidator}, similarityValidator, incidentPolicy)
 	incidentConsumer := incidents.NewConsumer(streamClient, incidentProcessor, outbox.ReportEventsStream, "signa-incident-processing", consumerName, cfg.AIPollInterval)
-	evidencePolicyProcessor, err := incidents.NewEvidencePolicyProcessor(database, confidence.Policy{EmergingMin: confidencePolicyConfig.EmergingMinEvidence, CorroboratedMin: confidencePolicyConfig.CorroboratedMinEvidence, HighMin: confidencePolicyConfig.HighMinEvidence})
+	evidencePolicyProcessor, err := incidents.NewEvidencePolicyProcessor(database, confidence.Policy{EmergingMin: confidencePolicyConfig.EmergingMinEvidence, CorroboratedMin: confidencePolicyConfig.CorroboratedMinEvidence, HighMin: confidencePolicyConfig.HighMinEvidence}, coordinationSyncWindow)
 	if err != nil {
 		return err
 	}
-	evidencePolicyConsumer := incidents.NewEvidencePolicyConsumer(streamClient, evidencePolicyProcessor, outbox.IncidentEventsStream, "signa-incident-confidence", consumerName, cfg.AIPollInterval)
+	evidencePolicyConsumer := incidents.NewEvidencePolicyConsumer(streamClient, evidencePolicyProcessor, outbox.IncidentEventsStream, "signa-incident-confidence", consumerName, cfg.AIPollInterval).WithLogger(logger)
 
 	errCh := make(chan error, 4)
 	go func() { errCh <- worker.Run(ctx, logger, cfg.WorkerInterval, publisher) }()

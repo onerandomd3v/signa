@@ -31,7 +31,7 @@ func TestEvidencePolicyTransitionsIdempotencyAndPrivacyIntegration(t *testing.T)
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	processor, err := NewEvidencePolicyProcessor(pool, confidence.Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3})
+	processor, err := NewEvidencePolicyProcessor(pool, confidence.Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3}, 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,8 @@ func TestEvidencePolicyTransitionsIdempotencyAndPrivacyIntegration(t *testing.T)
 		t.Fatal(err)
 	}
 	firstReport, firstExtraction := uuid.New(), uuid.New()
-	insertIntegrationReport(t, ctx, pool, firstReport, "private raw first report", nil, nil, nil, time.Now().UTC())
+	firstReporter, secondReporter := uuid.New(), uuid.New()
+	insertConfidenceReport(t, ctx, pool, firstReport, &firstReporter, "private raw first report")
 	insertIntegrationExtraction(t, ctx, pool, firstExtraction, firstReport, confidenceExtraction("LOW"))
 	if _, err := pool.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id) VALUES ($1, $2)`, incidentID, firstReport); err != nil {
 		t.Fatal(err)
@@ -53,9 +54,9 @@ func TestEvidencePolicyTransitionsIdempotencyAndPrivacyIntegration(t *testing.T)
 	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE event_type IN ('incident.confidence_changed', 'incident.severity_changed') AND aggregate_id = $1`, 2, incidentID)
 
 	secondReport, secondExtraction := uuid.New(), uuid.New()
-	insertIntegrationReport(t, ctx, pool, secondReport, "a distinct second report", nil, nil, nil, time.Now().UTC())
+	insertConfidenceReport(t, ctx, pool, secondReport, &secondReporter, "a distinct second report")
 	insertIntegrationExtraction(t, ctx, pool, secondExtraction, secondReport, confidenceExtraction("HIGH"))
-	if _, err := pool.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id, independence_state, coordination_state) VALUES ($1, $2, 'independence_supported', 'no_signal')`, incidentID, secondReport); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id) VALUES ($1, $2)`, incidentID, secondReport); err != nil {
 		t.Fatal(err)
 	}
 	attachedMessage := confidenceMessage(IncidentReportAttachedV1, incidentID)
@@ -65,13 +66,11 @@ func TestEvidencePolicyTransitionsIdempotencyAndPrivacyIntegration(t *testing.T)
 	assertIncidentState(t, ctx, pool, incidentID, "CORROBORATED", "HIGH")
 	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE event_type IN ('incident.confidence_changed', 'incident.severity_changed') AND aggregate_id = $1`, 4, incidentID)
 
-	// An unknown/ambiguous candidate does not clear an existing severity.
-	thirdReport, thirdExtraction := uuid.New(), uuid.New()
-	insertIntegrationReport(t, ctx, pool, thirdReport, "an uncertain report", nil, nil, nil, time.Now().UTC())
-	unknown := confidenceExtraction("")
-	unknown.SeverityCandidate = extraction.Field{Status: "ambiguous", Candidates: []string{"LOW", "CRITICAL"}, EvidenceQuotes: []string{}}
-	insertIntegrationExtraction(t, ctx, pool, thirdExtraction, thirdReport, unknown)
-	if _, err := pool.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id, independence_state) VALUES ($1, $2, 'indeterminate')`, incidentID, thirdReport); err != nil {
+	// A distinct report from the first reporter is not an independent source.
+	sameReporterReport, sameReporterExtraction := uuid.New(), uuid.New()
+	insertConfidenceReport(t, ctx, pool, sameReporterReport, &firstReporter, "a different wording from the first reporter")
+	insertIntegrationExtraction(t, ctx, pool, sameReporterExtraction, sameReporterReport, confidenceExtraction("LOW"))
+	if _, err := pool.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id) VALUES ($1, $2)`, incidentID, sameReporterReport); err != nil {
 		t.Fatal(err)
 	}
 	if err := processor.Process(ctx, attachedMessage); err != nil {
@@ -79,6 +78,33 @@ func TestEvidencePolicyTransitionsIdempotencyAndPrivacyIntegration(t *testing.T)
 	}
 	assertIncidentState(t, ctx, pool, incidentID, "CORROBORATED", "HIGH")
 	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE event_type IN ('incident.confidence_changed', 'incident.severity_changed') AND aggregate_id = $1`, 4, incidentID)
+
+	// An unknown/ambiguous candidate does not clear an existing severity.
+	thirdReport, thirdExtraction := uuid.New(), uuid.New()
+	insertConfidenceReport(t, ctx, pool, thirdReport, nil, "an uncertain report")
+	unknown := confidenceExtraction("")
+	unknown.SeverityCandidate = extraction.Field{Status: "ambiguous", Candidates: []string{"LOW", "CRITICAL"}, EvidenceQuotes: []string{}}
+	insertIntegrationExtraction(t, ctx, pool, thirdExtraction, thirdReport, unknown)
+	if _, err := pool.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id) VALUES ($1, $2)`, incidentID, thirdReport); err != nil {
+		t.Fatal(err)
+	}
+	if err := processor.Process(ctx, attachedMessage); err != nil {
+		t.Fatal(err)
+	}
+	assertIncidentState(t, ctx, pool, incidentID, "CORROBORATED", "HIGH")
+	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE event_type IN ('incident.confidence_changed', 'incident.severity_changed') AND aggregate_id = $1`, 4, incidentID)
+
+	thirdReporter, fourthReport, fourthExtraction := uuid.New(), uuid.New(), uuid.New()
+	insertConfidenceReport(t, ctx, pool, fourthReport, &thirdReporter, "a genuinely independent third report")
+	insertIntegrationExtraction(t, ctx, pool, fourthExtraction, fourthReport, confidenceExtraction("MODERATE"))
+	if _, err := pool.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id) VALUES ($1, $2)`, incidentID, fourthReport); err != nil {
+		t.Fatal(err)
+	}
+	if err := processor.Process(ctx, attachedMessage); err != nil {
+		t.Fatal(err)
+	}
+	assertIncidentState(t, ctx, pool, incidentID, "HIGH_CONFIDENCE", "HIGH")
+	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE event_type IN ('incident.confidence_changed', 'incident.severity_changed') AND aggregate_id = $1`, 5, incidentID)
 
 	// Commit-before-ACK redelivery and concurrent evaluation are no-ops.
 	var wg sync.WaitGroup
@@ -97,7 +123,7 @@ func TestEvidencePolicyTransitionsIdempotencyAndPrivacyIntegration(t *testing.T)
 			t.Fatal(processErr)
 		}
 	}
-	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE event_type IN ('incident.confidence_changed', 'incident.severity_changed') AND aggregate_id = $1`, 4, incidentID)
+	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE event_type IN ('incident.confidence_changed', 'incident.severity_changed') AND aggregate_id = $1`, 5, incidentID)
 
 	var payloads [][]byte
 	rows, err := pool.Query(ctx, `SELECT payload FROM outbox_events WHERE aggregate_id = $1`, incidentID)
@@ -142,7 +168,7 @@ func TestEvidencePolicyRollbackLeavesStateAndEventsUnchangedIntegration(t *testi
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	processor, err := NewEvidencePolicyProcessor(pool, confidence.Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3})
+	processor, err := NewEvidencePolicyProcessor(pool, confidence.Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3}, 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +177,7 @@ func TestEvidencePolicyRollbackLeavesStateAndEventsUnchangedIntegration(t *testi
 		t.Fatal(err)
 	}
 	reportID, extractionID := uuid.New(), uuid.New()
-	insertIntegrationReport(t, ctx, pool, reportID, "rollback private report", nil, nil, nil, time.Now().UTC())
+	insertConfidenceReport(t, ctx, pool, reportID, nil, "rollback private report")
 	insertIntegrationExtraction(t, ctx, pool, extractionID, reportID, confidenceExtraction("CRITICAL"))
 	if _, err := pool.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id) VALUES ($1, $2)`, incidentID, reportID); err != nil {
 		t.Fatal(err)
@@ -180,7 +206,7 @@ func TestEvidencePolicyOutboxRollbackLeavesStateAndHistoryUnchangedIntegration(t
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	processor, err := NewEvidencePolicyProcessor(pool, confidence.Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3})
+	processor, err := NewEvidencePolicyProcessor(pool, confidence.Policy{EmergingMin: 1, CorroboratedMin: 2, HighMin: 3}, 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +215,7 @@ func TestEvidencePolicyOutboxRollbackLeavesStateAndHistoryUnchangedIntegration(t
 		t.Fatal(err)
 	}
 	reportID, extractionID := uuid.New(), uuid.New()
-	insertIntegrationReport(t, ctx, pool, reportID, "outbox rollback report", nil, nil, nil, time.Now().UTC())
+	insertConfidenceReport(t, ctx, pool, reportID, nil, "outbox rollback report")
 	insertIntegrationExtraction(t, ctx, pool, extractionID, reportID, confidenceExtraction("HIGH"))
 	if _, err := pool.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id) VALUES ($1, $2)`, incidentID, reportID); err != nil {
 		t.Fatal(err)
@@ -219,6 +245,13 @@ func confidenceExtraction(severity string) extraction.Extraction {
 		SourceClaim:       extraction.Field{Status: "unknown", Candidates: []string{}, EvidenceQuotes: []string{}},
 		Language:          extraction.Field{Status: "identified", Value: stringPtr("en"), Candidates: []string{}, EvidenceQuotes: []string{}},
 		SeverityCandidate: extraction.Field{Status: "identified", Value: stringPtr(severity), Candidates: []string{}, EvidenceQuotes: []string{}},
+	}
+}
+
+func insertConfidenceReport(t *testing.T, ctx context.Context, pool *pgxpool.Pool, reportID uuid.UUID, reporterID *uuid.UUID, rawText string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `INSERT INTO reports (id, reporter_id, raw_text, submitted_at) VALUES ($1, $2, $3, now())`, reportID, reporterID, rawText); err != nil {
+		t.Fatal(err)
 	}
 }
 
