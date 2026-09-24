@@ -835,6 +835,12 @@ Potential controls:
 - avoid persistent continuous tracking by default;
 - route data should be short-lived unless a clear feature requires retention.
 
+Exact user location used for internal proximity work is kept as a current
+snapshot only; Signa does not create continuous user-location history here.
+The snapshot's `user_id` is an opaque boundary until the future user/auth
+domain owns referential constraints. Exact user and report coordinates remain
+restricted internal data and are omitted from generic public representations.
+
 ---
 
 # 19. Incident Lifecycle

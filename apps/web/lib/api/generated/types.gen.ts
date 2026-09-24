@@ -22,11 +22,8 @@ export type Report = {
     normalized_text?: string | null;
     source_type?: string | null;
     eyewitness_claim?: string | null;
-    claimed_location?: ReportLocation | null;
     observed_at?: string | null;
     submitted_at?: string;
-    device_location?: ReportLocation | null;
-    location_accuracy?: number | null;
     language?: string | null;
     evidence_state?: string | null;
     created_at?: string;

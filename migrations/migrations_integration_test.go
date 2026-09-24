@@ -64,6 +64,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	assertTableExists(t, ctx, connection, testSchema, "incident_reports")
 	assertTableExists(t, ctx, connection, testSchema, "incident_state_history")
 	assertTableExists(t, ctx, connection, testSchema, "report_ai_extractions")
+	assertTableExists(t, ctx, connection, testSchema, "user_locations")
 
 	t.Run("report columns", func(t *testing.T) {
 		rows, err := connection.Query(ctx, `
@@ -210,6 +211,45 @@ func TestReportAndOutboxMigration(t *testing.T) {
 		}
 	})
 
+	t.Run("restricted user location schema and indexes", func(t *testing.T) {
+		var locationType string
+		if err := connection.QueryRow(ctx, `
+			SELECT format_type(a.atttypid, a.atttypmod)
+			FROM pg_attribute AS a
+			JOIN pg_class AS c ON c.oid = a.attrelid
+			JOIN pg_namespace AS n ON n.oid = c.relnamespace
+			WHERE n.nspname = $1 AND c.relname = 'user_locations'
+			  AND a.attname = 'location' AND a.attnum > 0 AND NOT a.attisdropped
+		`, testSchema).Scan(&locationType); err != nil {
+			t.Fatal(err)
+		}
+		if locationType != "geography(Point,4326)" {
+			t.Fatalf("user location type = %q, want geography(Point,4326)", locationType)
+		}
+		rows, err := connection.Query(ctx, `
+			SELECT indexname, indexdef
+			FROM pg_indexes
+			WHERE schemaname = $1 AND tablename IN ('user_locations', 'incidents')
+		`, testSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		indexes := map[string]string{}
+		for rows.Next() {
+			var name, definition string
+			if err := rows.Scan(&name, &definition); err != nil {
+				t.Fatal(err)
+			}
+			indexes[name] = strings.ToLower(definition)
+		}
+		for _, name := range []string{"user_locations_location_gist_idx", "incidents_center_point_gist_idx", "incidents_affected_geometry_gist_idx"} {
+			if !strings.Contains(indexes[name], "gist") {
+				t.Errorf("index %q = %q, want GiST index", name, indexes[name])
+			}
+		}
+	})
+
 	t.Run("unpublished outbox record", func(t *testing.T) {
 		rows, err := connection.Query(ctx, `
 			SELECT column_name
@@ -287,10 +327,13 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
+	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	assertTableMissing(t, ctx, connection, testSchema, "reports")
 	assertTableMissing(t, ctx, connection, testSchema, "outbox_events")
 	assertTableMissing(t, ctx, connection, testSchema, "report_media")
 	assertTableMissing(t, ctx, connection, testSchema, "report_ai_extractions")
+	assertTableMissing(t, ctx, connection, testSchema, "user_locations")
+	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
@@ -304,6 +347,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	assertTableExists(t, ctx, connection, testSchema, "outbox_events")
 	assertTableExists(t, ctx, connection, testSchema, "report_media")
 	assertTableExists(t, ctx, connection, testSchema, "report_ai_extractions")
+	assertTableExists(t, ctx, connection, testSchema, "user_locations")
 }
 
 func runGoose(t *testing.T, ctx context.Context, databaseURL string, command string) {
