@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:signa:ai:evidence-independence:v1",
+  "title": "Signa evidence independence assessment v1",
+  "description": "Explainable repetition and source-independence signals only; not truth, confidence, attachment, or alert logic. Opaque origin identifiers and fingerprints are input-only and must not be returned.",
+  "type": "object",
+  "properties": {
+    "contract_version": {"const": "signa.ai.evidence-independence.v1"},
+    "input_contract_version": {"const": "signa.ai.report-extraction.v0"},
+    "independence_state": {"enum": ["independence_supported", "repetition_risk", "mixed_signals", "indeterminate"]},
+    "similarity_method": {"const": "word_set_jaccard.v1"},
+    "near_duplicate_cutoff": {"const": 0.8},
+    "factors": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"$ref": "#/$defs/factor"}},
+    "supporting_reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "limiting_reasons": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "required": ["contract_version", "input_contract_version", "independence_state", "similarity_method", "near_duplicate_cutoff", "factors", "supporting_reasons", "limiting_reasons"],
+  "additionalProperties": false,
+  "$defs": {
+    "factor": {
+      "type": "object",
+      "properties": {
+        "name": {"enum": ["text_similarity", "media_fingerprint", "source_origin", "source_claim"]},
+        "outcome": {"enum": ["repetition_risk", "independence_support", "no_signal", "unknown"]},
+        "score": {"anyOf": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "null"}]},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "required": ["name", "outcome", "score", "reason"],
+      "additionalProperties": false,
+      "allOf": [
+        {"if": {"properties": {"name": {"const": "text_similarity"}}, "required": ["name"]}, "then": {"properties": {"outcome": {"enum": ["repetition_risk", "no_signal", "unknown"]}}}},
+        {"if": {"properties": {"name": {"const": "media_fingerprint"}}, "required": ["name"]}, "then": {"properties": {"outcome": {"enum": ["repetition_risk", "no_signal", "unknown"]}}}},
+        {"if": {"properties": {"name": {"const": "source_origin"}}, "required": ["name"]}, "then": {"properties": {"outcome": {"enum": ["repetition_risk", "independence_support", "unknown"]}}}},
+        {"if": {"properties": {"name": {"const": "source_claim"}}, "required": ["name"]}, "then": {"properties": {"outcome": {"enum": ["repetition_risk", "no_signal", "unknown"]}}}},
+        {"if": {"properties": {"name": {"const": "text_similarity"}, "outcome": {"const": "unknown"}}, "required": ["name", "outcome"]}, "then": {"properties": {"score": {"type": "null"}}}},
+        {"if": {"properties": {"name": {"const": "text_similarity"}, "outcome": {"enum": ["repetition_risk", "no_signal"]}}, "required": ["name", "outcome"]}, "then": {"properties": {"score": {"type": "number"}}}},
+        {"if": {"properties": {"name": {"enum": ["media_fingerprint", "source_origin", "source_claim"]}}, "required": ["name"]}, "then": {"properties": {"score": {"type": "null"}}}}
+      ]
+    }
+  }
+}

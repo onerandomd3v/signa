@@ -1,0 +1,24 @@
+{
+  "evaluation_version": "signa.ai.evidence-independence-evaluation.v1",
+  "contract_version": "signa.ai.evidence-independence.v1",
+  "tolerance_version": "signa.ai.evidence-independence-tolerances.v1",
+  "comparison": "exact_states_outcomes_scores_and_selected_reasons",
+  "near_duplicate_cutoff": 0.8,
+  "cases": [
+    {"case_id":"independent-first-hand","fixture":"fixtures/01-independent-first-hand.json","categories":["independent_first_hand_observations"]},
+    {"case_id":"exact-duplicate-text","fixture":"fixtures/02-exact-duplicate-text.json","categories":["exact_duplicate_text"]},
+    {"case_id":"near-duplicate-text","fixture":"fixtures/03-near-duplicate-text.json","categories":["near_duplicate_reposted_text"]},
+    {"case_id":"duplicate-media","fixture":"fixtures/04-duplicate-media.json","categories":["duplicate_media_fingerprint"]},
+    {"case_id":"different-media","fixture":"fixtures/05-different-media.json","categories":["different_media_fingerprints"]},
+    {"case_id":"same-source","fixture":"fixtures/06-same-source.json","categories":["same_source_origin"]},
+    {"case_id":"distinct-sources","fixture":"fixtures/07-distinct-sources.json","categories":["distinct_source_origins"]},
+    {"case_id":"forwarded-content","fixture":"fixtures/08-forwarded-content.json","categories":["forwarded_content"]},
+    {"case_id":"second-hand-unclear","fixture":"fixtures/09-second-hand-unclear.json","categories":["second_hand_or_unclear_provenance"]},
+    {"case_id":"unknown-provenance","fixture":"fixtures/10-unknown-provenance.json","categories":["unknown_provenance"]},
+    {"case_id":"duplicate-text-same-source","fixture":"fixtures/11-duplicate-text-same-source.json","categories":["duplicate_text_and_same_source"]},
+    {"case_id":"similar-distinct-sources","fixture":"fixtures/12-similar-distinct-sources.json","categories":["similar_reports_distinct_sources"]},
+    {"case_id":"incomplete-evidence","fixture":"fixtures/13-incomplete-evidence.json","categories":["incomplete_evidence"]},
+    {"case_id":"mixed-signals","fixture":"fixtures/14-mixed-signals.json","categories":["mixed_repetition_and_origin_signals"]},
+    {"case_id":"unclear-provenance","fixture":"fixtures/15-unclear-provenance.json","categories":["unclear_provenance_remains_unknown"]}
+  ]
+}
