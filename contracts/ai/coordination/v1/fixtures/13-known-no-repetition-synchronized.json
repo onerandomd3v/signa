@@ -1,0 +1,19 @@
+{
+  "fixture_id": "known-no-repetition-synchronized",
+  "input": {
+    "observations": [
+      {"evidence": {"evidence_id": "e1", "text": "witness saw tree fall", "source_claim": {"status": "identified", "value": "first_hand", "candidates": [], "evidence_quotes": []}, "source_origin": "opaque-origin-alpha", "media_fingerprints": ["opaque-media-alpha"]}, "submitted_at": "2026-09-25T12:00:00Z"},
+      {"evidence": {"evidence_id": "e2", "text": "water pipe burst on road", "source_claim": {"status": "identified", "value": "first_hand", "candidates": [], "evidence_quotes": []}, "source_origin": "opaque-origin-beta", "media_fingerprints": ["opaque-media-beta"]}, "submitted_at": "2026-09-25T12:01:00Z"}
+    ]
+  },
+  "expected": {
+    "coordination_state": "no_signal",
+    "factors": {
+      "text_similarity": {"outcome": "no_signal", "weight": 0, "pair_count": 1, "known_pair_count": 1, "supporting_pair_count": 0},
+      "media_fingerprint": {"outcome": "no_signal", "weight": 0, "pair_count": 1, "known_pair_count": 1, "supporting_pair_count": 0},
+      "source_origin": {"outcome": "independence_support", "weight": 1, "pair_count": 1, "known_pair_count": 1, "supporting_pair_count": 1},
+      "source_claim": {"outcome": "no_signal", "weight": 0, "pair_count": 1, "known_pair_count": 1, "supporting_pair_count": 0},
+      "submission_timing": {"outcome": "synchronized", "weight": 1, "pair_count": 1, "known_pair_count": 1, "supporting_pair_count": 1}
+    }
+  }
+}
