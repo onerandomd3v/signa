@@ -184,8 +184,10 @@ func TestCandidateLookupIntegration(t *testing.T) {
 	})
 
 	runGoose(t, ctx, testDatabaseURL, "down")
+	runGoose(t, ctx, testDatabaseURL, "down")
 	assertIndexMissing(t, ctx, pool, "incidents_center_point_gist_idx")
 	assertTableExists(t, ctx, pool, "incidents")
+	runGoose(t, ctx, testDatabaseURL, "up")
 	runGoose(t, ctx, testDatabaseURL, "up")
 	assertIndexExists(t, ctx, pool, "incidents_center_point_gist_idx")
 }

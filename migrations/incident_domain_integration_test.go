@@ -250,8 +250,10 @@ func TestIncidentDomainMigration(t *testing.T) {
 	// Rolling back only the incident migration must leave the previous report schema healthy.
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	runGoose(t, ctx, testDatabaseURL.String(), "down")
+	runGoose(t, ctx, testDatabaseURL.String(), "down")
 	assertTableMissing(t, ctx, connection, "public", "incidents")
 	assertTableExists(t, ctx, connection, "public", "reports")
+	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")
 	assertTableExists(t, ctx, connection, "public", "incidents")

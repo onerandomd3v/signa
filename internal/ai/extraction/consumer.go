@@ -20,6 +20,12 @@ type StreamClient interface {
 	Ack(context.Context, string, string, string) error
 }
 
+// PendingClaimer lets a replacement consumer reclaim messages left pending by
+// a stopped consumer. Test clients may omit it and use the basic pending read.
+type PendingClaimer interface {
+	ClaimPending(context.Context, string, string, string) ([]StreamMessage, error)
+}
+
 type MessageProcessor interface {
 	Process(context.Context, StreamMessage) error
 }
@@ -66,16 +72,13 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return fmt.Errorf("ensure extraction consumer group: %w", err)
 	}
 
-	// This process-local quarantine prevents a validated result with no
-	// approved durable destination from triggering another provider call. The
-	// message intentionally remains pending; no new persistence state is added.
 	blockedMessageIDs := make(map[string]struct{})
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 
-		messages, err := c.client.Read(ctx, c.stream, c.group, c.consumer, true, 0)
+		messages, err := readPending(ctx, c.client, c.stream, c.group, c.consumer)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -83,51 +86,82 @@ func (c *Consumer) Run(ctx context.Context) error {
 			return fmt.Errorf("read pending extraction messages: %w", err)
 		}
 		messages = filterBlockedMessages(messages, blockedMessageIDs)
-		if len(messages) == 0 {
-			messages, err = c.client.Read(ctx, c.stream, c.group, c.consumer, false, c.pollPeriod)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil
-				}
-				return fmt.Errorf("read new extraction messages: %w", err)
-			}
-			messages = filterBlockedMessages(messages, blockedMessageIDs)
-		}
-
-		for _, message := range messages {
-			if _, blocked := blockedMessageIDs[message.ID]; blocked {
-				continue
-			}
-			if err := c.processor.Process(ctx, message); err != nil {
-				if errors.Is(err, ErrDurableExtractionDestinationUnresolved) {
-					blockedMessageIDs[message.ID] = struct{}{}
-					if c.logger != nil {
-						c.logger.Warn("report extraction blocked; message remains pending until durable destination is resolved", "stream_message_id", message.ID, "error", err)
-					}
+		processMessages := func(batch []StreamMessage) error {
+			for _, message := range batch {
+				if _, blocked := blockedMessageIDs[message.ID]; blocked {
 					continue
 				}
-				if c.logger != nil {
-					c.logger.Error("report extraction failed; message remains pending", "stream_message_id", message.ID, "error", err)
+				if err := c.processor.Process(ctx, message); err != nil {
+					if errors.Is(err, ErrDurableExtractionDestinationUnresolved) {
+						blockedMessageIDs[message.ID] = struct{}{}
+						continue
+					}
+					if c.logger != nil {
+						c.logger.Error("report extraction failed; message remains pending", "stream_message_id", message.ID, "error", err)
+					}
+					if err := wait(ctx, c.pollPeriod); err != nil {
+						return err
+					}
 				}
-				if err := wait(ctx, c.pollPeriod); err != nil {
-					return nil
-				}
-				continue
 			}
+			return nil
+		}
+		if err := processMessages(messages); err != nil {
+			return nil
+		}
+		newMessages, err := c.client.Read(ctx, c.stream, c.group, c.consumer, false, c.pollPeriod)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("read new extraction messages: %w", err)
+		}
+		newMessages = filterBlockedMessages(newMessages, blockedMessageIDs)
+		if err := processMessages(newMessages); err != nil {
+			return nil
 		}
 	}
 }
 
+func readPending(ctx context.Context, client StreamClient, stream, group, consumer string) ([]StreamMessage, error) {
+	messages, err := client.Read(ctx, stream, group, consumer, true, 0)
+	if err != nil {
+		return messages, err
+	}
+	if claimer, ok := client.(PendingClaimer); ok {
+		claimed, claimErr := claimer.ClaimPending(ctx, stream, group, consumer)
+		if claimErr != nil {
+			return nil, claimErr
+		}
+		return MergeMessages(messages, claimed), nil
+	}
+	return messages, nil
+}
+
+func MergeMessages(groups ...[]StreamMessage) []StreamMessage {
+	seen := make(map[string]struct{})
+	merged := make([]StreamMessage, 0)
+	for _, messages := range groups {
+		for _, message := range messages {
+			if _, ok := seen[message.ID]; ok {
+				continue
+			}
+			seen[message.ID] = struct{}{}
+			merged = append(merged, message)
+		}
+	}
+	return merged
+}
+
 func filterBlockedMessages(messages []StreamMessage, blocked map[string]struct{}) []StreamMessage {
-	if len(messages) == 0 || len(blocked) == 0 {
+	if len(blocked) == 0 {
 		return messages
 	}
 	filtered := make([]StreamMessage, 0, len(messages))
 	for _, message := range messages {
-		if _, ok := blocked[message.ID]; ok {
-			continue
+		if _, ok := blocked[message.ID]; !ok {
+			filtered = append(filtered, message)
 		}
-		filtered = append(filtered, message)
 	}
 	return filtered
 }
@@ -201,4 +235,21 @@ func (c *RedisStreamClient) Ack(ctx context.Context, stream, group, messageID st
 		return fmt.Errorf("redis stream client is required")
 	}
 	return c.client.XAck(ctx, stream, group, messageID).Err()
+}
+
+func (c *RedisStreamClient) ClaimPending(ctx context.Context, stream, group, consumer string) ([]StreamMessage, error) {
+	if c == nil || c.client == nil {
+		return nil, fmt.Errorf("redis stream client is required")
+	}
+	messages, _, err := c.client.XAutoClaim(ctx, &goRedis.XAutoClaimArgs{
+		Stream: stream, Group: group, Consumer: consumer, MinIdle: 30 * time.Second, Start: "0", Count: 100,
+	}).Result()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]StreamMessage, 0, len(messages))
+	for _, message := range messages {
+		result = append(result, StreamMessage{ID: message.ID, Values: message.Values})
+	}
+	return result, nil
 }

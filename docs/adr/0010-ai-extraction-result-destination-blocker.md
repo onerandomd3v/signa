@@ -1,20 +1,18 @@
-# 0010 — AI extraction result destination blocker
+# ADR-0010: Durable AI extraction result persistence
 
-**Status:** Blocked pending owner direction
+**Status:** Accepted
 **Scope:** COD-191 structured AI text extraction
 
 ## Context
 
-COD-191 validates a structured extraction from a `report.created.v1` event, but the repository does not yet approve where that result should be durably attached, audited, or published. PostgreSQL is the system of record, while Redis Streams is transport; silently logging a result and acknowledging the stream message would discard application state.
+COD-191 validates a structured extraction from a `report.created.v1` event. PostgreSQL is the system of record, while Redis Streams is transport; silently logging a result and acknowledging the stream message would discard application state.
 
 ## Current boundary
 
-The worker uses `LoggingObserver` only as an explicit boundary. It logs contract metadata without report text or evidence quotes, then returns `ErrDurableExtractionDestinationUnresolved`. The processor therefore does not acknowledge the Redis message, preserving retry visibility while the destination is unresolved. The consumer keeps that pending message in a process-local quarantine so it does not invoke the provider again, while continuing to service other work.
+Validated extraction results are stored in PostgreSQL in `report_ai_extractions`. The table stores the report ID, contract and taxonomy versions, and the schema-validated structured result as JSONB; it deliberately does not duplicate report text. `(report_id, contract_version)` is the idempotency key.
 
-## Owner decision required
+The extraction transaction inserts the durable result and a minimal `report.ai_processed` outbox event containing `report_id`, `extraction_id`, and `contract_version`, then commits before the worker acknowledges Redis. A redelivery first checks the unique durable result and acknowledges without invoking the provider again. A failed transaction is not acknowledged.
 
-The owner must choose and approve the durable result behavior before this blocker can be removed. That decision must define the destination, idempotency key, transaction/ack ordering, and any downstream contract. This issue does not invent a table, event, or service to resolve it.
+`report.ai_processed.v1` remains a report event on the report stream. The incident-processing consumer uses a separate consumer group, loads the authoritative extraction from PostgreSQL, and emits incident-domain events through the transactional outbox.
 
-## Consequence
-
-The default worker intentionally leaves successfully validated extraction messages pending. The process-local quarantine is deliberately not durable; restart behavior remains subject to the future owner decision. Tests may use an in-memory observer to verify the processor boundary, but production ACK/persistence behavior remains blocked until the owner decision is recorded in a follow-up ADR or issue.
+The production worker uses the PostgreSQL-backed observer. `LoggingObserver` remains only as a compatibility test boundary and is not production wiring.

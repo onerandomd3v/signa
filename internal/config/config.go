@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -50,6 +51,74 @@ type Config struct {
 	ObjectStorageBucket       string
 	ObjectStorageAccessKeyID  string
 	ObjectStorageSecret       string
+}
+
+type IncidentPolicy struct {
+	CandidateRadiusMeters  float64
+	CandidateTimeWindow    time.Duration
+	CandidateLimit         int
+	SimilarityThreshold    float64
+	SimilarityWinnerMargin float64
+}
+
+func LoadIncidentPolicy() (IncidentPolicy, error) {
+	radius, err := requiredFloat("SIGNA_INCIDENT_CANDIDATE_RADIUS_METERS", func(v float64) bool { return v > 0 })
+	if err != nil {
+		return IncidentPolicy{}, err
+	}
+	window, err := requiredDuration("SIGNA_INCIDENT_CANDIDATE_TIME_WINDOW")
+	if err != nil {
+		return IncidentPolicy{}, err
+	}
+	limit, err := requiredIntRange("SIGNA_INCIDENT_CANDIDATE_LIMIT", 1, 100)
+	if err != nil {
+		return IncidentPolicy{}, err
+	}
+	threshold, err := requiredFloat("SIGNA_INCIDENT_SIMILARITY_THRESHOLD", func(v float64) bool { return v >= 0 && v <= 1 })
+	if err != nil {
+		return IncidentPolicy{}, err
+	}
+	margin, err := requiredFloat("SIGNA_INCIDENT_SIMILARITY_WINNER_MARGIN", func(v float64) bool { return v >= 0 && v <= 1 })
+	if err != nil {
+		return IncidentPolicy{}, err
+	}
+	return IncidentPolicy{radius, window, limit, threshold, margin}, nil
+}
+
+func requiredFloat(name string, valid func(float64) bool) (float64, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return 0, fmt.Errorf("%s is required for incident processing", name)
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || !valid(parsed) {
+		return 0, fmt.Errorf("%s must be finite and satisfy its configured range", name)
+	}
+	return parsed, nil
+}
+
+func requiredDuration(name string) (time.Duration, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return 0, fmt.Errorf("%s is required for incident processing", name)
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a duration greater than zero", name)
+	}
+	return parsed, nil
+}
+
+func requiredIntRange(name string, min, max int) (int, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return 0, fmt.Errorf("%s is required for incident processing", name)
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < min || parsed > max {
+		return 0, fmt.Errorf("%s must be between %d and %d", name, min, max)
+	}
+	return parsed, nil
 }
 
 // Load reads configuration from environment variables and applies local defaults.
