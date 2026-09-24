@@ -98,6 +98,23 @@ func TestLoadRejectsInvalidDuration(t *testing.T) {
 	}
 }
 
+func TestLoadConfidencePolicyRequiresStrictlyIncreasingThresholds(t *testing.T) {
+	t.Setenv("SIGNA_CONFIDENCE_EMERGING_MIN_EVIDENCE", "1")
+	t.Setenv("SIGNA_CONFIDENCE_CORROBORATED_MIN_EVIDENCE", "2")
+	t.Setenv("SIGNA_CONFIDENCE_HIGH_MIN_EVIDENCE", "3")
+	got, err := LoadConfidencePolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.EmergingMinEvidence != 1 || got.CorroboratedMinEvidence != 2 || got.HighMinEvidence != 3 {
+		t.Fatalf("policy = %+v", got)
+	}
+	t.Setenv("SIGNA_CONFIDENCE_HIGH_MIN_EVIDENCE", "2")
+	if _, err := LoadConfidencePolicy(); err == nil {
+		t.Fatal("expected non-increasing threshold error")
+	}
+}
+
 func TestLoadRejectsMalformedRateLimit(t *testing.T) {
 	t.Setenv("SIGNA_REPORT_RATE_PER_MINUTE", "6oops")
 	if _, err := Load(); err == nil {

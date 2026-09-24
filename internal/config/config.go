@@ -61,6 +61,12 @@ type IncidentPolicy struct {
 	SimilarityWinnerMargin float64
 }
 
+type ConfidencePolicy struct {
+	EmergingMinEvidence     int
+	CorroboratedMinEvidence int
+	HighMinEvidence         int
+}
+
 func LoadIncidentPolicy() (IncidentPolicy, error) {
 	radius, err := requiredFloat("SIGNA_INCIDENT_CANDIDATE_RADIUS_METERS", func(v float64) bool { return v > 0 })
 	if err != nil {
@@ -83,6 +89,26 @@ func LoadIncidentPolicy() (IncidentPolicy, error) {
 		return IncidentPolicy{}, err
 	}
 	return IncidentPolicy{radius, window, limit, threshold, margin}, nil
+}
+
+func LoadConfidencePolicy() (ConfidencePolicy, error) {
+	emerging, err := requiredIntRange("SIGNA_CONFIDENCE_EMERGING_MIN_EVIDENCE", 1, int(^uint(0)>>1))
+	if err != nil {
+		return ConfidencePolicy{}, err
+	}
+	corroborated, err := requiredIntRange("SIGNA_CONFIDENCE_CORROBORATED_MIN_EVIDENCE", 1, int(^uint(0)>>1))
+	if err != nil {
+		return ConfidencePolicy{}, err
+	}
+	high, err := requiredIntRange("SIGNA_CONFIDENCE_HIGH_MIN_EVIDENCE", 1, int(^uint(0)>>1))
+	if err != nil {
+		return ConfidencePolicy{}, err
+	}
+	policy := ConfidencePolicy{EmergingMinEvidence: emerging, CorroboratedMinEvidence: corroborated, HighMinEvidence: high}
+	if emerging >= corroborated || corroborated >= high {
+		return ConfidencePolicy{}, fmt.Errorf("confidence evidence thresholds must be strictly increasing")
+	}
+	return policy, nil
 }
 
 func requiredFloat(name string, valid func(float64) bool) (float64, error) {
