@@ -28,6 +28,20 @@ export function AppShell({ children }: AppShellProps) {
           </span>
           <span>signa</span>
         </Link>
+        <nav aria-label="Main navigation" className="flex items-center gap-1">
+          <Link
+            className="min-h-10 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            href="/incidents"
+          >
+            Incidents
+          </Link>
+          <Link
+            className="min-h-10 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            href="/"
+          >
+            Report
+          </Link>
+        </nav>
       </header>
       <main
         className="flex min-w-0 flex-1 flex-col"
