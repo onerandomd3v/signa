@@ -1,0 +1,15 @@
+{
+  "evaluation_version": "signa.ai.contradiction-evaluation.v1",
+  "contract_version": "signa.ai.contradiction-assessment.v1",
+  "comparison": "exact_state_recency_and_factor_outcomes",
+  "cases": [
+    {"case_id": "road-blocked-vs-open", "fixture": "fixtures/01-road-blocked-vs-open.json", "categories": ["blocked-vs-open", "recent-evidence"]},
+    {"case_id": "activity-ongoing-vs-stopped", "fixture": "fixtures/02-activity-ongoing-vs-stopped.json", "categories": ["ongoing-vs-stopped"]},
+    {"case_id": "compatible-claims", "fixture": "fixtures/03-compatible-claims.json", "categories": ["compatible"]},
+    {"case_id": "older-and-newer-observation", "fixture": "fixtures/04-older-newer-observation.json", "categories": ["older-newer", "recency-order-only"]},
+    {"case_id": "unknown-location", "fixture": "fixtures/05-unknown-location.json", "categories": ["unknown-location", "incomplete"]},
+    {"case_id": "ambiguous-location", "fixture": "fixtures/06-ambiguous-location.json", "categories": ["ambiguous-location"]},
+    {"case_id": "different-location", "fixture": "fixtures/07-different-location.json", "categories": ["distinct-location"]},
+    {"case_id": "different-event-type", "fixture": "fixtures/08-different-event-type.json", "categories": ["distinct-event-type"]}
+  ]
+}
