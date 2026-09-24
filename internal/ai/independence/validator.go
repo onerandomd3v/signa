@@ -49,11 +49,20 @@ func (v *Validator) Validate(data []byte) (Assessment, error) {
 		return Assessment{}, fmt.Errorf("decode validated independence assessment: %w", err)
 	}
 	wanted := map[string]bool{"text_similarity": true, "media_fingerprint": true, "source_origin": true, "source_claim": true}
+	allowedOutcomes := map[string]map[string]bool{
+		"text_similarity":   {"repetition_risk": true, "no_signal": true, "unknown": true},
+		"media_fingerprint": {"repetition_risk": true, "no_signal": true, "unknown": true},
+		"source_origin":     {"repetition_risk": true, "independence_support": true, "unknown": true},
+		"source_claim":      {"repetition_risk": true, "no_signal": true, "unknown": true},
+	}
 	risk, support := false, false
 	expectedSupporting, expectedLimiting := make([]string, 0), make([]string, 0)
 	for _, factor := range result.Factors {
 		if !wanted[factor.Name] {
 			return Assessment{}, fmt.Errorf("independence assessment has duplicate or unsupported factor %q", factor.Name)
+		}
+		if !allowedOutcomes[factor.Name][factor.Outcome] {
+			return Assessment{}, fmt.Errorf("factor %s cannot have outcome %s", factor.Name, factor.Outcome)
 		}
 		delete(wanted, factor.Name)
 		switch factor.Outcome {
