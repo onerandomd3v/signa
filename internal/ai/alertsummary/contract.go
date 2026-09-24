@@ -4,12 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-const ContractVersion = "signa.ai.alert-summarization.v1"
+const (
+	ContractVersion = "signa.ai.alert-summarization.v1"
+	SnapshotVersion = "signa.incident-alert-snapshot.v1"
+)
 
 type ConfidenceState string
 
@@ -21,39 +26,62 @@ const (
 	Disputed       ConfidenceState = "DISPUTED"
 )
 
-type Freshness string
+type FreshnessState string
 
 const (
-	Current          Freshness = "CURRENT"
-	Aging            Freshness = "AGING"
-	Stale            Freshness = "STALE"
-	UnknownFreshness Freshness = "UNKNOWN"
+	Current          FreshnessState = "CURRENT"
+	Aging            FreshnessState = "AGING"
+	Stale            FreshnessState = "STALE"
+	UnknownFreshness FreshnessState = "UNKNOWN"
 )
 
-type Location struct {
+type PublicLocation struct {
 	Status string  `json:"status"`
 	Label  *string `json:"label"`
 }
 
+type Freshness struct {
+	State        FreshnessState `json:"state"`
+	LastSignalAt *time.Time     `json:"last_signal_at"`
+	AgeSeconds   *int64         `json:"age_seconds"`
+}
+
+type PolicyVersions struct {
+	Confidence string `json:"confidence"`
+	Lifecycle  string `json:"lifecycle"`
+}
+
+// State is the authoritative, public-safe incident snapshot supplied to the
+// summarizer. It contains no reporter identity, private coordinates, or truth
+// score. The incident service owns every field in this snapshot.
 type State struct {
-	EventLabel      string          `json:"event_label"`
+	SnapshotVersion string          `json:"snapshot_version"`
+	IncidentID      string          `json:"incident_id"`
+	EventType       string          `json:"event_type"`
 	ConfidenceState ConfidenceState `json:"confidence_state"`
 	Severity        *string         `json:"severity"`
-	Freshness       Freshness       `json:"freshness"`
 	LifecycleStatus string          `json:"lifecycle_status"`
-	Location        Location        `json:"location"`
+	PublicLocation  PublicLocation  `json:"public_location"`
+	Freshness       Freshness       `json:"freshness"`
+	AsOf            time.Time       `json:"as_of"`
+	PolicyVersions  PolicyVersions  `json:"policy_versions"`
 }
 
 type Summary struct {
 	ContractVersion      string          `json:"contract_version"`
+	SnapshotVersion      string          `json:"snapshot_version"`
+	IncidentID           string          `json:"incident_id"`
+	EventType            string          `json:"event_type"`
 	Title                string          `json:"title"`
 	Message              string          `json:"message"`
 	UncertaintyQualifier string          `json:"uncertainty_qualifier"`
 	ConfidenceState      ConfidenceState `json:"confidence_state"`
 	Severity             *string         `json:"severity"`
-	Freshness            Freshness       `json:"freshness"`
 	LifecycleStatus      string          `json:"lifecycle_status"`
-	Location             Location        `json:"location"`
+	PublicLocation       PublicLocation  `json:"public_location"`
+	Freshness            Freshness       `json:"freshness"`
+	AsOf                 time.Time       `json:"as_of"`
+	PolicyVersions       PolicyVersions  `json:"policy_versions"`
 }
 
 type Provider interface {
@@ -76,10 +104,11 @@ func NewValidator(schemaBytes []byte) (*Validator, error) {
 		return nil, fmt.Errorf("decode alert summarization schema: %w", err)
 	}
 	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource("https://signa.local/contracts/ai/alert-summarization/v1/schema.json", document); err != nil {
+	resource := "https://signa.local/contracts/ai/alert-summarization/v1/schema.json"
+	if err := compiler.AddResource(resource, document); err != nil {
 		return nil, fmt.Errorf("register alert summarization schema: %w", err)
 	}
-	schema, err := compiler.Compile("https://signa.local/contracts/ai/alert-summarization/v1/schema.json")
+	schema, err := compiler.Compile(resource)
 	if err != nil {
 		return nil, fmt.Errorf("compile alert summarization schema: %w", err)
 	}
@@ -104,52 +133,116 @@ func (v *Validator) Validate(data []byte) (Summary, error) {
 	return summary, nil
 }
 
-func ValidateBound(state State, summary Summary) error {
-	if summary.ContractVersion != ContractVersion {
-		return fmt.Errorf("contract_version must be %q", ContractVersion)
+func ValidateState(state State) error {
+	if state.SnapshotVersion != SnapshotVersion {
+		return fmt.Errorf("snapshot_version must be %q", SnapshotVersion)
 	}
-	if summary.ConfidenceState != state.ConfidenceState {
-		return fmt.Errorf("provider changed confidence_state from %q to %q", state.ConfidenceState, summary.ConfidenceState)
+	if strings.TrimSpace(state.IncidentID) == "" {
+		return fmt.Errorf("incident_id is required")
 	}
-	if !sameStringPointer(summary.Severity, state.Severity) {
-		return fmt.Errorf("provider changed severity")
+	if strings.TrimSpace(state.EventType) == "" {
+		return fmt.Errorf("event_type is required")
 	}
-	if summary.Freshness != state.Freshness || summary.LifecycleStatus != state.LifecycleStatus || !sameLocation(summary.Location, state.Location) {
-		return fmt.Errorf("provider changed authoritative freshness, lifecycle, or location")
+	if state.AsOf.IsZero() {
+		return fmt.Errorf("as_of is required")
 	}
-	if strings.TrimSpace(summary.UncertaintyQualifier) == "" {
-		return fmt.Errorf("uncertainty_qualifier is required")
+	if state.PolicyVersions.Confidence == "" || state.PolicyVersions.Lifecycle == "" {
+		return fmt.Errorf("applicable confidence and lifecycle policy versions are required")
 	}
-	text := strings.ToLower(summary.Title + " " + summary.Message + " " + summary.UncertaintyQualifier)
-	if state.ConfidenceState == Unverified || state.ConfidenceState == Emerging || state.ConfidenceState == Disputed {
-		for _, word := range []string{"confirmed", "verified", "definitely", "certainly", "fact"} {
-			if strings.Contains(text, word) && !(word == "verified" && strings.Contains(text, "unverified")) {
-				return fmt.Errorf("%s confidence cannot use certainty word %q", state.ConfidenceState, word)
-			}
-		}
+	if err := validateFreshness(state.AsOf, state.Freshness); err != nil {
+		return err
 	}
-	if state.ConfidenceState == Disputed && !strings.Contains(text, "disput") && !strings.Contains(text, "conflict") && !strings.Contains(text, "uncertain") {
-		return fmt.Errorf("disputed summary must mention conflicting or uncertain information")
+	if state.PublicLocation.Status != "KNOWN" && state.PublicLocation.Status != "APPROXIMATE" && state.PublicLocation.Status != "UNKNOWN" {
+		return fmt.Errorf("unsupported public_location status %q", state.PublicLocation.Status)
 	}
-	if state.Freshness != Current || (state.LifecycleStatus != "OPEN" && state.LifecycleStatus != "UNKNOWN") {
-		for _, word := range []string{"ongoing", "happening now", "currently", "right now"} {
-			if strings.Contains(text, word) {
-				return fmt.Errorf("stale/resolving summary cannot imply current activity")
-			}
+	if state.PublicLocation.Status == "UNKNOWN" && state.PublicLocation.Label != nil {
+		return fmt.Errorf("unknown public_location cannot have a label")
+	}
+	return nil
+}
+
+func validateFreshness(asOf time.Time, freshness Freshness) error {
+	switch freshness.State {
+	case Current, Aging, Stale, UnknownFreshness:
+	default:
+		return fmt.Errorf("unsupported freshness state %q", freshness.State)
+	}
+	if freshness.LastSignalAt != nil && freshness.LastSignalAt.After(asOf) {
+		return fmt.Errorf("last_signal_at cannot be after as_of")
+	}
+	if freshness.AgeSeconds != nil && *freshness.AgeSeconds < 0 {
+		return fmt.Errorf("age_seconds cannot be negative")
+	}
+	if freshness.LastSignalAt != nil && freshness.AgeSeconds != nil {
+		want := int64(asOf.Sub(freshness.LastSignalAt.UTC()).Seconds())
+		if want != *freshness.AgeSeconds {
+			return fmt.Errorf("age_seconds does not match as_of and last_signal_at")
 		}
 	}
 	return nil
 }
 
-func sameStringPointer(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
+func ValidateBound(state State, summary Summary) error {
+	if err := ValidateState(state); err != nil {
+		return fmt.Errorf("invalid authoritative snapshot: %w", err)
 	}
-	return *a == *b
+	if summary.ContractVersion != ContractVersion {
+		return fmt.Errorf("contract_version must be %q", ContractVersion)
+	}
+	if summary.SnapshotVersion != state.SnapshotVersion || summary.IncidentID != state.IncidentID || summary.EventType != state.EventType {
+		return fmt.Errorf("provider changed authoritative snapshot identity")
+	}
+	if summary.ConfidenceState != state.ConfidenceState {
+		return fmt.Errorf("provider changed confidence_state from %q to %q", state.ConfidenceState, summary.ConfidenceState)
+	}
+	if !sameStringPointer(summary.Severity, state.Severity) || summary.LifecycleStatus != state.LifecycleStatus || !sameLocation(summary.PublicLocation, state.PublicLocation) || !sameFreshness(summary.Freshness, state.Freshness) || !summary.AsOf.Equal(state.AsOf) || summary.PolicyVersions != state.PolicyVersions {
+		return fmt.Errorf("provider changed authoritative incident state")
+	}
+	if strings.TrimSpace(summary.Title) == "" || strings.TrimSpace(summary.Message) == "" || strings.TrimSpace(summary.UncertaintyQualifier) == "" {
+		return fmt.Errorf("title, message, and uncertainty_qualifier are required")
+	}
+	text := strings.ToLower(summary.Title + " " + summary.Message + " " + summary.UncertaintyQualifier)
+	for _, word := range []string{"confirmed", "verified", "definitely", "certainly"} {
+		if containsWord(text, word) {
+			return fmt.Errorf("summary contains unsupported certainty claim %q", word)
+		}
+	}
+	if state.ConfidenceState == Disputed && !containsWord(text, "disputed") && !strings.Contains(text, "conflict") && !strings.Contains(text, "uncertain") {
+		return fmt.Errorf("disputed summary must mention conflicting or uncertain information")
+	}
+	if state.Freshness.State != Current || (state.LifecycleStatus != "OPEN" && state.LifecycleStatus != "UNKNOWN") {
+		for _, phrase := range []string{"ongoing", "happening now", "currently", "right now"} {
+			if strings.Contains(text, phrase) {
+				return fmt.Errorf("summary cannot imply current activity for stale/resolving/resolved/expired state")
+			}
+		}
+	}
+	if coordinatePattern.MatchString(text) {
+		return fmt.Errorf("summary contains exact coordinates")
+	}
+	return nil
 }
 
-func sameLocation(a, b Location) bool {
+var coordinatePattern = regexp.MustCompile(`(?i)([-+]?\d{1,3}\.\d{3,})\s*[,; ]\s*([-+]?\d{1,3}\.\d{3,})`)
+var wordPattern = regexp.MustCompile(`\b[a-z]+\b`)
+
+func containsWord(text, want string) bool {
+	for _, word := range wordPattern.FindAllString(text, -1) {
+		if word == want {
+			return true
+		}
+	}
+	return false
+}
+func sameStringPointer(a, b *string) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+func sameLocation(a, b PublicLocation) bool {
 	return a.Status == b.Status && sameStringPointer(a.Label, b.Label)
+}
+func sameFreshness(a, b Freshness) bool {
+	return a.State == b.State && sameTimePointer(a.LastSignalAt, b.LastSignalAt) && (a.AgeSeconds == nil) == (b.AgeSeconds == nil) && (a.AgeSeconds == nil || *a.AgeSeconds == *b.AgeSeconds)
+}
+func sameTimePointer(a, b *time.Time) bool {
+	return (a == nil) == (b == nil) && (a == nil || a.Equal(*b))
 }
 
 func Summarize(ctx context.Context, state State, provider Provider, validator *Validator) (Summary, error) {
@@ -158,6 +251,9 @@ func Summarize(ctx context.Context, state State, provider Provider, validator *V
 	}
 	if validator == nil {
 		return Summary{}, fmt.Errorf("alert summary validator is required")
+	}
+	if err := ValidateState(state); err != nil {
+		return Summary{}, err
 	}
 	data, err := provider.Summarize(ctx, state)
 	if err != nil {
