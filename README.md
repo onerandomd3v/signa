@@ -69,6 +69,15 @@ The API listens on `:8080` by default. Check its health with `GET http://localho
 
 Text-first reports are accepted with `POST /reports` using an `Idempotency-Key` header and a JSON body containing non-empty `raw_text`. An optional `device_location` may include latitude, longitude, and non-negative accuracy. The API acknowledges accepted reports before downstream processing; exact device coordinates are not returned.
 
+Environment-file boundaries:
+
+- `.env.example` is the complete local-development/full-stack reference.
+- `apps/web/.env.example` contains frontend/Vercel web variables only.
+- `deploy/env/api.env.example` contains Go API deployment variables.
+- `deploy/env/worker.env.example` contains Go worker deployment variables.
+
+Production secrets must be configured in the deployment platform and must never be committed to the repository.
+
 Optional local configuration can be copied from `.env.example`:
 
 - `SIGNA_API_ADDR` sets the API listen address.
