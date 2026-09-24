@@ -81,6 +81,7 @@ Optional local configuration can be copied from `.env.example`:
 - The incident worker requires `SIGNA_INCIDENT_CANDIDATE_RADIUS_METERS`, `SIGNA_INCIDENT_CANDIDATE_TIME_WINDOW`, `SIGNA_INCIDENT_CANDIDATE_LIMIT`, `SIGNA_INCIDENT_SIMILARITY_THRESHOLD`, and `SIGNA_INCIDENT_SIMILARITY_WINNER_MARGIN`; these have no product-policy defaults and are not required by the API process.
 - The incident worker also requires `SIGNA_CONFIDENCE_EMERGING_MIN_EVIDENCE`, `SIGNA_CONFIDENCE_CORROBORATED_MIN_EVIDENCE`, and `SIGNA_CONFIDENCE_HIGH_MIN_EVIDENCE`; they must be positive and strictly increasing, have no product-policy defaults, and are not required by the API process.
 - The incident worker also requires `SIGNA_COORDINATION_SYNC_WINDOW`, a positive duration of at least one second used by COD-224 source-coordination evaluation; it has no product-policy default and is not required by the API process.
+- The incident worker also requires `SIGNA_INCIDENT_RESOLVING_AFTER`, `SIGNA_INCIDENT_RESOLVED_AFTER`, `SIGNA_INCIDENT_EXPIRED_AFTER`, and `SIGNA_INCIDENT_LIFECYCLE_SWEEP_INTERVAL`; these are positive Go durations, the first three must be strictly increasing, have no product-policy defaults, and are not required by the API process.
 
 Run the worker in another terminal:
 

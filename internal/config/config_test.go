@@ -127,6 +127,33 @@ func TestLoadCoordinationSyncWindowRequiresExplicitDuration(t *testing.T) {
 	}
 }
 
+func TestLoadIncidentLifecyclePolicyRequiresExplicitIncreasingDurations(t *testing.T) {
+	t.Setenv("SIGNA_INCIDENT_RESOLVING_AFTER", "1h")
+	t.Setenv("SIGNA_INCIDENT_RESOLVED_AFTER", "2h")
+	t.Setenv("SIGNA_INCIDENT_EXPIRED_AFTER", "3h")
+	t.Setenv("SIGNA_INCIDENT_LIFECYCLE_SWEEP_INTERVAL", "30s")
+	got, err := LoadIncidentLifecyclePolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ResolvingAfter != time.Hour || got.ResolvedAfter != 2*time.Hour || got.ExpiredAfter != 3*time.Hour || got.SweepInterval != 30*time.Second {
+		t.Fatalf("policy = %+v", got)
+	}
+	t.Setenv("SIGNA_INCIDENT_EXPIRED_AFTER", "2h")
+	if _, err := LoadIncidentLifecyclePolicy(); err == nil {
+		t.Fatal("expected non-increasing lifecycle duration error")
+	}
+}
+
+func TestLoadDoesNotRequireWorkerOnlyLifecyclePolicy(t *testing.T) {
+	for _, name := range []string{"SIGNA_INCIDENT_RESOLVING_AFTER", "SIGNA_INCIDENT_RESOLVED_AFTER", "SIGNA_INCIDENT_EXPIRED_AFTER", "SIGNA_INCIDENT_LIFECYCLE_SWEEP_INTERVAL"} {
+		t.Setenv(name, "")
+	}
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoadRejectsMalformedRateLimit(t *testing.T) {
 	t.Setenv("SIGNA_REPORT_RATE_PER_MINUTE", "6oops")
 	if _, err := Load(); err == nil {

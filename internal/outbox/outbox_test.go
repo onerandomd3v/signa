@@ -43,8 +43,22 @@ func TestMapEventIncidentAndAIEvents(t *testing.T) {
 		"incident.report_attached":    IncidentReportAttachedV1,
 		"incident.confidence_changed": IncidentConfidenceChangedV1,
 		"incident.severity_changed":   IncidentSeverityChangedV1,
+		"incident.status_changed":     IncidentStatusChangedV1,
+		"incident.resolved":           IncidentResolvedV1,
 	} {
 		got, err := MapEvent(Event{ID: "event-3", EventType: eventType, AggregateType: "report", AggregateID: "report-1", Payload: json.RawMessage(`{"report_id":"report-1"}`), CreatedAt: time.Unix(0, 0)})
+		if err != nil || got.EventName != want {
+			t.Fatalf("MapEvent(%q) = %+v, err = %v", eventType, got, err)
+		}
+	}
+}
+
+func TestMapEventLifecycleEventsV1(t *testing.T) {
+	for eventType, want := range map[string]string{
+		"incident.status_changed": IncidentStatusChangedV1,
+		"incident.resolved":       IncidentResolvedV1,
+	} {
+		got, err := MapEvent(Event{ID: "event-lifecycle", EventType: eventType, AggregateType: "incident", AggregateID: "incident-1", Payload: json.RawMessage(`{"incident_id":"incident-1"}`), CreatedAt: time.Unix(0, 0)})
 		if err != nil || got.EventName != want {
 			t.Fatalf("MapEvent(%q) = %+v, err = %v", eventType, got, err)
 		}

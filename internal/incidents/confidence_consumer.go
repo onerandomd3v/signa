@@ -79,7 +79,7 @@ func (c *EvidencePolicyConsumer) process(ctx context.Context, messages []StreamM
 				}
 				continue
 			}
-		case IncidentConfidenceChangedV1, IncidentSeverityChangedV1:
+		case IncidentConfidenceChangedV1, IncidentSeverityChangedV1, IncidentStatusChangedV1, IncidentResolvedV1:
 			// These are outputs of this processor and must not feed it again.
 		default:
 			// Unknown or unrelated events remain pending for inspection.
