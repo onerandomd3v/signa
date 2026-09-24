@@ -2,6 +2,7 @@ package coordination
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -76,6 +77,9 @@ func (v *Validator) ValidateForInput(data []byte, input Input, config Config) (A
 	if err := validateTimingForInput(assessment, input, config, expectedPairCount); err != nil {
 		return Assessment{}, err
 	}
+	if err := validateEvidenceFactorsForInput(assessment, input, config); err != nil {
+		return Assessment{}, err
+	}
 	var document any
 	if err := json.Unmarshal(data, &document); err != nil {
 		return Assessment{}, fmt.Errorf("decode coordination assessment: %w", err)
@@ -92,6 +96,46 @@ func (v *Validator) ValidateForInput(data []byte, input Input, config Config) (A
 		}
 	}
 	return assessment, nil
+}
+
+func validateEvidenceFactorsForInput(assessment Assessment, input Input, config Config) error {
+	// Reuse the COD-199 pairwise evaluator and COD-224 aggregate semantics so
+	// evidence-derived outcomes and weights cannot be asserted by a provider.
+	want, err := (RuleBasedEvaluator{}).Assess(context.Background(), input, config)
+	if err != nil {
+		return fmt.Errorf("recompute evidence-derived coordination factors: %w", err)
+	}
+	for _, name := range []string{"text_similarity", "media_fingerprint", "source_origin", "source_claim"} {
+		gotFactor, wantFactor := findFactor(assessment, name), findFactor(want, name)
+		if gotFactor == nil || wantFactor == nil {
+			return fmt.Errorf("factor %s is missing during evidence comparison", name)
+		}
+		if gotFactor.Outcome != wantFactor.Outcome {
+			return fmt.Errorf("%s outcome mismatch: got %q, want %q", name, gotFactor.Outcome, wantFactor.Outcome)
+		}
+		if gotFactor.PairCount != wantFactor.PairCount {
+			return fmt.Errorf("%s pair_count mismatch: got %d, want %d", name, gotFactor.PairCount, wantFactor.PairCount)
+		}
+		if gotFactor.KnownPairCount != wantFactor.KnownPairCount {
+			return fmt.Errorf("%s known_pair_count mismatch: got %d, want %d", name, gotFactor.KnownPairCount, wantFactor.KnownPairCount)
+		}
+		if gotFactor.SupportingPairCount != wantFactor.SupportingPairCount {
+			return fmt.Errorf("%s supporting_pair_count mismatch: got %d, want %d", name, gotFactor.SupportingPairCount, wantFactor.SupportingPairCount)
+		}
+		if !sameOptionalWeight(gotFactor.Weight, wantFactor.Weight) {
+			return fmt.Errorf("%s weight mismatch: got %s, want %s", name, formatWeight(gotFactor.Weight), formatWeight(wantFactor.Weight))
+		}
+	}
+	return nil
+}
+
+func findFactor(assessment Assessment, name string) *Factor {
+	for i := range assessment.Factors {
+		if assessment.Factors[i].Name == name {
+			return &assessment.Factors[i]
+		}
+	}
+	return nil
 }
 
 func validateTimingForInput(assessment Assessment, input Input, config Config, pairCount int) error {
