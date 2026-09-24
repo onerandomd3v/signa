@@ -14,6 +14,8 @@ const stateLabels: Record<PushState, string> = {
   checking: "Checking browser support…",
   unsupported: "Push notifications are unavailable in this browser or context.",
   "not-requested": "Notifications are off. Permission hasn’t been requested.",
+  "default-subscribed":
+    "Permission hasn’t been granted. A push subscription remains in this browser.",
   denied: "Notifications are blocked in this browser.",
   "denied-subscribed":
     "Permission is blocked, but a push subscription remains in this browser.",
@@ -160,7 +162,9 @@ export function PushSettings() {
             Enable notifications
           </Button>
         )}
-        {(state === "subscribed" || state === "denied-subscribed") && (
+        {(state === "subscribed" ||
+          state === "denied-subscribed" ||
+          state === "default-subscribed") && (
           <Button
             disabled={busy}
             onClick={handleDisable}

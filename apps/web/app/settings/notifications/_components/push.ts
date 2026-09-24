@@ -2,6 +2,7 @@ export type PushState =
   | "checking"
   | "unsupported"
   | "not-requested"
+  | "default-subscribed"
   | "denied"
   | "denied-subscribed"
   | "granted"
@@ -50,8 +51,10 @@ export async function readPushState(): Promise<PushState> {
   if (Notification.permission === "denied") {
     return subscription ? "denied-subscribed" : "denied";
   }
-  if (subscription) return "subscribed";
-  return Notification.permission === "granted" ? "granted" : "not-requested";
+  if (Notification.permission === "default") {
+    return subscription ? "default-subscribed" : "not-requested";
+  }
+  return subscription ? "subscribed" : "granted";
 }
 
 export async function enablePush(publicKey: string): Promise<PushState> {
@@ -89,5 +92,12 @@ export async function disablePush(): Promise<PushState> {
 
   // Unsubscribing removes this browser's push endpoint; it does not revoke
   // Notification permission or remove an endpoint saved by a server.
-  return Notification.permission === "denied" ? "denied" : "granted";
+  switch (Notification.permission) {
+    case "granted":
+      return "granted";
+    case "denied":
+      return "denied";
+    default:
+      return "not-requested";
+  }
 }

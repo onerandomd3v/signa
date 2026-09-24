@@ -74,7 +74,19 @@ describe("browser push settings", () => {
     expect(Notification.requestPermission).not.toHaveBeenCalled();
   });
 
-  it("keeps cleanup available if permission is revoked while subscribed", async () => {
+  it("reports default permission accurately when a subscription remains", async () => {
+    const getSubscription = vi.fn().mockResolvedValue({ unsubscribe: vi.fn() });
+    setBrowser({
+      permission: "default",
+      registration: {
+        pushManager: { getSubscription } as unknown as PushManager,
+      },
+    });
+
+    expect(await readPushState()).toBe("default-subscribed");
+  });
+
+  it("keeps cleanup available if permission is denied while subscribed", async () => {
     const getSubscription = vi.fn().mockResolvedValue({ unsubscribe: vi.fn() });
     setBrowser({
       permission: "denied",
@@ -198,4 +210,27 @@ describe("browser push settings", () => {
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(unregister).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["default", "not-requested"],
+    ["denied", "denied"],
+    ["granted", "granted"],
+  ] as const)(
+    "preserves %s permission after removing its browser subscription",
+    async (permission, expectedState) => {
+      const unsubscribe = vi.fn().mockResolvedValue(true);
+      setBrowser({
+        permission,
+        registration: {
+          pushManager: {
+            getSubscription: vi.fn().mockResolvedValue({ unsubscribe }),
+          } as unknown as PushManager,
+        },
+      });
+
+      expect(await disablePush()).toBe(expectedState);
+      expect(unsubscribe).toHaveBeenCalledOnce();
+      expect(Notification.permission).toBe(permission);
+    },
+  );
 });
