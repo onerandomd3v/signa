@@ -55,10 +55,6 @@ func TestValidateBoundRejectsEachUnsafeViolationIndividually(t *testing.T) {
 		{"policy version mismatch", func(s *alertsummary.Summary) { s.PolicyVersions.Confidence = "other-policy" }},
 		{"confirmed claim", func(s *alertsummary.Summary) { s.Message = "This incident is confirmed." }},
 		{"verified claim", func(s *alertsummary.Summary) { s.Message = "This incident is verified." }},
-		{"disputed as fact", func(s *alertsummary.Summary) {
-			s.ConfidenceState = alertsummary.Disputed
-			s.Message = "This is a fact."
-		}},
 		{"exact coordinates", func(s *alertsummary.Summary) { s.Message = "Reported at 6.524379, 3.379206." }},
 	}
 	for _, tc := range tests {
@@ -69,6 +65,37 @@ func TestValidateBoundRejectsEachUnsafeViolationIndividually(t *testing.T) {
 				t.Fatalf("ValidateBound accepted %s", tc.name)
 			}
 		})
+	}
+}
+
+func TestValidateBoundRejectsUnsupportedAssurancesIndividually(t *testing.T) {
+	state := validState()
+	for _, phrase := range []string{"The road is safe now.", "There is no danger.", "There is no immediate danger.", "There is no risk.", "There is nothing to worry about."} {
+		t.Run(phrase, func(t *testing.T) {
+			candidate := alertsummary.RenderDeterministic(state)
+			candidate.Message = phrase
+			if err := alertsummary.ValidateBound(state, candidate); err == nil {
+				t.Fatalf("accepted unsupported assurance %q", phrase)
+			}
+		})
+	}
+}
+
+func TestDisputedAsFactIsRejectedWithMatchingAuthoritativeConfidence(t *testing.T) {
+	state := validState()
+	state.ConfidenceState = alertsummary.Disputed
+	candidate := alertsummary.RenderDeterministic(state)
+	candidate.Message = "This incident is a fact."
+	if err := alertsummary.ValidateBound(state, candidate); err == nil {
+		t.Fatal("accepted disputed incident stated as fact")
+	}
+}
+
+func TestValidateStateRejectsExactCoordinatesInPublicLocation(t *testing.T) {
+	state := validState()
+	state.PublicLocation.Label = stringPointer("6.524379, 3.379206")
+	if err := alertsummary.ValidateState(state); err == nil {
+		t.Fatal("accepted exact coordinates in public_location.label")
 	}
 }
 
@@ -109,6 +136,44 @@ func TestValidateStateRejectsTimestampAgeMismatch(t *testing.T) {
 	state.Freshness.AgeSeconds = &age
 	if err := alertsummary.ValidateState(state); err == nil {
 		t.Fatal("accepted inconsistent freshness age")
+	}
+}
+
+func TestValidateStateRequiresConsistentKnownFreshness(t *testing.T) {
+	state := validState()
+	state.Freshness.LastSignalAt = nil
+	if err := alertsummary.ValidateState(state); err == nil {
+		t.Fatal("accepted CURRENT freshness without last_signal_at")
+	}
+	state = validState()
+	state.Freshness.AgeSeconds = nil
+	if err := alertsummary.ValidateState(state); err == nil {
+		t.Fatal("accepted CURRENT freshness without age_seconds")
+	}
+	state = validState()
+	state.Freshness.State = alertsummary.UnknownFreshness
+	if err := alertsummary.ValidateState(state); err == nil {
+		t.Fatal("accepted UNKNOWN freshness with known timestamps")
+	}
+}
+
+func TestValidateStateAcceptsUnknownFreshnessWithoutTimestamps(t *testing.T) {
+	state := validState()
+	state.Freshness = alertsummary.Freshness{State: alertsummary.UnknownFreshness}
+	if err := alertsummary.ValidateState(state); err != nil {
+		t.Fatalf("rejected unknown freshness: %v", err)
+	}
+}
+
+func TestValidateStatePreservesCanonicalUnknownEventType(t *testing.T) {
+	state := validState()
+	state.EventType = alertsummary.EventTypeUnknown
+	if err := alertsummary.ValidateState(state); err != nil {
+		t.Fatalf("rejected canonical unknown event type: %v", err)
+	}
+	state.EventType = "unknown event"
+	if err := alertsummary.ValidateState(state); err == nil {
+		t.Fatal("accepted non-canonical event type")
 	}
 }
 

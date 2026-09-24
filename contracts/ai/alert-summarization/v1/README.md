@@ -4,6 +4,8 @@
 
 The input snapshot supplies only public-safe/generalized location context, canonical `event_type`, structured freshness (`last_signal_at`, `age_seconds`), `as_of`, and applicable policy versions. Exact reporter coordinates, identity, internal scores, and provider confidence are not part of this contract. Supplied timestamps and ages must agree. The output repeats the authoritative state so consumers can validate that wording and metadata refer to the same snapshot.
 
+Canonical event types are lowercase taxonomy identifiers. `unknown` means no supported event classification is available; `other` means a discernible event outside the taxonomy. The snapshot version remains `signa.incident-alert-snapshot.v1`.
+
 Required safety behavior:
 
 - `UNVERIFIED`, `EMERGING`, and `DISPUTED` wording remains explicitly qualified.

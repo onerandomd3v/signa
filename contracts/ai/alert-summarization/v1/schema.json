@@ -8,7 +8,7 @@
     "contract_version": {"const": "signa.ai.alert-summarization.v1"},
     "snapshot_version": {"const": "signa.incident-alert-snapshot.v1"},
     "incident_id": {"type": "string", "minLength": 1, "maxLength": 128},
-    "event_type": {"type": "string", "minLength": 1, "maxLength": 120},
+    "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "minLength": 1, "maxLength": 120},
     "title": {"type": "string", "minLength": 1, "maxLength": 120},
     "message": {"type": "string", "minLength": 1, "maxLength": 500},
     "uncertainty_qualifier": {"type": "string", "minLength": 1, "maxLength": 160},

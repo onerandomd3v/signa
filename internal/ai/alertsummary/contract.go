@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	ContractVersion = "signa.ai.alert-summarization.v1"
-	SnapshotVersion = "signa.incident-alert-snapshot.v1"
+	ContractVersion  = "signa.ai.alert-summarization.v1"
+	SnapshotVersion  = "signa.incident-alert-snapshot.v1"
+	EventTypeUnknown = "unknown"
+	EventTypeOther   = "other"
 )
 
 type ConfidenceState string
@@ -143,6 +145,9 @@ func ValidateState(state State) error {
 	if strings.TrimSpace(state.EventType) == "" {
 		return fmt.Errorf("event_type is required")
 	}
+	if strings.ContainsAny(state.EventType, " \t\r\n") {
+		return fmt.Errorf("event_type must be a canonical identifier")
+	}
 	if state.AsOf.IsZero() {
 		return fmt.Errorf("as_of is required")
 	}
@@ -157,6 +162,9 @@ func ValidateState(state State) error {
 	}
 	if state.PublicLocation.Status == "UNKNOWN" && state.PublicLocation.Label != nil {
 		return fmt.Errorf("unknown public_location cannot have a label")
+	}
+	if state.PublicLocation.Label != nil && coordinatePattern.MatchString(strings.ToLower(*state.PublicLocation.Label)) {
+		return fmt.Errorf("public_location.label cannot contain exact coordinates")
 	}
 	return nil
 }
@@ -178,6 +186,13 @@ func validateFreshness(asOf time.Time, freshness Freshness) error {
 		if want != *freshness.AgeSeconds {
 			return fmt.Errorf("age_seconds does not match as_of and last_signal_at")
 		}
+	}
+	if freshness.State == UnknownFreshness {
+		if freshness.LastSignalAt != nil || freshness.AgeSeconds != nil {
+			return fmt.Errorf("unknown freshness cannot include known timestamp or age")
+		}
+	} else if freshness.LastSignalAt == nil || freshness.AgeSeconds == nil {
+		return fmt.Errorf("known freshness state requires last_signal_at and age_seconds")
 	}
 	return nil
 }
@@ -202,9 +217,14 @@ func ValidateBound(state State, summary Summary) error {
 		return fmt.Errorf("title, message, and uncertainty_qualifier are required")
 	}
 	text := strings.ToLower(summary.Title + " " + summary.Message + " " + summary.UncertaintyQualifier)
-	for _, word := range []string{"confirmed", "verified", "definitely", "certainly"} {
+	for _, word := range []string{"confirmed", "verified", "definitely", "certainly", "fact"} {
 		if containsWord(text, word) {
 			return fmt.Errorf("summary contains unsupported certainty claim %q", word)
+		}
+	}
+	for _, phrase := range []string{"safe now", "no danger", "no immediate danger", "no risk", "nothing to worry"} {
+		if strings.Contains(text, phrase) {
+			return fmt.Errorf("summary contains unsupported assurance %q", phrase)
 		}
 	}
 	if state.ConfidenceState == Disputed && !containsWord(text, "disputed") && !strings.Contains(text, "conflict") && !strings.Contains(text, "uncertain") {
