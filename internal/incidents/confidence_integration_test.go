@@ -179,8 +179,8 @@ func TestEvidencePolicyCoordinationSuppressesIndependentEvidenceIntegration(t *t
 	}
 	base := time.Now().UTC().Add(-30 * time.Second)
 	for i, reportText := range []string{
-		"smoke beside the market entrance",
-		"water rising near the bridge approach",
+		"road blocked by police now",
+		"road blocked by police now",
 		"traffic stopped outside the stadium gate",
 	} {
 		reportID, extractionID, reporterID := uuid.New(), uuid.New(), uuid.New()
@@ -201,8 +201,15 @@ func TestEvidencePolicyCoordinationSuppressesIndependentEvidenceIntegration(t *t
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM incident_reports WHERE incident_id = $1 AND independence_state = 'independence_supported'`, incidentID).Scan(&independentCount); err != nil {
 		t.Fatal(err)
 	}
-	if independentCount != 2 {
-		t.Fatalf("independence_supported rows = %d, want 2", independentCount)
+	if independentCount != 1 {
+		t.Fatalf("independence_supported rows = %d, want 1", independentCount)
+	}
+	var mixedCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM incident_reports WHERE incident_id = $1 AND independence_state = 'mixed_signals'`, incidentID).Scan(&mixedCount); err != nil {
+		t.Fatal(err)
+	}
+	if mixedCount != 1 {
+		t.Fatalf("mixed_signals rows = %d, want 1", mixedCount)
 	}
 }
 

@@ -141,9 +141,7 @@ func (RuleBasedEvaluator) Assess(ctx context.Context, input Input, config Config
 			}
 		}
 		if state == "indeterminate" {
-			if factor := stats["source_origin"]; factor.independence > 0 {
-				state = "possible_coordination"
-			} else if !hasUnknown {
+			if !hasUnknown {
 				state = "no_signal"
 			}
 		}
