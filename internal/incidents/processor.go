@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/ai/extraction"
@@ -62,13 +63,17 @@ func (p *Processor) Process(ctx context.Context, message StreamMessage) error {
 	if err != nil {
 		return err
 	}
-	if err := p.apply(ctx, report, decision); err != nil {
+	if err := p.apply(ctx, report, result, decision); err != nil {
 		return err
 	}
 	return nil
 }
 
-type aiProcessedEvent struct{ ReportID, ExtractionID, ContractVersion string }
+type aiProcessedEvent struct {
+	ReportID        string `json:"report_id"`
+	ExtractionID    string `json:"extraction_id"`
+	ContractVersion string `json:"contract_version"`
+}
 
 func parseAIProcessed(fields map[string]any) (aiProcessedEvent, error) {
 	get := func(name string) (string, error) {
@@ -162,7 +167,7 @@ func (p *Processor) assess(ctx context.Context, report reportEvidence, result ex
 	if result.EventType.Status != "identified" || result.EventType.Value == nil || report.Latitude == nil || report.Longitude == nil {
 		return PolicyDecision{Decision: DecisionCreate, Reason: "candidate lookup requires identified event type and claimed coordinates"}, nil
 	}
-	now := p.now().UTC()
+	now := firstTime(report.ObservedAt, report.SubmittedAt)
 	candidates, err := p.lookup.LookupCandidates(ctx, CandidateLookup{EventType: *result.EventType.Value, Latitude: *report.Latitude, Longitude: *report.Longitude, RadiusMeters: p.policy.CandidateRadiusMeters, AsOf: now, TimeWindow: p.policy.CandidateTimeWindow, Limit: p.policy.CandidateLimit})
 	if err != nil {
 		return PolicyDecision{}, err
@@ -180,7 +185,10 @@ func (p *Processor) assess(ctx context.Context, report reportEvidence, result ex
 	assessed := make([]AssessedCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
 		distance, radius := candidate.DistanceMeters, p.policy.CandidateRadiusMeters
-		candidateEvidence := similarity.ReportEvidence{EventType: extraction.Field{Status: "identified", Value: &candidate.EventType, Candidates: []string{}, EvidenceQuotes: []string{}}, TimeReference: extraction.Field{Status: "unknown", Candidates: []string{}, EvidenceQuotes: []string{}}, Location: location.Normalization{LocationState: "unknown", Candidates: []location.Candidate{}}, Text: ""}
+		candidateEvidence, err := p.loadCandidateEvidence(ctx, candidate.ID, candidate.EventType)
+		if err != nil {
+			return PolicyDecision{}, err
+		}
 		encoded, err := p.similarity.Assess(ctx, evidence, similarity.CandidateIncident{ID: candidate.ID.String(), Evidence: candidateEvidence, DistanceMeters: &distance, SearchRadiusMeters: &radius})
 		if err != nil {
 			return PolicyDecision{}, err
@@ -200,7 +208,51 @@ func (p *Processor) assess(ctx context.Context, report reportEvidence, result ex
 	return DecideAttachment(assessed, p.policy.SimilarityThreshold, p.policy.SimilarityWinnerMargin)
 }
 
-func (p *Processor) apply(ctx context.Context, report reportEvidence, decision PolicyDecision) error {
+func (p *Processor) loadCandidateEvidence(ctx context.Context, incidentID uuid.UUID, fallbackEventType string) (similarity.ReportEvidence, error) {
+	var rawText string
+	var encoded []byte
+	err := p.pool.QueryRow(ctx, `
+		SELECT r.raw_text, e.result
+		FROM incident_reports AS ir
+		JOIN reports AS r ON r.id = ir.report_id
+	LEFT JOIN report_ai_extractions AS e
+		  ON e.report_id = r.id AND e.contract_version = $2
+		WHERE ir.incident_id = $1
+		ORDER BY ir.attached_at, ir.report_id
+		LIMIT 1
+	`, incidentID, similarity.InputContractVersion).Scan(&rawText, &encoded)
+	if err == pgx.ErrNoRows {
+		return similarity.ReportEvidence{
+			EventType:     extraction.Field{Status: "identified", Value: &fallbackEventType, Candidates: []string{}, EvidenceQuotes: []string{}},
+			TimeReference: extraction.Field{Status: "unknown", Candidates: []string{}, EvidenceQuotes: []string{}},
+			Location:      location.Normalization{LocationState: "unknown", Candidates: []location.Candidate{}},
+		}, nil
+	}
+	if err != nil {
+		return similarity.ReportEvidence{}, fmt.Errorf("load candidate incident %s evidence: %w", incidentID, err)
+	}
+	result := extraction.Extraction{}
+	if len(encoded) > 0 {
+		if err := json.Unmarshal(encoded, &result); err != nil {
+			return similarity.ReportEvidence{}, fmt.Errorf("decode candidate incident %s extraction: %w", incidentID, err)
+		}
+	} else {
+		result.EventType = extraction.Field{Status: "identified", Value: &fallbackEventType, Candidates: []string{}, EvidenceQuotes: []string{}}
+		result.TimeReference = extraction.Field{Status: "unknown", Candidates: []string{}, EvidenceQuotes: []string{}}
+	}
+	normalized := location.Normalization{LocationState: "unknown", Candidates: []location.Candidate{}}
+	if result.LocationReference.Status != "unknown" {
+		encodedLocation, normalizeErr := (location.RuleBasedNormalizer{}).Normalize(ctx, result.LocationReference)
+		if normalizeErr == nil {
+			if err := json.Unmarshal(encodedLocation, &normalized); err != nil {
+				return similarity.ReportEvidence{}, err
+			}
+		}
+	}
+	return similarity.ReportEvidence{EventType: result.EventType, TimeReference: result.TimeReference, Location: normalized, Text: rawText}, nil
+}
+
+func (p *Processor) apply(ctx context.Context, report reportEvidence, result extraction.Extraction, decision PolicyDecision) error {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin incident decision: %w", err)
@@ -212,6 +264,15 @@ func (p *Processor) apply(ctx context.Context, report reportEvidence, decision P
 	}
 	if existing != nil {
 		return tx.Commit(ctx)
+	}
+	if decision.Decision == DecisionCreate {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('signa.incident.create', 0))`); err != nil {
+			return fmt.Errorf("serialize incident create decision: %w", err)
+		}
+		decision, err = p.assess(ctx, report, result)
+		if err != nil {
+			return err
+		}
 	}
 	metadata, _ := json.Marshal(struct {
 		ReportID     string   `json:"report_id"`
@@ -228,6 +289,9 @@ func (p *Processor) apply(ctx context.Context, report reportEvidence, decision P
 		}
 		if resolvedAt != nil || expiresAt != nil && !expiresAt.After(p.now()) {
 			return fmt.Errorf("candidate incident %s is no longer attachable", incidentID)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE incidents SET last_signal_at = GREATEST(COALESCE(last_signal_at, '-infinity'::timestamptz), $2), updated_at = now() WHERE id = $1`, incidentID, firstTime(report.ObservedAt, report.SubmittedAt)); err != nil {
+			return fmt.Errorf("update attached incident signal: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id, similarity) VALUES ($1, $2, $3) ON CONFLICT (incident_id, report_id) DO NOTHING`, incidentID, report.ID, decision.Score); err != nil {
 			return fmt.Errorf("attach report: %w", err)
@@ -256,9 +320,11 @@ func (p *Processor) apply(ctx context.Context, report reportEvidence, decision P
 	}
 	eventTypeName := map[Decision]string{DecisionCreate: "incident.created", DecisionAttach: "incident.report_attached"}[decision.Decision]
 	payload, _ := json.Marshal(struct {
-		IncidentID, ReportID, PolicyVersion string
-		SimilarityScore                     *float64 `json:"similarity_score,omitempty"`
-		WinnerMargin                        *float64 `json:"winner_margin,omitempty"`
+		IncidentID      string   `json:"incident_id"`
+		ReportID        string   `json:"report_id"`
+		PolicyVersion   string   `json:"policy_version"`
+		SimilarityScore *float64 `json:"similarity_score,omitempty"`
+		WinnerMargin    *float64 `json:"winner_margin,omitempty"`
 	}{incidentID, report.ID, AttachmentPolicyVersion, decision.Score, decision.WinnerMargin})
 	if _, err := tx.Exec(ctx, `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ($1, 'incident', $2, $3::jsonb)`, eventTypeName, incidentID, payload); err != nil {
 		return fmt.Errorf("write incident outbox event: %w", err)
@@ -298,21 +364,12 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return err
 	}
 	for ctx.Err() == nil {
-		messages, err := c.client.Read(ctx, c.stream, c.group, c.consumer, true, 0)
+		messages, err := readPending(ctx, c.client, c.stream, c.group, c.consumer)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
 			return err
-		}
-		if len(messages) == 0 {
-			messages, err = c.client.Read(ctx, c.stream, c.group, c.consumer, false, c.poll)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil
-				}
-				return err
-			}
 		}
 		for _, message := range messages {
 			if name, ok := streamString(message.Values, "event_name"); ok && name != ReportAIProcessedV1 {
@@ -335,8 +392,47 @@ func (c *Consumer) Run(ctx context.Context) error {
 				return err
 			}
 		}
+		// Always read new entries after pending work. A repeatedly failing
+		// pending message must not starve newer incident events.
+		messages, err = c.client.Read(ctx, c.stream, c.group, c.consumer, false, c.poll)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		for _, message := range messages {
+			if name, ok := streamString(message.Values, "event_name"); ok && name != ReportAIProcessedV1 {
+				if name == extraction.ReportCreatedV1 || name == "report.media_attached.v1" {
+					if _, err := extraction.ParseReportEvent(message.Values); err != nil {
+						continue
+					}
+					if err := c.client.Ack(ctx, c.stream, c.group, message.ID); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			if err := c.processor.Process(ctx, message); err != nil {
+				continue
+			}
+			if err := c.client.Ack(ctx, c.stream, c.group, message.ID); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+func readPending(ctx context.Context, client StreamClient, stream, group, consumer string) ([]StreamMessage, error) {
+	messages, err := client.Read(ctx, stream, group, consumer, true, 0)
+	if err != nil || len(messages) > 0 {
+		return messages, err
+	}
+	if claimer, ok := client.(extraction.PendingClaimer); ok {
+		return claimer.ClaimPending(ctx, stream, group, consumer)
+	}
+	return messages, nil
 }
 
 func streamString(fields map[string]any, name string) (string, bool) {

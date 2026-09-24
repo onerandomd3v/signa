@@ -20,6 +20,12 @@ type StreamClient interface {
 	Ack(context.Context, string, string, string) error
 }
 
+// PendingClaimer lets a replacement consumer reclaim messages left pending by
+// a stopped consumer. Test clients may omit it and use the basic pending read.
+type PendingClaimer interface {
+	ClaimPending(context.Context, string, string, string) ([]StreamMessage, error)
+}
+
 type MessageProcessor interface {
 	Process(context.Context, StreamMessage) error
 }
@@ -72,7 +78,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 			return nil
 		}
 
-		messages, err := c.client.Read(ctx, c.stream, c.group, c.consumer, true, 0)
+		messages, err := readPending(ctx, c.client, c.stream, c.group, c.consumer)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -110,6 +116,17 @@ func (c *Consumer) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func readPending(ctx context.Context, client StreamClient, stream, group, consumer string) ([]StreamMessage, error) {
+	messages, err := client.Read(ctx, stream, group, consumer, true, 0)
+	if err != nil || len(messages) > 0 {
+		return messages, err
+	}
+	if claimer, ok := client.(PendingClaimer); ok {
+		return claimer.ClaimPending(ctx, stream, group, consumer)
+	}
+	return messages, nil
 }
 
 func filterBlockedMessages(messages []StreamMessage, blocked map[string]struct{}) []StreamMessage {
@@ -194,4 +211,21 @@ func (c *RedisStreamClient) Ack(ctx context.Context, stream, group, messageID st
 		return fmt.Errorf("redis stream client is required")
 	}
 	return c.client.XAck(ctx, stream, group, messageID).Err()
+}
+
+func (c *RedisStreamClient) ClaimPending(ctx context.Context, stream, group, consumer string) ([]StreamMessage, error) {
+	if c == nil || c.client == nil {
+		return nil, fmt.Errorf("redis stream client is required")
+	}
+	messages, _, err := c.client.XAutoClaim(ctx, &goRedis.XAutoClaimArgs{
+		Stream: stream, Group: group, Consumer: consumer, MinIdle: 30 * time.Second, Start: "0", Count: 100,
+	}).Result()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]StreamMessage, 0, len(messages))
+	for _, message := range messages {
+		result = append(result, StreamMessage{ID: message.ID, Values: message.Values})
+	}
+	return result, nil
 }
