@@ -73,12 +73,16 @@ func (p *LifecycleProcessor) Sweep(ctx context.Context, limit int) error {
 	rows, err := tx.Query(ctx, `
 		SELECT id
 		FROM incidents
-		WHERE status IN ('OPEN', 'RESOLVING', 'RESOLVED')
-		  AND COALESCE(last_signal_at, started_at, created_at) <= $1
-		ORDER BY COALESCE(last_signal_at, started_at, created_at), id
-		LIMIT $2
+		WHERE (status = 'OPEN' AND COALESCE(last_signal_at, started_at, created_at) <= $1)
+		   OR (status = 'RESOLVING' AND COALESCE(last_signal_at, started_at, created_at) <= $2)
+		   OR (status = 'RESOLVED' AND (
+				(expires_at IS NOT NULL AND expires_at <= $3)
+				OR (expires_at IS NULL AND COALESCE(last_signal_at, started_at, created_at) <= $4)
+		   ))
+		ORDER BY COALESCE(expires_at, COALESCE(last_signal_at, started_at, created_at)), id
+		LIMIT $5
 		FOR UPDATE SKIP LOCKED
-	`, now.Add(-p.policy.ResolvingAfter), limit)
+	`, now.Add(-p.policy.ResolvingAfter), now.Add(-p.policy.ResolvedAfter), now, now.Add(-p.policy.ExpiredAfter), limit)
 	if err != nil {
 		return fmt.Errorf("select lifecycle sweep batch: %w", err)
 	}

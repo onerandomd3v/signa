@@ -74,6 +74,25 @@ func TestLifecycleProcessorEventsSweepIdempotencyAndPrivacyIntegration(t *testin
 	}
 	assertLifecycleState(t, ctx, pool, incidentID, lifecycle.Resolved, base.Add(3*time.Hour), timePtr(base.Add(2*time.Hour)))
 	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE event_type = 'incident.resolved' AND aggregate_id = $1`, 1, incidentID)
+
+	// A bounded sweep must advance through due rows instead of selecting the
+	// same OPEN/RESOLVING row again with the earliest threshold.
+	backlogIDs := []uuid.UUID{uuid.New(), uuid.New()}
+	for _, backlogID := range backlogIDs {
+		if _, err := pool.Exec(ctx, `INSERT INTO incidents (id, status, confidence_state, started_at, last_signal_at, created_at, updated_at) VALUES ($1, 'OPEN', 'UNVERIFIED', $2, $2, $2, $2)`, backlogID, base.Add(-90*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current = base
+	if err := processor.Sweep(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	backlogQuery := `SELECT count(*) FROM incidents WHERE (id = $1 OR id = $2) AND status = 'RESOLVING'`
+	assertCount(t, ctx, pool, backlogQuery, 1, backlogIDs[0], backlogIDs[1])
+	if err := processor.Sweep(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	assertCount(t, ctx, pool, backlogQuery, 2, backlogIDs[0], backlogIDs[1])
 	if candidates, err := NewStore(pool).LookupCandidates(ctx, CandidateLookup{EventType: "road_blockage", Latitude: 6.5244, Longitude: 3.3792, RadiusMeters: 1000, AsOf: base.Add(2 * time.Hour), TimeWindow: 4 * time.Hour, Limit: 10}); err != nil {
 		t.Fatal(err)
 	} else if len(candidates) != 0 {
