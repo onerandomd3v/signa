@@ -32,6 +32,14 @@ export type IncidentFeedState =
   | { status: "ready"; incidents: IncidentView[] };
 
 const contentWidth = "mx-auto w-full max-w-3xl px-4 sm:px-6";
+const terminalStatuses = new Set(["resolved", "expired"]);
+const relativeTimeFormatter = new Intl.RelativeTimeFormat("en", {
+  numeric: "auto",
+});
+const updateDateFormatter = new Intl.DateTimeFormat("en", {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
 
 function displayValue(value: string | null | undefined): string {
   if (!value?.trim()) return "Not provided";
@@ -58,7 +66,7 @@ function relativeTime(value: string | null): string {
           ? [Math.round(seconds / 3_600), "hour"]
           : [Math.round(seconds / 86_400), "day"];
 
-  return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(
+  return relativeTimeFormatter.format(
     amount,
     unit as Intl.RelativeTimeFormatUnit,
   );
@@ -78,7 +86,7 @@ function updateSummary(update: IncidentUpdateView): string {
 
 function StatusPill({ status }: { status: string }) {
   const label = displayValue(status);
-  const terminal = ["resolved", "expired"].includes(label.toLowerCase());
+  const terminal = terminalStatuses.has(label.toLowerCase());
 
   return (
     <span
@@ -373,10 +381,7 @@ export function IncidentDetail({ state }: { state: IncidentDetailState }) {
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   {Number.isFinite(Date.parse(update.occurredAt)) ? (
                     <time dateTime={update.occurredAt}>
-                      {new Intl.DateTimeFormat("en", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      }).format(new Date(update.occurredAt))}
+                      {updateDateFormatter.format(new Date(update.occurredAt))}
                     </time>
                   ) : (
                     "Update time unavailable"
