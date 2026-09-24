@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:signa:ai-same-event-similarity:v1",
+  "title": "Signa same-event similarity assessment v1",
+  "description": "An explainable, uncalibrated interpretation signal. It does not determine truth, incident confidence, attachment, severity, or alerts.",
+  "type": "object",
+  "properties": {
+    "contract_version": {"const": "signa.ai.same-event-similarity.v1"},
+    "input_contract_version": {"const": "signa.ai.report-extraction.v0"},
+    "candidate_incident_id": {"type": "string", "minLength": 1},
+    "similarity_state": {"enum": ["assessed", "insufficient_evidence"]},
+    "similarity_score": {"anyOf": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "null"}]},
+    "scoring_method": {"const": "arithmetic_mean_of_informative_factors.v1"},
+    "factors": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"$ref": "#/$defs/factor"}},
+    "supporting_reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "limiting_reasons": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "required": ["contract_version", "input_contract_version", "candidate_incident_id", "similarity_state", "similarity_score", "scoring_method", "factors", "supporting_reasons", "limiting_reasons"],
+  "additionalProperties": false,
+  "allOf": [
+    {"if": {"properties": {"similarity_state": {"const": "assessed"}}, "required": ["similarity_state"]}, "then": {"properties": {"similarity_score": {"type": "number"}}}},
+    {"if": {"properties": {"similarity_state": {"const": "insufficient_evidence"}}, "required": ["similarity_state"]}, "then": {"properties": {"similarity_score": {"type": "null"}}}}
+  ],
+  "$defs": {
+    "factor": {
+      "type": "object",
+      "properties": {
+        "name": {"enum": ["event_type", "time_reference", "location_reference", "text_similarity", "spatial_proximity"]},
+        "status": {"enum": ["informative", "indeterminate"]},
+        "score": {"anyOf": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "null"}]},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "required": ["name", "status", "score", "reason"],
+      "additionalProperties": false,
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "informative"}}, "required": ["status"]}, "then": {"properties": {"score": {"type": "number"}}}},
+        {"if": {"properties": {"status": {"const": "indeterminate"}}, "required": ["status"]}, "then": {"properties": {"score": {"type": "null"}}}}
+      ]
+    }
+  }
+}
