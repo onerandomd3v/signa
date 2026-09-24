@@ -92,6 +92,41 @@ func TestConsumerDoesNotRetryUnresolvedDestination(t *testing.T) {
 	}
 }
 
+func TestReadPendingCombinesLocalAndStaleMessagesWithoutDuplicates(t *testing.T) {
+	client := &combinedPendingStreamClient{
+		local:   []StreamMessage{{ID: "local-1"}},
+		claimed: []StreamMessage{{ID: "local-1"}, {ID: "stale-1"}},
+	}
+	messages, err := readPending(context.Background(), client, "stream", "group", "consumer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].ID != "local-1" || messages[1].ID != "stale-1" {
+		t.Fatalf("messages = %+v", messages)
+	}
+}
+
+func TestConsumerDoesNotLetLocalFailureStarveClaimedOrNewMessages(t *testing.T) {
+	client := &combinedPendingStreamClient{
+		local:   []StreamMessage{{ID: "local-1"}},
+		claimed: []StreamMessage{{ID: "stale-1"}},
+		new:     []StreamMessage{{ID: "new-1"}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	processor := &starvationProcessor{client: client, cancel: cancel}
+	consumer := NewConsumer(client, processor, "stream", "group", "consumer", time.Millisecond)
+	if err := consumer.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if processor.calls["stale-1"] != 1 || processor.calls["new-1"] != 1 {
+		t.Fatalf("processed calls = %+v", processor.calls)
+	}
+	if client.acks["stale-1"] != 1 || client.acks["new-1"] != 1 {
+		t.Fatalf("acks = %+v", client.acks)
+	}
+}
+
 func reportCreatedFields() map[string]any {
 	return map[string]any{
 		"event_id":       "event-1",
@@ -157,6 +192,63 @@ type fakeMessageProcessor struct {
 	err          error
 	afterProcess context.CancelFunc
 	afterFailure context.CancelFunc
+}
+
+type combinedPendingStreamClient struct {
+	local, claimed, new []StreamMessage
+	claimCalls          int
+	acks                map[string]int
+}
+
+func (c *combinedPendingStreamClient) EnsureGroup(context.Context, string, string) error { return nil }
+func (c *combinedPendingStreamClient) Read(ctx context.Context, _ string, _ string, _ string, pending bool, _ time.Duration) ([]StreamMessage, error) {
+	if pending {
+		return c.local, nil
+	}
+	if len(c.new) == 0 {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	result := c.new
+	c.new = nil
+	return result, nil
+}
+func (c *combinedPendingStreamClient) Ack(_ context.Context, _, _, id string) error {
+	if c.acks == nil {
+		c.acks = map[string]int{}
+	}
+	c.acks[id]++
+	return nil
+}
+func (c *combinedPendingStreamClient) ClaimPending(context.Context, string, string, string) ([]StreamMessage, error) {
+	c.claimCalls++
+	if c.claimCalls == 1 {
+		return c.claimed, nil
+	}
+	return nil, nil
+}
+
+type starvationProcessor struct {
+	client *combinedPendingStreamClient
+	calls  map[string]int
+	cancel context.CancelFunc
+}
+
+func (p *starvationProcessor) Process(ctx context.Context, message StreamMessage) error {
+	if p.calls == nil {
+		p.calls = map[string]int{}
+	}
+	p.calls[message.ID]++
+	if message.ID == "local-1" {
+		return errors.New("poison pending message")
+	}
+	if err := p.client.Ack(ctx, "stream", "group", message.ID); err != nil {
+		return err
+	}
+	if message.ID == "new-1" {
+		p.cancel()
+	}
+	return nil
 }
 
 func (f *fakeMessageProcessor) Process(_ context.Context, message StreamMessage) error {

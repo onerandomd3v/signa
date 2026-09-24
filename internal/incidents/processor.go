@@ -164,6 +164,10 @@ func (p *Processor) loadReportAndExtraction(ctx context.Context, reportID, extra
 }
 
 func (p *Processor) assess(ctx context.Context, report reportEvidence, result extraction.Extraction) (PolicyDecision, error) {
+	return p.assessExcluding(ctx, report, result, nil)
+}
+
+func (p *Processor) assessExcluding(ctx context.Context, report reportEvidence, result extraction.Extraction, excluded map[string]struct{}) (PolicyDecision, error) {
 	if result.EventType.Status != "identified" || result.EventType.Value == nil || report.Latitude == nil || report.Longitude == nil {
 		return PolicyDecision{Decision: DecisionCreate, Reason: "candidate lookup requires identified event type and claimed coordinates"}, nil
 	}
@@ -184,6 +188,9 @@ func (p *Processor) assess(ctx context.Context, report reportEvidence, result ex
 	evidence := similarity.ReportEvidence{EventType: result.EventType, TimeReference: result.TimeReference, Location: reportLocation, Text: report.RawText}
 	assessed := make([]AssessedCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
+		if _, skip := excluded[candidate.ID.String()]; skip {
+			continue
+		}
 		distance, radius := candidate.DistanceMeters, p.policy.CandidateRadiusMeters
 		candidateEvidence, err := p.loadCandidateEvidence(ctx, candidate.ID, candidate.EventType)
 		if err != nil {
@@ -265,10 +272,12 @@ func (p *Processor) apply(ctx context.Context, report reportEvidence, result ext
 	if existing != nil {
 		return tx.Commit(ctx)
 	}
-	if decision.Decision == DecisionCreate {
+	if decision.Decision == DecisionCreate || decision.Decision == DecisionAttach {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('signa.incident.create', 0))`); err != nil {
 			return fmt.Errorf("serialize incident create decision: %w", err)
 		}
+	}
+	if decision.Decision == DecisionCreate {
 		decision, err = p.assess(ctx, report, result)
 		if err != nil {
 			return err
@@ -281,15 +290,26 @@ func (p *Processor) apply(ctx context.Context, report reportEvidence, result ext
 		WinnerMargin *float64 `json:"winner_margin,omitempty"`
 	}{report.ID, decision.Decision, decision.Score, decision.WinnerMargin})
 	var incidentID string
-	if decision.Decision == DecisionAttach {
+	excluded := make(map[string]struct{})
+	for decision.Decision == DecisionAttach {
 		incidentID = decision.CandidateID
 		var resolvedAt, expiresAt *time.Time
 		if err := tx.QueryRow(ctx, `SELECT resolved_at, expires_at FROM incidents WHERE id = $1 FOR UPDATE`, incidentID).Scan(&resolvedAt, &expiresAt); err != nil {
 			return fmt.Errorf("recheck incident candidate %s: %w", incidentID, err)
 		}
-		if resolvedAt != nil || expiresAt != nil && !expiresAt.After(p.now()) {
-			return fmt.Errorf("candidate incident %s is no longer attachable", incidentID)
+		if resolvedAt == nil && (expiresAt == nil || expiresAt.After(p.now())) {
+			break
 		}
+		excluded[incidentID] = struct{}{}
+		decision, err = p.assessExcluding(ctx, report, result, excluded)
+		if err != nil {
+			return err
+		}
+		if decision.Decision == DecisionCreate {
+			decision.Reason = "re-evaluated after candidate became unattachable: " + decision.Reason
+		}
+	}
+	if decision.Decision == DecisionAttach {
 		if _, err := tx.Exec(ctx, `UPDATE incidents SET last_signal_at = GREATEST(COALESCE(last_signal_at, '-infinity'::timestamptz), $2), updated_at = now() WHERE id = $1`, incidentID, firstTime(report.ObservedAt, report.SubmittedAt)); err != nil {
 			return fmt.Errorf("update attached incident signal: %w", err)
 		}
@@ -426,11 +446,15 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 func readPending(ctx context.Context, client StreamClient, stream, group, consumer string) ([]StreamMessage, error) {
 	messages, err := client.Read(ctx, stream, group, consumer, true, 0)
-	if err != nil || len(messages) > 0 {
+	if err != nil {
 		return messages, err
 	}
 	if claimer, ok := client.(extraction.PendingClaimer); ok {
-		return claimer.ClaimPending(ctx, stream, group, consumer)
+		claimed, claimErr := claimer.ClaimPending(ctx, stream, group, consumer)
+		if claimErr != nil {
+			return nil, claimErr
+		}
+		return extraction.MergeMessages(messages, claimed), nil
 	}
 	return messages, nil
 }
