@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/api"
 	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/logging"
 	"github.com/onerandomd3v/signa/internal/media"
 	"github.com/onerandomd3v/signa/internal/reports"
@@ -29,6 +31,10 @@ func run(parent context.Context, logger *slog.Logger) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+	publicGeometryPolicy, err := config.LoadPublicIncidentGeometryPolicy()
+	if err != nil {
+		return fmt.Errorf("load public incident geometry policy: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
@@ -58,12 +64,12 @@ func run(parent context.Context, logger *slog.Logger) error {
 		}
 	}
 
-	server := api.NewServerWithMediaAndCORS(cfg.APIAddr, logger, api.RateLimitConfig{
+	server := api.NewServerWithMediaAndCORSAndPublicIncidents(cfg.APIAddr, logger, api.RateLimitConfig{
 		PerClientRatePerMinute: cfg.ReportRatePerMinute,
 		PerClientBurst:         cfg.ReportRateBurst,
 		GlobalRatePerMinute:    cfg.GlobalReportRatePerMinute,
 		GlobalBurst:            cfg.GlobalReportRateBurst,
-	}, cfg.WebAllowedOrigins, pool, storage, reports.NewStore(pool))
+	}, cfg.WebAllowedOrigins, pool, storage, incidents.NewStore(pool), publicGeometryPolicy, reports.NewStore(pool))
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("api starting", "addr", cfg.APIAddr)
