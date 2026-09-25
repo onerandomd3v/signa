@@ -1,5 +1,6 @@
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -7,7 +8,17 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PublicIncident } from "@/lib/api/generated";
+import type { RealtimeConnector } from "./use-realtime-updates";
 import { IncidentMapExperience } from "./incident-map-experience";
+
+const idleRealtime: RealtimeConnector = async ({ signal }) => ({
+  stream: (async function* () {
+    await new Promise<void>((resolve) => {
+      if (signal.aborted) resolve();
+      else signal.addEventListener("abort", () => resolve(), { once: true });
+    });
+  })(),
+});
 
 vi.mock("./incident-map-stage", () => ({
   IncidentMapStage: ({
@@ -56,6 +67,7 @@ describe("IncidentMapExperience", () => {
   it("keeps a keyboard-accessible details list and selection control alongside the map", async () => {
     render(
       <IncidentMapExperience
+        connectRealtime={idleRealtime}
         loadIncidents={async () => [incident]}
         mapStyleUrl="https://tiles.example/style.json"
       />,
@@ -77,6 +89,7 @@ describe("IncidentMapExperience", () => {
   it("shows the map fallback when style is missing or map initialization fails", async () => {
     const { rerender } = render(
       <IncidentMapExperience
+        connectRealtime={idleRealtime}
         loadIncidents={async () => [incident]}
         mapStyleUrl={null}
       />,
@@ -84,6 +97,7 @@ describe("IncidentMapExperience", () => {
     expect(await screen.findByText(/no map style is configured/i)).toBeTruthy();
     rerender(
       <IncidentMapExperience
+        connectRealtime={idleRealtime}
         loadIncidents={async () => [incident]}
         mapStyleUrl="https://tiles.example/style.json"
       />,
@@ -104,6 +118,7 @@ describe("IncidentMapExperience", () => {
       .mockResolvedValueOnce([incident]);
     render(
       <IncidentMapExperience
+        connectRealtime={idleRealtime}
         loadIncidents={loadIncidents}
         mapStyleUrl={null}
       />,
@@ -111,6 +126,148 @@ describe("IncidentMapExperience", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
     expect(
       await screen.findByRole("heading", { name: "Road Closure" }),
+    ).toBeTruthy();
+  });
+
+  it("reconciles an incident event from REST and coalesces rapid bursts", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    const updatedIncident: PublicIncident = {
+      ...incident,
+      status: "RESOLVING",
+    };
+    const loadIncidents = vi
+      .fn<(signal: AbortSignal) => Promise<PublicIncident[]>>()
+      .mockResolvedValueOnce([incident])
+      .mockResolvedValue([updatedIncident]);
+    const connectRealtime: RealtimeConnector = async (options) => {
+      options.onConnection?.();
+      emit = options.onSseEvent;
+      return idleRealtime(options);
+    };
+
+    render(
+      <IncidentMapExperience
+        connectRealtime={connectRealtime}
+        loadIncidents={loadIncidents}
+        mapStyleUrl={null}
+      />,
+    );
+    await screen.findByRole("heading", { name: "Road Closure" });
+    expect(loadIncidents).toHaveBeenCalledOnce();
+
+    act(() => {
+      emit?.({
+        event: "incident.status_changed.v1",
+        id: "cursor-1",
+        data: "ignored",
+      });
+      emit?.({
+        event: "incident.confidence_changed.v1",
+        id: "cursor-2",
+        data: "malformed{",
+      });
+      emit?.({
+        event: "incident.resolved.v1",
+        id: "cursor-3",
+        data: { status: "OPEN" },
+      });
+    });
+
+    await waitFor(() => expect(loadIncidents).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Resolving")).toBeTruthy();
+  });
+
+  it("keeps fetched incidents visible when realtime authentication is unavailable", async () => {
+    const connectRealtime: RealtimeConnector = async (options) => {
+      options.onSseError?.(new Error("SSE failed: 401 Unauthorized"));
+      return { stream: (async function* () {})() };
+    };
+    render(
+      <IncidentMapExperience
+        connectRealtime={connectRealtime}
+        loadIncidents={async () => [incident]}
+        mapStyleUrl={null}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Road Closure" }),
+    ).toBeTruthy();
+    expect(
+      await screen.findByText(/realtime updates unavailable/i),
+    ).toBeTruthy();
+  });
+
+  it("does not render alert payload content and explains the missing alert read API", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    const connectRealtime: RealtimeConnector = async (options) => {
+      options.onConnection?.();
+      emit = options.onSseEvent;
+      return idleRealtime(options);
+    };
+    render(
+      <IncidentMapExperience
+        connectRealtime={connectRealtime}
+        loadIncidents={async () => [incident]}
+        mapStyleUrl={null}
+      />,
+    );
+    await screen.findByRole("heading", { name: "Road Closure" });
+
+    act(() =>
+      emit?.({
+        event: "alert.created.v1",
+        id: "alert-cursor",
+        data: { message: "private alert details must not be shown" },
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        /alert details aren’t available in the public API yet/i,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/private alert details/i)).toBeNull();
+  });
+
+  it("does not commit an older list snapshot after a newer invalidation arrives", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    const stale = { ...incident, event_type: "stale_snapshot" };
+    const fresh = { ...incident, event_type: "fresh_snapshot" };
+    const pending: Array<(value: PublicIncident[]) => void> = [];
+    const loadIncidents = vi.fn(
+      () => new Promise<PublicIncident[]>((resolve) => pending.push(resolve)),
+    );
+    const connectRealtime: RealtimeConnector = async (options) => {
+      emit = options.onSseEvent;
+      return idleRealtime(options);
+    };
+    render(
+      <IncidentMapExperience
+        connectRealtime={connectRealtime}
+        loadIncidents={loadIncidents}
+        mapStyleUrl={null}
+      />,
+    );
+    await waitFor(() => expect(pending).toHaveLength(1));
+    act(() => emit?.({ event: "incident.created.v1", id: "cursor", data: {} }));
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    act(() => pending[0]([stale]));
+    await waitFor(() => expect(pending).toHaveLength(2));
+    expect(
+      screen.queryByRole("heading", { name: "Stale Snapshot" }),
+    ).toBeNull();
+
+    act(() => pending[1]([fresh]));
+    expect(
+      await screen.findByRole("heading", { name: "Fresh Snapshot" }),
     ).toBeTruthy();
   });
 });

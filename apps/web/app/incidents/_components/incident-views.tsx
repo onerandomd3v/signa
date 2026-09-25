@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import type { RealtimeConnectionStatus } from "./use-realtime-updates";
 
 /**
  * A deliberately small presentation projection—not an API contract. Keep it
@@ -29,6 +30,41 @@ export type IncidentFeedState =
   | { status: "error" }
   | { status: "unavailable" }
   | { status: "ready"; incidents: IncidentView[] };
+
+export function RealtimeConnectionStatusMessage({
+  status,
+  alertUpdateReceived,
+}: {
+  status: RealtimeConnectionStatus;
+  alertUpdateReceived: boolean;
+}) {
+  const messages: Record<RealtimeConnectionStatus, string> = {
+    connecting: "Connecting to incident updates…",
+    live: "Connected to realtime updates.",
+    reconnecting: "Realtime connection interrupted. Reconnecting…",
+    unavailable:
+      "Realtime updates unavailable. Incident information remains available.",
+  };
+
+  return (
+    <div className="space-y-1">
+      <p
+        aria-atomic="true"
+        aria-live="polite"
+        className="text-xs text-muted-foreground"
+        role="status"
+      >
+        {messages[status]}
+      </p>
+      {alertUpdateReceived && (
+        <p className="text-xs text-muted-foreground">
+          An alert event was received. Alert details aren’t available in the
+          public API yet.
+        </p>
+      )}
+    </div>
+  );
+}
 
 const contentWidth = "mx-auto w-full max-w-3xl px-4 sm:px-6";
 const terminalStatuses = new Set(["resolved", "expired"]);

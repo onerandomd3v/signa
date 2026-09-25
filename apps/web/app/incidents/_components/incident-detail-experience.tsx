@@ -1,13 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { PublicIncident } from "@/lib/api/generated";
 import { fetchPublicIncident } from "@/lib/api/incidents";
+import { useCoalescedRefresh } from "./use-coalesced-refresh";
 import {
   IncidentDetail,
+  RealtimeConnectionStatusMessage,
   type IncidentDetailState,
   type IncidentView,
 } from "./incident-views";
+import type { RealtimeConnector } from "./use-realtime-updates";
+import { useRealtimeUpdates } from "./use-realtime-updates";
 
 function toIncidentView(incident: PublicIncident): IncidentView {
   return {
@@ -25,49 +29,60 @@ function toIncidentView(incident: PublicIncident): IncidentView {
 
 export function IncidentDetailExperience({
   incidentId,
+  connectRealtime,
 }: {
   incidentId: string;
+  connectRealtime?: RealtimeConnector;
 }) {
   const [state, setState] = useState<IncidentDetailState>({
     status: "loading",
   });
-  const [retryCount, setRetryCount] = useState(0);
 
-  useEffect(() => {
-    let active = true;
-    fetchPublicIncident(incidentId)
-      .then((result) => {
-        if (!active) return;
-        if (result.status === "ready") {
-          setState({
-            status: "ready",
-            incident: toIncidentView(result.incident),
-          });
-        } else {
-          setState({ status: result.status });
-        }
-      })
-      .catch(() => {
-        if (active) setState({ status: "error" });
-      });
-    return () => {
-      active = false;
-    };
-  }, [incidentId, retryCount]);
+  const refresh = useCoalescedRefresh({
+    key: incidentId,
+    load: (signal: AbortSignal) =>
+      fetchPublicIncident(incidentId, globalThis.fetch, signal),
+    onSuccess: (result) => {
+      if (result.status === "ready") {
+        setState({
+          status: "ready",
+          incident: toIncidentView(result.incident),
+        });
+      } else if (result.status === "error") {
+        setState((current) =>
+          current.status === "ready" ? current : { status: "error" },
+        );
+      } else {
+        setState({ status: result.status });
+      }
+    },
+    onError: () => {
+      setState((current) =>
+        current.status === "ready" ? current : { status: "error" },
+      );
+    },
+  });
+  const realtime = useRealtimeUpdates({
+    onInvalidation: refresh,
+    connect: connectRealtime,
+  });
 
-  if (state.status === "error") {
-    return (
-      <IncidentDetail
-        state={{
-          ...state,
-          onRetry: () => {
-            setState({ status: "loading" });
-            setRetryCount((count) => count + 1);
-          },
-        }}
+  const visibleState =
+    state.status === "ready" && state.incident.id !== incidentId
+      ? { status: "loading" as const }
+      : state;
+  const detailState: IncidentDetailState =
+    visibleState.status === "error"
+      ? { ...visibleState, onRetry: refresh }
+      : visibleState;
+
+  return (
+    <div className="space-y-3">
+      <RealtimeConnectionStatusMessage
+        alertUpdateReceived={realtime.alertUpdateReceived}
+        status={realtime.status}
       />
-    );
-  }
-
-  return <IncidentDetail state={state} />;
+      <IncidentDetail state={detailState} />
+    </div>
+  );
 }
