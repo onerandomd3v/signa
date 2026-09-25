@@ -155,6 +155,23 @@ func (s *Store) FindPublicRouteRelevance(ctx context.Context, geometry routing.G
 	if err != nil {
 		return "", nil, fmt.Errorf("encode route geometry: %w", err)
 	}
+	var classification geospatial.RouteRelevance
+	if err := s.pool.QueryRow(ctx, `
+WITH route AS (
+	SELECT ST_SetSRID(ST_GeomFromGeoJSON($1::json), 4326) AS geometry
+)
+SELECT CASE
+	WHEN COALESCE(bool_or(i.affected_geometry IS NOT NULL AND ST_Intersects(i.affected_geometry::geometry, route.geometry)), false) THEN $2
+	WHEN COALESCE(bool_or(i.affected_geometry IS NULL), false) THEN $3
+	ELSE $4
+END
+FROM incidents AS i
+CROSS JOIN route
+WHERE i.status IN ('OPEN', 'RESOLVING')
+  AND (i.center_point IS NOT NULL OR i.affected_geometry IS NOT NULL)
+`, string(encoded), geospatial.RouteRelevanceRelevant, geospatial.RouteRelevanceUnknown, geospatial.RouteRelevanceNotRelevant).Scan(&classification); err != nil {
+		return "", nil, fmt.Errorf("classify public route relevance: %w", err)
+	}
 	rows, err := s.pool.Query(ctx, `
 WITH route AS (
 	SELECT ST_SetSRID(ST_GeomFromGeoJSON($1::json), 4326) AS geometry
@@ -215,7 +232,6 @@ LIMIT $8
 		return "", nil, fmt.Errorf("query public route relevance: %w", err)
 	}
 	defer rows.Close()
-	classification := geospatial.RouteRelevanceNotRelevant
 	publicIncidents := make([]PublicIncident, 0, maxPublicIncidentLimit)
 	for rows.Next() {
 		var incident PublicIncident

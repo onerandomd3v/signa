@@ -118,6 +118,21 @@ func TestRouteRelevanceHandlerRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestRouteRelevanceHandlerRejectsOmittedEndpoints(t *testing.T) {
+	called := false
+	service := routeRelevanceServiceFunc(func(context.Context, routing.Request) (RouteRelevanceResult, error) {
+		called = true
+		return RouteRelevanceResult{}, nil
+	})
+	record := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/route-relevance", strings.NewReader(`{"origin":{"latitude":6.5,"longitude":3.3}}`))
+	request.Header.Set("Content-Type", "application/json")
+	routeRelevanceHandler(nil, service).ServeHTTP(record, request)
+	if record.Code != http.StatusBadRequest || called {
+		t.Fatalf("status = %d, called = %v, want 400 without service call", record.Code, called)
+	}
+}
+
 func TestRouteRelevanceHandlerMapsIncidentFailureToServiceUnavailable(t *testing.T) {
 	record := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/v1/route-relevance", strings.NewReader(`{"origin":{"latitude":6.5,"longitude":3.3},"destination":{"latitude":6.6,"longitude":3.4}}`))
@@ -170,6 +185,30 @@ func TestRouteRelevanceServerUsesCanonicalCookieAuthAndDedicatedRateLimit(t *tes
 	server.ServeHTTP(unauthenticatedResponse, unauthenticated)
 	if unauthenticatedResponse.Code != http.StatusUnauthorized || providerCalls != 0 {
 		t.Fatalf("unauthenticated status = %d, calls = %d, want 401 and no provider call", unauthenticatedResponse.Code, providerCalls)
+	}
+
+	for _, test := range []struct {
+		name        string
+		origin      string
+		contentType string
+		wantStatus  int
+	}{
+		{name: "disallowed origin", origin: "https://evil.example", contentType: "application/json", wantStatus: http.StatusForbidden},
+		{name: "non-json body", contentType: "text/plain", wantStatus: http.StatusUnsupportedMediaType},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/v1/route-relevance", strings.NewReader(body))
+			request.Header.Set("Content-Type", test.contentType)
+			if test.origin != "" {
+				request.Header.Set("Origin", test.origin)
+			}
+			request.AddCookie(&http.Cookie{Name: auth.DefaultCookieName, Value: "cookie-secret"})
+			response := httptest.NewRecorder()
+			server.ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+			}
+		})
 	}
 
 	for i, wantStatus := range []int{http.StatusOK, http.StatusTooManyRequests} {

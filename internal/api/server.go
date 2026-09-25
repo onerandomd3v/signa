@@ -65,7 +65,8 @@ func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger *slog
 		ingestor = ingestors[0]
 	}
 	router := chi.NewRouter()
-	router.Use(newCORSMiddleware(allowedOrigins).Middleware)
+	cors := newCORSMiddleware(allowedOrigins)
+	router.Use(cors.Middleware)
 	router.Get("/healthz", healthHandler(logger))
 	router.With(NewRateLimiter(rateConfig, RateLimiterOptions{}).Middleware).Post("/reports", reportIngestHandler(logger, ingestor))
 	mediaLimiter := NewRateLimiter(rateConfig, RateLimiterOptions{})
@@ -107,7 +108,7 @@ func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger *slog
 				GlobalRatePerMinute:    routeLimiterConfig.GlobalRouteRatePerMinute,
 				GlobalBurst:            routeLimiterConfig.GlobalRouteBurst,
 			}, RateLimiterOptions{})
-			router.With(principalMiddleware, routeLimiter.Middleware).Post("/v1/route-relevance", routeRelevanceHandler(logger, service).ServeHTTP)
+			router.With(routeRelevanceRequestGuard(cors), principalMiddleware, routeLimiter.Middleware).Post("/v1/route-relevance", routeRelevanceHandler(logger, service).ServeHTTP)
 		}
 		if realtimeHandler != nil {
 			router.With(principalMiddleware).Get("/events", realtimeHandler.ServeHTTP)

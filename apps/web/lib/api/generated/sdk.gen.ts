@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, GetAlertData, GetAlertErrors, GetAlertResponses, GetCurrentSessionData, GetCurrentSessionErrors, GetCurrentSessionResponses, GetHealthData, GetHealthResponses, GetIncidentData, GetIncidentErrors, GetIncidentResponses, ListIncidentsData, ListIncidentsErrors, ListIncidentsResponses, RegisterPushSubscriptionData, RegisterPushSubscriptionErrors, RegisterPushSubscriptionResponses, RevokePushSubscriptionData, RevokePushSubscriptionErrors, RevokePushSubscriptionResponses, StreamRealtimeEventsData, StreamRealtimeEventsErrors, StreamRealtimeEventsResponse, StreamRealtimeEventsResponses } from './types.gen';
+import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, EvaluateRouteRelevanceData, EvaluateRouteRelevanceErrors, EvaluateRouteRelevanceResponses, GetAlertData, GetAlertErrors, GetAlertResponses, GetCurrentSessionData, GetCurrentSessionErrors, GetCurrentSessionResponses, GetHealthData, GetHealthResponses, GetIncidentData, GetIncidentErrors, GetIncidentResponses, ListIncidentsData, ListIncidentsErrors, ListIncidentsResponses, RegisterPushSubscriptionData, RegisterPushSubscriptionErrors, RegisterPushSubscriptionResponses, RevokePushSubscriptionData, RevokePushSubscriptionErrors, RevokePushSubscriptionResponses, StreamRealtimeEventsData, StreamRealtimeEventsErrors, StreamRealtimeEventsResponse, StreamRealtimeEventsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -36,6 +36,25 @@ export const getCurrentSession = <ThrowOnError extends boolean = false>(options?
         }],
     url: '/auth/session',
     ...options
+});
+
+/**
+ * Evaluate route relevance against public incidents
+ *
+ * Evaluates one authenticated, request-scoped origin-to-destination route with optional waypoints. The server owns the relevance classification. Route inputs and returned geometry are not persisted, published, or included in application logs. NOT_RELEVANT does not mean that a route is safe or clear.
+ */
+export const evaluateRouteRelevance = <ThrowOnError extends boolean = false>(options: Options<EvaluateRouteRelevanceData, ThrowOnError>): RequestResult<EvaluateRouteRelevanceResponses, EvaluateRouteRelevanceErrors, ThrowOnError> => (options.client ?? client).post<EvaluateRouteRelevanceResponses, EvaluateRouteRelevanceErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'signa_session',
+            type: 'apiKey'
+        }],
+    url: '/v1/route-relevance',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 /**

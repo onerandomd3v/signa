@@ -21,6 +21,11 @@ func newCORSMiddleware(origins []string) corsMiddleware {
 	return corsMiddleware{allowed: allowed}
 }
 
+func (c corsMiddleware) allows(origin string) bool {
+	_, allowed := c.allowed[origin]
+	return allowed
+}
+
 func (c corsMiddleware) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		origin := request.Header.Get("Origin")
@@ -30,8 +35,7 @@ func (c corsMiddleware) Middleware(next http.Handler) http.Handler {
 		}
 
 		writer.Header().Add("Vary", "Origin")
-		_, allowed := c.allowed[origin]
-		if !allowed {
+		if !c.allows(origin) {
 			next.ServeHTTP(writer, request)
 			return
 		}

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
+	"strings"
 
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/geospatial"
@@ -21,8 +23,8 @@ var (
 )
 
 type routeRelevanceRequest struct {
-	Origin      routePoint   `json:"origin"`
-	Destination routePoint   `json:"destination"`
+	Origin      *routePoint  `json:"origin"`
+	Destination *routePoint  `json:"destination"`
 	Waypoints   []routePoint `json:"waypoints,omitempty"`
 }
 
@@ -88,7 +90,11 @@ func routeRelevanceHandler(logger *slog.Logger, service routeRelevanceService) h
 			writeError(writer, http.StatusBadRequest, "invalid_route_request", "origin, destination, and optional waypoints are required")
 			return
 		}
-		routeRequest := input.routingRequest()
+		routeRequest, err := input.routingRequest()
+		if err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid_route_request", "origin, destination, and optional waypoints are required")
+			return
+		}
 		if err := routeRequest.Validate(); err != nil {
 			writeError(writer, http.StatusBadRequest, "invalid_route_request", "origin, destination, and optional waypoints are invalid")
 			return
@@ -126,7 +132,10 @@ func routeRelevanceHandler(logger *slog.Logger, service routeRelevanceService) h
 	})
 }
 
-func (r routeRelevanceRequest) routingRequest() routing.Request {
+func (r routeRelevanceRequest) routingRequest() (routing.Request, error) {
+	if r.Origin == nil || r.Destination == nil {
+		return routing.Request{}, routing.ErrInvalidRequest
+	}
 	waypoints := make([]routing.Point, 0, len(r.Waypoints))
 	for _, waypoint := range r.Waypoints {
 		waypoints = append(waypoints, routing.Point{Latitude: waypoint.Latitude, Longitude: waypoint.Longitude})
@@ -135,6 +144,24 @@ func (r routeRelevanceRequest) routingRequest() routing.Request {
 		Origin:      routing.Point{Latitude: r.Origin.Latitude, Longitude: r.Origin.Longitude},
 		Destination: routing.Point{Latitude: r.Destination.Latitude, Longitude: r.Destination.Longitude},
 		Waypoints:   waypoints,
+	}, nil
+}
+
+func routeRelevanceRequestGuard(cors corsMiddleware) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			origin := request.Header.Get("Origin")
+			if origin != "" && !cors.allows(origin) {
+				writeError(writer, http.StatusForbidden, "origin_not_allowed", "origin is not allowed")
+				return
+			}
+			contentType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+			if err != nil || !strings.EqualFold(contentType, "application/json") {
+				writeError(writer, http.StatusUnsupportedMediaType, "unsupported_media_type", "Content-Type must be application/json")
+				return
+			}
+			next.ServeHTTP(writer, request)
+		})
 	}
 }
 
