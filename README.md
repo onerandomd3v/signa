@@ -10,6 +10,9 @@ The platform addresses the gap between scattered, fast-moving local reports and 
 
 The current technical source of truth is the [System Architecture](docs/architecture.md).
 
+OpenShip production image and migration instructions are in
+[docs/deployment-openship.md](docs/deployment-openship.md).
+
 Before implementation, read the repository-wide [Codex instructions](AGENTS.md), the [ADR index](docs/adr/), and the [Signa Linear project](https://linear.app/codeddevs/project/signa-7d2f8fe71827).
 
 ## Development workflow
