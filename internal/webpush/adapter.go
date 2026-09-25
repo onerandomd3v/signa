@@ -2,11 +2,10 @@ package webpush
 
 import (
 	"context"
-	"crypto/elliptic"
+	"crypto/ecdh"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +21,8 @@ import (
 )
 
 const Channel = "WEB_PUSH"
+
+const recipientClaimLease = 5 * time.Minute
 
 var (
 	ErrNoSubscriptions       = errors.New("user has no active push subscriptions")
@@ -62,9 +63,11 @@ func (c Config) Validate() error {
 	if err != nil || len(privateKey) != 32 || allZero(privateKey) {
 		return fmt.Errorf("%w: VAPID private key is invalid", ErrInvalidProviderConfig)
 	}
-	curve := elliptic.P256()
-	x, y := curve.ScalarBaseMult(privateKey)
-	expectedPublicKey := elliptic.Marshal(curve, x, y)
+	privateECDHKey, err := ecdh.P256().NewPrivateKey(privateKey)
+	if err != nil {
+		return fmt.Errorf("%w: VAPID private key is invalid", ErrInvalidProviderConfig)
+	}
+	expectedPublicKey := privateECDHKey.PublicKey().Bytes()
 	if len(expectedPublicKey) != len(publicKey) || subtle.ConstantTimeCompare(expectedPublicKey, publicKey) != 1 {
 		return fmt.Errorf("%w: VAPID key pair does not match", ErrInvalidProviderConfig)
 	}
@@ -126,6 +129,10 @@ func (a *Adapter) Deliver(ctx context.Context, attempt delivery.Attempt) (delive
 	if attempt.UserID == uuid.Nil {
 		return delivery.ProviderResult{}, delivery.Permanent(errors.New("web push delivery user is required"))
 	}
+	deliveryID, err := uuid.Parse(attempt.DeliveryID)
+	if err != nil {
+		return delivery.ProviderResult{}, delivery.Permanent(fmt.Errorf("web push delivery ID is invalid: %w", err))
+	}
 	subscriptions, err := a.store.ListForDelivery(ctx, attempt.UserID)
 	if err != nil {
 		return delivery.ProviderResult{}, delivery.Transient(fmt.Errorf("list web push subscriptions: %w", err))
@@ -133,37 +140,84 @@ func (a *Adapter) Deliver(ctx context.Context, attempt delivery.Attempt) (delive
 	if len(subscriptions) == 0 {
 		return delivery.ProviderResult{}, delivery.Permanent(ErrNoSubscriptions)
 	}
+	if err := a.store.EnsureDeliveryResults(ctx, deliveryID, attempt.UserID, subscriptions); err != nil {
+		return delivery.ProviderResult{}, delivery.Transient(fmt.Errorf("initialize web push delivery results: %w", err))
+	}
+	results, err := a.store.LoadDeliveryResults(ctx, deliveryID)
+	if err != nil {
+		return delivery.ProviderResult{}, delivery.Transient(fmt.Errorf("load web push delivery results: %w", err))
+	}
 
 	var (
 		succeeded    int
+		terminal     int
 		lastResponse string
 		transientErr error
 		permanentErr error
 	)
 	for _, subscription := range subscriptions {
+		stored, ok := results[subscription.ID]
+		if ok {
+			switch stored.State {
+			case push.DeliveryResultSucceeded:
+				succeeded++
+				terminal++
+				lastResponse = stored.ProviderResponse
+				continue
+			case push.DeliveryResultExpired, push.DeliveryResultPermanent:
+				terminal++
+				lastResponse = stored.ProviderResponse
+				permanentErr = fmt.Errorf("web push subscription result is %s", strings.ToLower(string(stored.State)))
+				continue
+			}
+		}
+		claimed, err := a.store.ClaimDeliveryResult(ctx, deliveryID, subscription.ID, recipientClaimLease)
+		if err != nil {
+			transientErr = fmt.Errorf("claim web push delivery result: %w", err)
+			continue
+		}
+		if !claimed {
+			transientErr = errors.New("web push delivery recipient is already being processed")
+			continue
+		}
 		result, sendErr := a.sender.Send(ctx, subscription, attempt.Payload, attempt.OperationKey)
 		if sendErr != nil {
-			transientErr = fmt.Errorf("send web push notification: %w", sendErr)
+			if completeErr := a.store.CompleteDeliveryResult(ctx, deliveryID, subscription.ID, push.DeliveryResultRetryable, "", sendErr.Error()); completeErr != nil {
+				transientErr = fmt.Errorf("record web push retryable result: %w", completeErr)
+			} else {
+				transientErr = fmt.Errorf("send web push notification: %w", sendErr)
+			}
 			continue
 		}
 		lastResponse = result.Response
 		switch {
 		case result.StatusCode >= 200 && result.StatusCode < 300:
-			succeeded++
-		case result.StatusCode == http.StatusNotFound || result.StatusCode == http.StatusGone:
-			if err := a.store.RemoveExpired(ctx, attempt.UserID, subscription.ID); err != nil {
-				transientErr = fmt.Errorf("remove expired web push subscription: %w", err)
+			if err := a.store.CompleteDeliveryResult(ctx, deliveryID, subscription.ID, push.DeliveryResultSucceeded, result.Response, ""); err != nil {
+				transientErr = fmt.Errorf("record web push success: %w", err)
 			} else {
+				succeeded++
+				terminal++
+			}
+		case result.StatusCode == http.StatusNotFound || result.StatusCode == http.StatusGone:
+			if err := a.store.CompleteExpiredDeliveryResult(ctx, deliveryID, attempt.UserID, subscription.ID, result.Response, fmt.Sprintf("web push subscription expired: status %d", result.StatusCode)); err != nil {
+				transientErr = fmt.Errorf("record expired web push subscription: %w", err)
+			} else {
+				terminal++
 				permanentErr = fmt.Errorf("web push subscription expired: status %d", result.StatusCode)
 			}
 		case result.StatusCode >= 400 && result.StatusCode < 500 && result.StatusCode != http.StatusRequestTimeout && result.StatusCode != http.StatusTooManyRequests:
-			if err := a.store.RemoveExpired(ctx, attempt.UserID, subscription.ID); err != nil {
-				transientErr = fmt.Errorf("remove invalid web push subscription: %w", err)
+			if err := a.store.CompleteDeliveryResult(ctx, deliveryID, subscription.ID, push.DeliveryResultPermanent, result.Response, fmt.Sprintf("web push provider rejected subscription: status %d", result.StatusCode)); err != nil {
+				transientErr = fmt.Errorf("record web push permanent result: %w", err)
 			} else {
-				permanentErr = fmt.Errorf("web push subscription rejected: status %d", result.StatusCode)
+				terminal++
+				permanentErr = fmt.Errorf("web push provider rejected subscription: status %d", result.StatusCode)
 			}
 		default:
-			transientErr = fmt.Errorf("web push provider returned status %d", result.StatusCode)
+			if err := a.store.CompleteDeliveryResult(ctx, deliveryID, subscription.ID, push.DeliveryResultRetryable, result.Response, fmt.Sprintf("web push provider returned status %d", result.StatusCode)); err != nil {
+				transientErr = fmt.Errorf("record web push retryable result: %w", err)
+			} else {
+				transientErr = fmt.Errorf("web push provider returned status %d", result.StatusCode)
+			}
 		}
 	}
 	if transientErr != nil {
@@ -172,10 +226,10 @@ func (a *Adapter) Deliver(ctx context.Context, attempt delivery.Attempt) (delive
 	if succeeded > 0 {
 		return delivery.ProviderResult{Response: lastResponse}, nil
 	}
-	if permanentErr != nil {
+	if permanentErr != nil && terminal == len(subscriptions) {
 		return delivery.ProviderResult{Response: lastResponse}, delivery.Permanent(permanentErr)
 	}
-	return delivery.ProviderResult{Response: lastResponse}, delivery.Permanent(ErrNoSubscriptions)
+	return delivery.ProviderResult{Response: lastResponse}, delivery.Transient(errors.New("web push delivery has unresolved recipients"))
 }
 
 type librarySender struct {
@@ -196,12 +250,12 @@ func (s *librarySender) Send(ctx context.Context, subscription push.Subscription
 	if err != nil {
 		return SendResult{}, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
 	return SendResult{StatusCode: response.StatusCode, Response: strings.TrimSpace(string(body))}, nil
 }
 
 func operationTopic(operationKey string) string {
 	digest := sha256.Sum256([]byte(operationKey))
-	return hex.EncodeToString(digest[:])
+	return base64.RawURLEncoding.EncodeToString(digest[:24])
 }
