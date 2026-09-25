@@ -12,6 +12,7 @@ import (
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/media"
+	"github.com/onerandomd3v/signa/internal/push"
 	"github.com/onerandomd3v/signa/internal/reports"
 )
 
@@ -70,6 +71,11 @@ func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger *slog
 		router.With(principalMiddleware).Get("/auth/session", currentSessionHandler)
 		if realtimeHandler != nil {
 			router.With(principalMiddleware).Get("/events", realtimeHandler.ServeHTTP)
+		}
+		if pool != nil {
+			pushStore := push.NewStore(pool)
+			router.With(principalMiddleware).Post("/push-subscriptions", pushSubscriptionCreateHandler(pushStore).ServeHTTP)
+			router.With(principalMiddleware).Delete("/push-subscriptions/{subscription_id}", pushSubscriptionDeleteHandler(pushStore).ServeHTTP)
 		}
 	}
 	return router

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -47,14 +48,15 @@ func (s *PostgresStore) StartAttempt(ctx context.Context, request Request, now t
 	defer func() { _ = tx.Rollback(ctx) }()
 	var state State
 	var storedAlertID, storedKey, channel, priority string
+	var userID uuid.UUID
 	var payload []byte
 	var attempts int
 	var activeAttemptNo *int
 	var lastAttempt, nextAttempt *time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT d.state, d.alert_id::text, d.idempotency_key, d.channel, d.priority, d.payload, d.attempts, d.active_attempt_no, d.last_attempt_at, d.next_attempt_at
+		SELECT d.state, d.alert_id::text, d.user_id, d.idempotency_key, d.channel, d.priority, d.payload, d.attempts, d.active_attempt_no, d.last_attempt_at, d.next_attempt_at
 		FROM deliveries d WHERE d.id = $1 FOR UPDATE`, request.DeliveryID).
-		Scan(&state, &storedAlertID, &storedKey, &channel, &priority, &payload, &attempts, &activeAttemptNo, &lastAttempt, &nextAttempt)
+		Scan(&state, &storedAlertID, &userID, &storedKey, &channel, &priority, &payload, &attempts, &activeAttemptNo, &lastAttempt, &nextAttempt)
 	if err == pgx.ErrNoRows {
 		return StartResult{}, fmt.Errorf("delivery %s not found", request.DeliveryID)
 	}
@@ -119,7 +121,7 @@ func (s *PostgresStore) StartAttempt(ctx context.Context, request Request, now t
 	if err := tx.Commit(ctx); err != nil {
 		return StartResult{}, fmt.Errorf("commit delivery attempt: %w", err)
 	}
-	return StartResult{Attempt: Attempt{DeliveryID: request.DeliveryID, AlertID: request.AlertID, Channel: channel, Priority: priority, Payload: json.RawMessage(payload), IdempotencyKey: request.IdempotencyKey, Attempt: attemptNo, OperationKey: operationKey(request.IdempotencyKey)}}, nil
+	return StartResult{Attempt: Attempt{DeliveryID: request.DeliveryID, AlertID: request.AlertID, UserID: userID, Channel: channel, Priority: priority, Payload: json.RawMessage(payload), IdempotencyKey: request.IdempotencyKey, Attempt: attemptNo, OperationKey: operationKey(request.IdempotencyKey)}}, nil
 }
 
 func (s *PostgresStore) FinishAttempt(ctx context.Context, attempt Attempt, provider ProviderResult, kind FailureKind, deliveryErr error, now time.Time) (FinishResult, error) {
