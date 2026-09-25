@@ -64,3 +64,10 @@ func TestMapEventLifecycleEventsV1(t *testing.T) {
 		}
 	}
 }
+
+func TestMapEventAlertCreatedV1(t *testing.T) {
+	got, err := MapEvent(Event{ID: "event-alert", EventType: "alert.created", AggregateType: "alert", AggregateID: "alert-1", Payload: json.RawMessage(`{"alert_id":"alert-1"}`), CreatedAt: time.Unix(0, 0)})
+	if err != nil || got.EventName != AlertCreatedV1 || got.AggregateType != "alert" {
+		t.Fatalf("MapEvent(alert.created) = %+v, err = %v", got, err)
+	}
+}

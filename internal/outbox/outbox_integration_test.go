@@ -101,6 +101,26 @@ func TestPublisherIntegrationAndConsumerGroupProof(t *testing.T) {
 	if !foundLifecycle {
 		t.Fatalf("lifecycle event %s was not routed to %s", lifecycleEventID, IncidentEventsStream)
 	}
+	alertEventID := insertOutboxEventType(t, ctx, pool, "alert.created", "alert", `{"alert_id":"safe-alert","incident_id":"safe-incident","alert_type":"IMMEDIATE","confidence_snapshot":"EMERGING","severity_snapshot":"CRITICAL","priority_snapshot":"P1","created_at":"2026-09-24T12:00:00Z"}`)
+	publisher.stream = ReportEventsStream
+	if err := publisher.PublishCycle(ctx); err != nil {
+		t.Fatalf("publish alert event: %v", err)
+	}
+	alertMessages, err := redisClient.XRange(ctx, AlertEventsStream, "-", "+").Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundAlert := false
+	for _, message := range alertMessages {
+		if message.Values["event_id"] == alertEventID {
+			foundAlert = message.Values["event_name"] == AlertCreatedV1 && message.Values["aggregate_type"] == "alert"
+			break
+		}
+	}
+	if !foundAlert {
+		t.Fatalf("alert event %s was not routed to %s", alertEventID, AlertEventsStream)
+	}
+	publisher.stream = stream
 
 	if err := redisClient.XGroupCreateMkStream(ctx, stream, group, "0").Err(); err != nil {
 		t.Fatalf("create consumer group: %v", err)

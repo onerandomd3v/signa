@@ -426,7 +426,14 @@ Alert
 - alert_type
 - confidence_snapshot
 - severity_snapshot
+- status_snapshot
+- priority_snapshot
+- freshness_snapshot
 - message
+- eligibility_policy_version
+- eligibility_reasons
+- as_of
+- idempotency_key
 - created_at
 - supersedes_alert_id?
 ```
