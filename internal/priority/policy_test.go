@@ -33,6 +33,7 @@ func TestEvaluatePriorityRuleTable(t *testing.T) {
 		{"low high confidence is p3", func(input *Input) { input.Incident.Severity = SeverityLow }, P3, "severity_low"},
 		{"unverified high confidence-independent is p3", func(input *Input) { input.Incident.Confidence = ConfidenceUnverified }, P3, "confidence_unverified"},
 		{"disputed is explicitly p3", func(input *Input) { input.Incident.Confidence = ConfidenceDisputed }, P3, "confidence_disputed"},
+		{"unknown accuracy is uncertain p3", func(input *Input) { input.Proximity.AccuracyMeters = nil }, P3, "location_uncertain"},
 		{"terminal resolved is none", func(input *Input) { input.Incident.Status = StatusResolved }, None, "incident_terminal"},
 		{"terminal expired is none", func(input *Input) { input.Incident.Status = StatusExpired }, None, "incident_terminal"},
 		{"resolving remains active", func(input *Input) { input.Incident.Status = StatusResolving }, P1, "incident_active"},
@@ -84,6 +85,63 @@ func TestEvaluateAccuracyAwareBoundaries(t *testing.T) {
 			got, err := Evaluate(testPolicy(), input)
 			if err != nil || got.Level != tc.wantLevel {
 				t.Fatalf("decision = (%+v, %v), want level %s", got, err, tc.wantLevel)
+			}
+		})
+	}
+}
+
+func TestEvaluateAccuracyAwareP2Explainability(t *testing.T) {
+	tests := []struct {
+		name           string
+		distance       float64
+		accuracy       *float64
+		wantLevel      Level
+		wantReasons    []string
+		unwantedReason string
+	}{
+		{
+			name:        "possible overlap is uncertain p3",
+			distance:    550,
+			accuracy:    floatPtr(100),
+			wantLevel:   P3,
+			wantReasons: []string{"location_uncertain", "possibly_within_p2_radius"},
+		},
+		{
+			name:           "definite p2 boundary remains p2",
+			distance:       490,
+			accuracy:       floatPtr(10),
+			wantLevel:      P2,
+			wantReasons:    []string{"within_p2_radius"},
+			unwantedReason: "possibly_within_p2_radius",
+		},
+		{
+			name:           "zero accuracy outside p2 is none",
+			distance:       550,
+			accuracy:       floatPtr(0),
+			wantLevel:      None,
+			wantReasons:    []string{"outside_p2_radius"},
+			unwantedReason: "possibly_within_p2_radius",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := testInput()
+			input.Proximity.DistanceMeters = tc.distance
+			input.Proximity.AccuracyMeters = tc.accuracy
+			got, err := Evaluate(testPolicy(), input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Level != tc.wantLevel {
+				t.Fatalf("level = %s, want %s; reasons = %v", got.Level, tc.wantLevel, got.Reasons)
+			}
+			for _, reason := range tc.wantReasons {
+				if !contains(got.Reasons, reason) {
+					t.Errorf("reasons = %v, want %q", got.Reasons, reason)
+				}
+			}
+			if tc.unwantedReason != "" && contains(got.Reasons, tc.unwantedReason) {
+				t.Errorf("reasons = %v, must not contain %q", got.Reasons, tc.unwantedReason)
 			}
 		})
 	}

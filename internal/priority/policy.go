@@ -136,8 +136,16 @@ func Evaluate(policy Policy, input Input) (Decision, error) {
 		return Decision{Level: P2, Reasons: append(reasons, "within_p2_radius", severityReason(input.Incident.Severity), confidenceReason(input.Incident.Confidence))}, nil
 	}
 	if possiblyWithinP2 {
-		if knownAccuracy {
+		if knownAccuracy && definitelyWithinP2 {
 			reasons = append(reasons, "within_p2_radius")
+		} else {
+			if !knownAccuracy {
+				// Unknown accuracy is conservatively treated as a raw-radius
+				// candidate, but never as a definite spatial match.
+				reasons = append(reasons, "possibly_within_p2_radius")
+			} else {
+				reasons = append(reasons, "location_uncertain", "possibly_within_p2_radius")
+			}
 		}
 		if input.Incident.Confidence == ConfidenceDisputed {
 			reasons = append(reasons, "confidence_disputed")

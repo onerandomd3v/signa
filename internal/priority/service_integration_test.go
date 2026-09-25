@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"os/exec"
@@ -52,12 +53,26 @@ func TestServiceUsesPrivacySafeProximityStore(t *testing.T) {
 	`, incidentID, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	accuracy := 10.0
-	userID := uuid.New()
-	if _, err := proximity.UpsertUserLocation(ctx, geospatial.RestrictedUserLocation{
-		UserID: userID, Point: geospatial.Point{Latitude: 6.5244, Longitude: 3.3792}, AccuracyMeters: &accuracy, ObservedAt: now.Add(-time.Minute),
-	}); err != nil {
-		t.Fatal(err)
+	incidentLatitude := 6.5244
+	incidentLongitude := 3.3792
+	metersPerLongitude := 111320 * math.Cos(incidentLatitude*math.Pi/180)
+	pointAtDistance := func(distanceMeters float64) geospatial.Point {
+		return geospatial.Point{Latitude: incidentLatitude, Longitude: incidentLongitude + distanceMeters/metersPerLongitude}
+	}
+	possibleUser := uuid.New()
+	definitelyOutsideUser := uuid.New()
+	definitelyInsideUser := uuid.New()
+	possibleAccuracy := 100.0
+	zeroAccuracy := 0.0
+	insideAccuracy := 10.0
+	for _, location := range []geospatial.RestrictedUserLocation{
+		{UserID: possibleUser, Point: pointAtDistance(550), AccuracyMeters: &possibleAccuracy, ObservedAt: now.Add(-time.Minute)},
+		{UserID: definitelyOutsideUser, Point: pointAtDistance(550), AccuracyMeters: &zeroAccuracy, ObservedAt: now.Add(-time.Minute)},
+		{UserID: definitelyInsideUser, Point: pointAtDistance(480), AccuracyMeters: &insideAccuracy, ObservedAt: now.Add(-time.Minute)},
+	} {
+		if _, err := proximity.UpsertUserLocation(ctx, location); err != nil {
+			t.Fatal(err)
+		}
 	}
 	service, err := NewService(pool, proximity, testPolicy())
 	if err != nil {
@@ -67,8 +82,21 @@ func TestServiceUsesPrivacySafeProximityStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].UserID != userID || results[0].Decision.Level != P1 {
-		t.Fatalf("priority evaluations = %+v, want one P1 evaluation", results)
+	decisions := make(map[uuid.UUID]Decision)
+	for _, result := range results {
+		decisions[result.UserID] = result.Decision
+	}
+	if len(results) != 2 {
+		t.Fatalf("priority evaluations = %+v, want possible and definite users only", results)
+	}
+	if decisions[possibleUser].Level != P3 || !contains(decisions[possibleUser].Reasons, "location_uncertain") || !contains(decisions[possibleUser].Reasons, "possibly_within_p2_radius") {
+		t.Fatalf("possible user decision = %+v, want uncertain P3", decisions[possibleUser])
+	}
+	if _, ok := decisions[definitelyOutsideUser]; ok {
+		t.Fatalf("definitely outside user was returned: %+v", decisions[definitelyOutsideUser])
+	}
+	if decisions[definitelyInsideUser].Level != P2 || !contains(decisions[definitelyInsideUser].Reasons, "within_p2_radius") {
+		t.Fatalf("definitely inside user decision = %+v, want P2", decisions[definitelyInsideUser])
 	}
 	encoded, err := json.Marshal(results)
 	if err != nil {

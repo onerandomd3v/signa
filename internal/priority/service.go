@@ -49,7 +49,7 @@ func (s *Service) EvaluateIncident(ctx context.Context, incidentID uuid.UUID, as
 	if err != nil {
 		return nil, err
 	}
-	proximity, err := s.proximity.FindUsersWithinRadius(ctx, geospatial.ProximityQuery{
+	proximity, err := s.proximity.FindUsersPossiblyWithinRadius(ctx, geospatial.ProximityQuery{
 		Target:       target,
 		RadiusMeters: s.policy.P2RadiusMeters,
 		AsOf:         asOf,
