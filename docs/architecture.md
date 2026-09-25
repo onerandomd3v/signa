@@ -147,6 +147,8 @@ Exact reporter location may itself be sensitive.
 
 The system should collect only what is necessary and should avoid retaining continuous user movement unless a feature explicitly requires it.
 
+The authenticated route-relevance API is a request-scoped browser-display projection: it may return validated route geometry to the requesting session for map display, but it does not persist or publish route input or geometry. This projection is separate from COD-210 priority evaluation, which does not return or embed route geometry in priority reasons or events.
+
 Public-facing incident information should expose an appropriate area or zone rather than a reporter's exact position.
 
 ## 4.7 Text-first, media-optional

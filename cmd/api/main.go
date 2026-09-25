@@ -20,6 +20,7 @@ import (
 	platformredis "github.com/onerandomd3v/signa/internal/platform/redis"
 	"github.com/onerandomd3v/signa/internal/realtime"
 	"github.com/onerandomd3v/signa/internal/reports"
+	"github.com/onerandomd3v/signa/internal/routing"
 )
 
 func main() {
@@ -38,6 +39,18 @@ func run(parent context.Context, logger *slog.Logger) error {
 	publicGeometryPolicy, err := config.LoadPublicIncidentGeometryPolicy()
 	if err != nil {
 		return fmt.Errorf("load public incident geometry policy: %w", err)
+	}
+	var routeProvider routing.Provider
+	if routingConfig, routingErr := config.LoadRoutingConfig(); routingErr != nil {
+		logger.Warn("route relevance is disabled; routing configuration is unavailable", "error", routingErr)
+	} else if provider, providerErr := routing.NewProvider(routing.Config{
+		Provider: routingConfig.Provider,
+		BaseURL:  routingConfig.BaseURL,
+		Timeout:  routingConfig.Timeout,
+	}, http.DefaultClient); providerErr != nil {
+		logger.Warn("route relevance is disabled; routing provider could not be initialized", "error", providerErr)
+	} else {
+		routeProvider = provider
 	}
 
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
@@ -86,6 +99,11 @@ func run(parent context.Context, logger *slog.Logger) error {
 		GlobalBurst:            cfg.GlobalReportRateBurst,
 	}, cfg.WebAllowedOrigins, pool, storage, incidents.NewStore(pool), publicGeometryPolicy, api.AuthConfig{
 		Store: sessionStore,
+		RouteRelevance: api.RouteRelevanceConfig{
+			Provider: routeProvider,
+			Reader:   incidents.NewStore(pool),
+			Policy:   publicGeometryPolicy,
+		},
 	}, sseHandler, reports.NewStore(pool))
 	serverErrors := make(chan error, 1)
 	go func() {

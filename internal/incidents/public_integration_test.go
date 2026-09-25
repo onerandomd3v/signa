@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/geospatial"
+	"github.com/onerandomd3v/signa/internal/routing"
 )
 
 func TestPublicIncidentGeometryIntegration(t *testing.T) {
@@ -112,6 +114,24 @@ func TestPublicIncidentGeometryIntegration(t *testing.T) {
 	}
 
 	store := NewStore(pool)
+	route := routing.GeoJSONLineString{Type: "LineString", Coordinates: [][]float64{{3.376, 6.5244}, {3.382, 6.5244}}}
+	classification, routeIncidents, err := store.FindPublicRouteRelevance(ctx, route, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if classification != geospatial.RouteRelevanceRelevant {
+		t.Fatalf("route classification = %q, want RELEVANT", classification)
+	}
+	if len(routeIncidents) == 0 {
+		t.Fatal("route relevance returned no public incident references")
+	}
+	encodedRouteIncidents, err := json.Marshal(routeIncidents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encodedRouteIncidents), "center_point") || strings.Contains(string(encodedRouteIncidents), "reporter") {
+		t.Fatalf("route relevance exposed private incident fields: %s", encodedRouteIncidents)
+	}
 	items, err := store.ListPublicIncidents(ctx, policy)
 	if err != nil {
 		t.Fatal(err)

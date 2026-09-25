@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/geospatial"
+	"github.com/onerandomd3v/signa/internal/routing"
 )
 
 const maxPublicIncidentLimit = 100
@@ -31,6 +33,12 @@ type PublicIncident struct {
 type PublicIncidentReader interface {
 	ListPublicIncidents(context.Context, config.PublicIncidentGeometryPolicy) ([]PublicIncident, error)
 	GetPublicIncident(context.Context, uuid.UUID, config.PublicIncidentGeometryPolicy) (PublicIncident, error)
+}
+
+// RouteRelevanceReader evaluates a request-scoped route against active
+// incidents while returning only the existing public incident projection.
+type RouteRelevanceReader interface {
+	FindPublicRouteRelevance(context.Context, routing.GeoJSONLineString, config.PublicIncidentGeometryPolicy) (geospatial.RouteRelevance, []PublicIncident, error)
 }
 
 const publicIncidentProjection = `
@@ -131,6 +139,103 @@ func (s *Store) GetPublicIncident(ctx context.Context, incidentID uuid.UUID, pol
 		return PublicIncident{}, err
 	}
 	return incident, nil
+}
+
+func (s *Store) FindPublicRouteRelevance(ctx context.Context, geometry routing.GeoJSONLineString, policy config.PublicIncidentGeometryPolicy) (geospatial.RouteRelevance, []PublicIncident, error) {
+	if s == nil || s.pool == nil {
+		return "", nil, fmt.Errorf("incident store database is required")
+	}
+	if err := geometry.Validate(); err != nil {
+		return "", nil, err
+	}
+	if err := policy.Validate(); err != nil {
+		return "", nil, fmt.Errorf("invalid public incident geometry policy: %w", err)
+	}
+	encoded, err := json.Marshal(geometry)
+	if err != nil {
+		return "", nil, fmt.Errorf("encode route geometry: %w", err)
+	}
+	rows, err := s.pool.Query(ctx, `
+WITH route AS (
+	SELECT ST_SetSRID(ST_GeomFromGeoJSON($1::json), 4326) AS geometry
+), metric AS (
+	SELECT
+		i.id,
+		i.event_type,
+		i.status,
+		i.confidence_state,
+		i.severity,
+		CASE
+			WHEN i.affected_geometry IS NOT NULL
+				AND NOT ST_IsEmpty(ST_CollectionExtract(i.affected_geometry::geometry, 3))
+			THEN ST_SimplifyPreserveTopology(
+				ST_SnapToGrid(ST_Transform(ST_Multi(ST_CollectionExtract(i.affected_geometry::geometry, 3)), 3857), $2),
+				$4
+			)
+		END AS affected_metric,
+		ST_SnapToGrid(ST_Transform(i.center_point::geometry, 3857), $2) AS center_metric,
+		CASE
+			WHEN i.affected_geometry IS NULL THEN $5
+			WHEN ST_Intersects(i.affected_geometry::geometry, route.geometry) THEN $6
+			ELSE $7
+		END AS route_relevance,
+		i.started_at,
+		i.last_signal_at,
+		i.updated_at
+	FROM incidents AS i
+	CROSS JOIN route
+	WHERE i.status IN ('OPEN', 'RESOLVING')
+	  AND (i.center_point IS NOT NULL OR i.affected_geometry IS NOT NULL)
+), generalized AS (
+	SELECT
+		id,
+		event_type,
+		status,
+		confidence_state,
+		severity,
+		route_relevance,
+		CASE
+			WHEN affected_metric IS NOT NULL AND NOT ST_IsEmpty(affected_metric) THEN ST_Transform(affected_metric, 4326)
+			WHEN center_metric IS NOT NULL THEN ST_Transform(ST_Buffer(center_metric, $3), 4326)
+		END AS public_geometry,
+		started_at,
+		last_signal_at,
+		updated_at
+	FROM metric
+)
+SELECT id, event_type, status, confidence_state, severity, route_relevance,
+	ST_AsGeoJSON(public_geometry)::jsonb, started_at, last_signal_at, updated_at
+FROM generalized
+WHERE public_geometry IS NOT NULL
+ORDER BY updated_at DESC, id ASC
+LIMIT $8
+`, string(encoded), policy.GridMeters, policy.MinRadiusMeters, policy.SimplifyMeters,
+		geospatial.RouteRelevanceUnknown, geospatial.RouteRelevanceRelevant, geospatial.RouteRelevanceNotRelevant, maxPublicIncidentLimit)
+	if err != nil {
+		return "", nil, fmt.Errorf("query public route relevance: %w", err)
+	}
+	defer rows.Close()
+	classification := geospatial.RouteRelevanceNotRelevant
+	publicIncidents := make([]PublicIncident, 0, maxPublicIncidentLimit)
+	for rows.Next() {
+		var incident PublicIncident
+		var geometryJSON []byte
+		var incidentRelevance geospatial.RouteRelevance
+		if err := rows.Scan(&incident.ID, &incident.EventType, &incident.Status, &incident.ConfidenceState, &incident.Severity, &incidentRelevance, &geometryJSON, &incident.StartedAt, &incident.LastSignalAt, &incident.UpdatedAt); err != nil {
+			return "", nil, fmt.Errorf("scan public route relevance: %w", err)
+		}
+		incident.PublicGeometry = json.RawMessage(geometryJSON)
+		publicIncidents = append(publicIncidents, incident)
+		if incidentRelevance == geospatial.RouteRelevanceRelevant {
+			classification = geospatial.RouteRelevanceRelevant
+		} else if incidentRelevance == geospatial.RouteRelevanceUnknown && classification != geospatial.RouteRelevanceRelevant {
+			classification = geospatial.RouteRelevanceUnknown
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", nil, fmt.Errorf("iterate public route relevance: %w", err)
+	}
+	return classification, publicIncidents, nil
 }
 
 type publicIncidentScanner interface {

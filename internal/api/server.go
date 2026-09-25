@@ -15,6 +15,7 @@ import (
 	"github.com/onerandomd3v/signa/internal/media"
 	"github.com/onerandomd3v/signa/internal/push"
 	"github.com/onerandomd3v/signa/internal/reports"
+	"github.com/onerandomd3v/signa/internal/routing"
 )
 
 // NewHandler builds the HTTP handler while keeping the endpoint compatible with net/http.
@@ -43,8 +44,15 @@ func NewHandlerWithMediaAndCORSAndPublicIncidents(logger *slog.Logger, rateConfi
 }
 
 type AuthConfig struct {
-	Store  auth.SessionStore
-	Alerts alerts.AlertReader
+	Store          auth.SessionStore
+	Alerts         alerts.AlertReader
+	RouteRelevance RouteRelevanceConfig
+}
+
+type RouteRelevanceConfig struct {
+	Provider routing.Provider
+	Reader   incidents.RouteRelevanceReader
+	Policy   config.PublicIncidentGeometryPolicy
 }
 
 func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, ingestors ...reports.Ingestor) http.Handler {
@@ -77,6 +85,29 @@ func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger *slog
 		}
 		if alertReader != nil {
 			router.With(principalMiddleware).Get("/alerts/{alert_id}", alertReadHandler(logger, alertReader))
+		}
+		if authConfig.RouteRelevance.Reader != nil {
+			service := newRouteRelevanceService(authConfig.RouteRelevance.Provider, authConfig.RouteRelevance.Reader, authConfig.RouteRelevance.Policy)
+			routeLimiterConfig := rateConfig
+			if routeLimiterConfig.PerClientRouteRatePerMinute <= 0 {
+				routeLimiterConfig.PerClientRouteRatePerMinute = defaultRouteRatePerMinute
+			}
+			if routeLimiterConfig.PerClientRouteBurst <= 0 {
+				routeLimiterConfig.PerClientRouteBurst = defaultRouteRateBurst
+			}
+			if routeLimiterConfig.GlobalRouteRatePerMinute <= 0 {
+				routeLimiterConfig.GlobalRouteRatePerMinute = defaultGlobalRouteRatePerMinute
+			}
+			if routeLimiterConfig.GlobalRouteBurst <= 0 {
+				routeLimiterConfig.GlobalRouteBurst = defaultGlobalRouteBurst
+			}
+			routeLimiter := NewRateLimiter(RateLimitConfig{
+				PerClientRatePerMinute: routeLimiterConfig.PerClientRouteRatePerMinute,
+				PerClientBurst:         routeLimiterConfig.PerClientRouteBurst,
+				GlobalRatePerMinute:    routeLimiterConfig.GlobalRouteRatePerMinute,
+				GlobalBurst:            routeLimiterConfig.GlobalRouteBurst,
+			}, RateLimiterOptions{})
+			router.With(principalMiddleware, routeLimiter.Middleware).Post("/v1/route-relevance", routeRelevanceHandler(logger, service).ServeHTTP)
 		}
 		if realtimeHandler != nil {
 			router.With(principalMiddleware).Get("/events", realtimeHandler.ServeHTTP)
