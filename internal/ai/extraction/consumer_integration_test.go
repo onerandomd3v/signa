@@ -48,7 +48,7 @@ func TestConsumerRetriesPendingMessageAndAcknowledgesAfterSuccess(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := &sequencedProvider{outputs: [][]byte{nil, []byte(validExtractionJSON())}, errors: []error{errors.New("provider unavailable"), nil}}
+	provider := &sequencedProvider{outputs: [][]byte{nil, []byte(validExtractionJSON())}, errors: []error{transientProviderError("test provider", errors.New("provider unavailable")), nil}}
 	observer := &recordingObserver{}
 	streamClient := NewRedisStreamClient(redisClient)
 	processor := NewProcessor(

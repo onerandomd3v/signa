@@ -35,6 +35,47 @@ func TestVersionedV0EvaluationSuite(t *testing.T) {
 	}
 }
 
+func TestVersionedV0EvaluationSuiteAcceptsExplicitThresholds(t *testing.T) {
+	suite := loadTestSuite(t)
+	minimumPassed := len(suite.Cases)
+	minimumRate := 1.0
+	report, err := EvaluateWithThresholds(context.Background(), suite, replayProvider(suite), testValidator(t), &AcceptanceThresholds{
+		MinimumPassed:   &minimumPassed,
+		MinimumPassRate: &minimumRate,
+	})
+	if err != nil {
+		t.Fatalf("EvaluateWithThresholds() error = %v", err)
+	}
+	if !report.Accepted() || report.Acceptance == nil || report.Acceptance.PassRate != 1 {
+		t.Fatalf("report = %+v, want accepted complete fixture evaluation", report)
+	}
+}
+
+func TestEvaluateWithThresholdsRequiresExplicitConfiguration(t *testing.T) {
+	suite := loadTestSuite(t)
+	if _, err := EvaluateWithThresholds(context.Background(), suite, replayProvider(suite), testValidator(t), nil); err == nil || !strings.Contains(err.Error(), "owner approval") {
+		t.Fatalf("EvaluateWithThresholds() error = %v, want missing owner-approved configuration", err)
+	}
+}
+
+func TestAcceptanceThresholdBoundaries(t *testing.T) {
+	minimumPassed := 3
+	minimumRate := 0.75
+	report := Report{Total: 4, Passed: 3}
+	acceptance, err := report.CheckAcceptance(AcceptanceThresholds{MinimumPassed: &minimumPassed, MinimumPassRate: &minimumRate})
+	if err != nil || !acceptance.Passed {
+		t.Fatalf("boundary acceptance = %+v, err = %v; want pass", acceptance, err)
+	}
+	minimumPassed = 4
+	acceptance, err = report.CheckAcceptance(AcceptanceThresholds{MinimumPassed: &minimumPassed})
+	if err != nil || acceptance.Passed {
+		t.Fatalf("minimum_passed boundary = %+v, err = %v; want fail", acceptance, err)
+	}
+	if _, err := report.CheckAcceptance(AcceptanceThresholds{}); err == nil {
+		t.Fatal("CheckAcceptance() error = nil for missing thresholds")
+	}
+}
+
 func TestVersionedV0EvaluationSuiteCoversRequiredCategories(t *testing.T) {
 	suite := loadTestSuite(t)
 	want := []string{
