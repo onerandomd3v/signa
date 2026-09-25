@@ -33,20 +33,17 @@ supplied by the OpenShip Redis service (normally `:5432` and `:6379`).
 
 ## Migrations
 
-Run the migration image as one OpenShip release/job command before starting or
-rolling the API and worker services:
+Run the migration image as one OpenShip release/job before starting or rolling
+the API and worker services. OpenShip only needs to supply
+`SIGNA_DATABASE_URL` to the migration job and start the image; no shell command
+or environment-variable interpolation in command arguments is required.
 
-```text
--dir /app/migrations postgres "$SIGNA_DATABASE_URL" up
-```
-
-The migration image's entrypoint is `/app/goose`, so the release/job command
-above is passed as its arguments. The job receives `SIGNA_DATABASE_URL` at
-runtime from OpenShip. It uses the repository's existing Goose version,
-`v3.27.0`, and exits after applying pending migrations. Wait for this job to
-succeed before deploying or restarting the API and worker. Do not add
-migration commands to either application service; this prevents the two
-services from racing during startup.
+The migration entrypoint requires a non-empty `SIGNA_DATABASE_URL`, then runs
+Goose with the repository's existing version, `v3.27.0`. It exits with Goose's
+status after applying pending migrations. Wait for the job to exit successfully
+before deploying or restarting the API and worker. Do not add migration
+commands to either application service; this prevents the two services from
+racing during startup.
 
 The migration image is built from `deploy/migrate/Dockerfile` with the same
 repository-root context as the application images. It contains only the

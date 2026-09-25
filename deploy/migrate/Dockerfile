@@ -15,7 +15,8 @@ RUN apk add --no-cache ca-certificates \
 WORKDIR /app
 COPY --from=build --chown=signa:signa /go/bin/goose /app/goose
 COPY --chown=signa:signa migrations /app/migrations
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod 0555 /app/entrypoint.sh
 
 USER signa
-ENTRYPOINT ["/app/goose"]
-CMD ["-h"]
+ENTRYPOINT ["/app/entrypoint.sh"]
