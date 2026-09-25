@@ -1,0 +1,1 @@
+.superpowers/sdd/2026-09-25-cod-254-alert-read-model/plan-path
