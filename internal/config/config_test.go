@@ -289,6 +289,36 @@ func TestLoadRejectsOutOfRangeWebOriginPort(t *testing.T) {
 		t.Fatal("webAllowedOriginsFromEnv() error = nil, want invalid port error")
 	}
 }
+
+func TestLoadWebPushConfigRequiresServerOnlyVAPIDSettings(t *testing.T) {
+	for _, name := range []string{"SIGNA_WEB_PUSH_VAPID_SUBJECT", "SIGNA_WEB_PUSH_VAPID_PUBLIC_KEY", "SIGNA_WEB_PUSH_VAPID_PRIVATE_KEY"} {
+		t.Setenv(name, "")
+	}
+	if _, err := LoadWebPushConfig(); err == nil {
+		t.Fatal("LoadWebPushConfig() error = nil, want missing setting error")
+	}
+}
+
+func TestLoadWebPushConfigParsesBoundedWorkerSettings(t *testing.T) {
+	t.Setenv("SIGNA_WEB_PUSH_VAPID_SUBJECT", "mailto:alerts@example.test")
+	t.Setenv("SIGNA_WEB_PUSH_VAPID_PUBLIC_KEY", "public-key")
+	t.Setenv("SIGNA_WEB_PUSH_VAPID_PRIVATE_KEY", "private-key")
+	t.Setenv("SIGNA_WEB_PUSH_TTL", "2m")
+	t.Setenv("SIGNA_WEB_PUSH_TIMEOUT", "7s")
+
+	got, err := LoadWebPushConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Subscriber != "mailto:alerts@example.test" || got.VAPIDPublicKey != "public-key" || got.VAPIDPrivateKey != "private-key" || got.TTL != 2*time.Minute || got.Timeout != 7*time.Second {
+		t.Fatalf("web push config = %+v", got)
+	}
+
+	t.Setenv("SIGNA_WEB_PUSH_TTL", "2419201s")
+	if _, err := LoadWebPushConfig(); err == nil {
+		t.Fatal("LoadWebPushConfig() error = nil for excessive TTL")
+	}
+}
 func TestLoadPriorityPolicyRequiresExplicitValidConfiguration(t *testing.T) {
 	setPriorityEnv(t, "100", "500", "10m", "30m")
 

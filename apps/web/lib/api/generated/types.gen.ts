@@ -88,6 +88,20 @@ export type ReportMedia = {
     created_at: string;
 };
 
+export type PushSubscriptionRequest = {
+    endpoint: string;
+    keys: {
+        p256dh: string;
+        auth: string;
+    };
+};
+
+export type PushSubscriptionResponse = {
+    id: string;
+    created_at: string;
+    updated_at: string;
+};
+
 /**
  * Active incident projection with generalized public geometry; exact internal coordinates and report evidence are omitted.
  */
@@ -142,6 +156,8 @@ export type ReportLocation = {
 export type ReportId = string;
 
 export type IncidentId = string;
+
+export type SubscriptionId = string;
 
 export type GetHealthData = {
     body?: never;
@@ -408,3 +424,79 @@ export type AttachReportMediaResponses = {
 };
 
 export type AttachReportMediaResponse = AttachReportMediaResponses[keyof AttachReportMediaResponses];
+
+export type RegisterPushSubscriptionData = {
+    body: PushSubscriptionRequest;
+    path?: never;
+    query?: never;
+    url: '/push-subscriptions';
+};
+
+export type RegisterPushSubscriptionErrors = {
+    /**
+     * Invalid subscription
+     */
+    400: ErrorResponse;
+    /**
+     * Authentication required
+     */
+    401: ErrorResponse;
+    /**
+     * Subscription belongs to another user
+     */
+    409: ErrorResponse;
+    /**
+     * Subscription persistence failure
+     */
+    500: ErrorResponse;
+};
+
+export type RegisterPushSubscriptionError = RegisterPushSubscriptionErrors[keyof RegisterPushSubscriptionErrors];
+
+export type RegisterPushSubscriptionResponses = {
+    /**
+     * Existing subscription updated idempotently
+     */
+    200: PushSubscriptionResponse;
+    /**
+     * Push subscription registered
+     */
+    201: PushSubscriptionResponse;
+};
+
+export type RegisterPushSubscriptionResponse = RegisterPushSubscriptionResponses[keyof RegisterPushSubscriptionResponses];
+
+export type RevokePushSubscriptionData = {
+    body?: never;
+    path: {
+        subscription_id: string;
+    };
+    query?: never;
+    url: '/push-subscriptions/{subscription_id}';
+};
+
+export type RevokePushSubscriptionErrors = {
+    /**
+     * Authentication required
+     */
+    401: ErrorResponse;
+    /**
+     * Push subscription not found for this user
+     */
+    404: ErrorResponse;
+    /**
+     * Subscription persistence failure
+     */
+    500: ErrorResponse;
+};
+
+export type RevokePushSubscriptionError = RevokePushSubscriptionErrors[keyof RevokePushSubscriptionErrors];
+
+export type RevokePushSubscriptionResponses = {
+    /**
+     * Push subscription revoked
+     */
+    204: void;
+};
+
+export type RevokePushSubscriptionResponse = RevokePushSubscriptionResponses[keyof RevokePushSubscriptionResponses];

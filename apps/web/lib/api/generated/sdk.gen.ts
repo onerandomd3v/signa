@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, GetCurrentSessionData, GetCurrentSessionErrors, GetCurrentSessionResponses, GetHealthData, GetHealthResponses, GetIncidentData, GetIncidentErrors, GetIncidentResponses, ListIncidentsData, ListIncidentsErrors, ListIncidentsResponses, StreamRealtimeEventsData, StreamRealtimeEventsErrors, StreamRealtimeEventsResponse, StreamRealtimeEventsResponses } from './types.gen';
+import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, GetCurrentSessionData, GetCurrentSessionErrors, GetCurrentSessionResponses, GetHealthData, GetHealthResponses, GetIncidentData, GetIncidentErrors, GetIncidentResponses, ListIncidentsData, ListIncidentsErrors, ListIncidentsResponses, RegisterPushSubscriptionData, RegisterPushSubscriptionErrors, RegisterPushSubscriptionResponses, RevokePushSubscriptionData, RevokePushSubscriptionErrors, RevokePushSubscriptionResponses, StreamRealtimeEventsData, StreamRealtimeEventsErrors, StreamRealtimeEventsResponse, StreamRealtimeEventsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -101,4 +101,36 @@ export const attachReportMedia = <ThrowOnError extends boolean = false>(options:
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Register the authenticated browser's Web Push subscription
+ *
+ * Stores the subscription for the authenticated user. Endpoint and key material are never returned.
+ */
+export const registerPushSubscription = <ThrowOnError extends boolean = false>(options: Options<RegisterPushSubscriptionData, ThrowOnError>): RequestResult<RegisterPushSubscriptionResponses, RegisterPushSubscriptionErrors, ThrowOnError> => (options.client ?? client).post<RegisterPushSubscriptionResponses, RegisterPushSubscriptionErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'signa_session',
+            type: 'apiKey'
+        }],
+    url: '/push-subscriptions',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Revoke one authenticated user's Web Push subscription
+ */
+export const revokePushSubscription = <ThrowOnError extends boolean = false>(options: Options<RevokePushSubscriptionData, ThrowOnError>): RequestResult<RevokePushSubscriptionResponses, RevokePushSubscriptionErrors, ThrowOnError> => (options.client ?? client).delete<RevokePushSubscriptionResponses, RevokePushSubscriptionErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'signa_session',
+            type: 'apiKey'
+        }],
+    url: '/push-subscriptions/{subscription_id}',
+    ...options
 });
