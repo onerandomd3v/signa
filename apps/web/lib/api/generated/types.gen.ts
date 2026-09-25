@@ -99,9 +99,16 @@ export type PublicIncident = {
 /**
  * GeoJSON-compatible generalized incident area in EPSG:4326.
  */
-export type PublicIncidentGeometry = {
-    type: 'Polygon' | 'MultiPolygon';
-    coordinates: Array<unknown>;
+export type PublicIncidentGeometry = PublicIncidentPolygonGeometry | PublicIncidentMultiPolygonGeometry;
+
+export type PublicIncidentPolygonGeometry = {
+    type: 'Polygon';
+    coordinates: Array<Array<Array<number>>>;
+};
+
+export type PublicIncidentMultiPolygonGeometry = {
+    type: 'MultiPolygon';
+    coordinates: Array<Array<Array<Array<number>>>>;
 };
 
 export type ErrorResponse = {

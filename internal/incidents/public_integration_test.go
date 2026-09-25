@@ -73,7 +73,7 @@ func TestPublicIncidentGeometryIntegration(t *testing.T) {
 	}
 	_, err = pool.Exec(ctx, `
 		INSERT INTO incidents (id, event_type, status, confidence_state, severity, affected_geometry, started_at, last_signal_at, created_at, updated_at)
-		VALUES ($1, 'affected_area', 'RESOLVING', 'EMERGING', 'P2', ST_GeomFromText('POLYGON((3.3780 6.5235, 3.3804 6.5235, 3.3804 6.5253, 3.3780 6.5253, 3.3780 6.5235))', 4326)::geography, $2, $2, $2, $2)
+		VALUES ($1, 'affected_area', 'RESOLVING', 'EMERGING', 'MODERATE', ST_GeomFromText('POLYGON((3.3780 6.5235, 3.3804 6.5235, 3.3804 6.5253, 3.3780 6.5253, 3.3780 6.5235))', 4326)::geography, $2, $2, $2, $2)
 	`, affectedID, base.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)

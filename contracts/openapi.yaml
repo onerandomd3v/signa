@@ -355,15 +355,47 @@ components:
         last_signal_at: { type: [string, 'null'], format: date-time }
         updated_at: { type: string, format: date-time }
     PublicIncidentGeometry:
-      type: object
       description: GeoJSON-compatible generalized incident area in EPSG:4326.
+      oneOf:
+        - $ref: '#/components/schemas/PublicIncidentPolygonGeometry'
+        - $ref: '#/components/schemas/PublicIncidentMultiPolygonGeometry'
+    PublicIncidentPolygonGeometry:
+      type: object
       required: [type, coordinates]
       properties:
-        type:
-          type: string
-          enum: [Polygon, MultiPolygon]
+        type: { type: string, const: Polygon }
         coordinates:
+          description: GeoJSON positions use [longitude, latitude] ordering.
           type: array
+          minItems: 1
+          items:
+            type: array
+            minItems: 4
+            items:
+              type: array
+              minItems: 2
+              maxItems: 3
+              items: { type: number }
+    PublicIncidentMultiPolygonGeometry:
+      type: object
+      required: [type, coordinates]
+      properties:
+        type: { type: string, const: MultiPolygon }
+        coordinates:
+          description: GeoJSON positions use [longitude, latitude] ordering.
+          type: array
+          minItems: 1
+          items:
+            type: array
+            minItems: 1
+            items:
+              type: array
+              minItems: 4
+              items:
+                type: array
+                minItems: 2
+                maxItems: 3
+                items: { type: number }
     ErrorResponse:
       type: object
       required:
