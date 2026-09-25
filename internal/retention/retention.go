@@ -98,6 +98,7 @@ func (s *Store) Sweep(ctx context.Context, now time.Time, policy Policy) (Counts
 				FROM user_locations
 				WHERE observed_at < $1
 				ORDER BY observed_at, user_id LIMIT $2
+				FOR UPDATE
 			), watermarks AS (
 				INSERT INTO user_location_deletions (user_id, last_observed_at, deleted_at)
 				SELECT user_id, observed_at, $3 FROM expired
@@ -110,6 +111,7 @@ func (s *Store) Sweep(ctx context.Context, now time.Time, policy Policy) (Counts
 			DELETE FROM user_locations AS locations
 			USING watermarks
 			WHERE locations.user_id = watermarks.user_id
+			  AND locations.observed_at < $1
 		`, now.Add(-policy.UserLocation), policy.BatchSize, now)
 	})
 	if err != nil {
