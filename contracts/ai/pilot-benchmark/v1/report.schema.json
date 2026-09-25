@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://signa.local/contracts/ai/pilot-benchmark/v1/report.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["report_version", "benchmark_version", "execution_mode", "acceptance_threshold_status", "overall", "components", "guardrails", "scenario_coverage", "known_limitations"],
+  "properties": {
+    "report_version": {"const": "signa.ai.pilot-benchmark-report.v1"},
+    "benchmark_version": {"const": "signa.ai.pilot-benchmark.v1"},
+    "execution_mode": {"enum": ["offline_deterministic", "injected"]},
+    "acceptance_threshold_status": {"const": "not_configured"},
+    "overall": {"$ref": "#/$defs/counts"},
+    "components": {"type": "array", "minItems": 6, "items": {"$ref": "#/$defs/component"}},
+    "guardrails": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/guardrail"}},
+    "scenario_coverage": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/scenario"}},
+    "known_limitations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+  },
+  "$defs": {
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_cases", "passed_cases", "failed_cases", "pass_rate", "evaluation_units_total", "evaluation_units_passed", "evaluation_units_failed"],
+      "properties": {
+        "total_cases": {"type": "integer", "minimum": 0},
+        "passed_cases": {"type": "integer", "minimum": 0},
+        "failed_cases": {"type": "integer", "minimum": 0},
+        "pass_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "evaluation_units_total": {"type": "integer", "minimum": 0},
+        "evaluation_units_passed": {"type": "integer", "minimum": 0},
+        "evaluation_units_failed": {"type": "integer", "minimum": 0}
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "evaluation_version", "contract_version", "tolerance_version", "provider_mode", "failures", "total_cases", "passed_cases", "failed_cases", "pass_rate", "evaluation_units_total", "evaluation_units_passed", "evaluation_units_failed"],
+      "properties": {
+        "name": {"enum": ["extraction", "location", "similarity", "contradiction", "independence", "alert_summarization", "coordination"]},
+        "evaluation_version": {"type": "string", "minLength": 1},
+        "contract_version": {"type": "string", "minLength": 1},
+        "tolerance_version": {"type": ["string", "null"]},
+        "provider_mode": {"enum": ["fixture_replay", "rule_based", "deterministic", "injected"]},
+        "failures": {"type": "array", "items": {"$ref": "#/$defs/failure"}},
+        "total_cases": {"type": "integer", "minimum": 0},
+        "passed_cases": {"type": "integer", "minimum": 0},
+        "failed_cases": {"type": "integer", "minimum": 0},
+        "pass_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "evaluation_units_total": {"type": "integer", "minimum": 0},
+        "evaluation_units_passed": {"type": "integer", "minimum": 0},
+        "evaluation_units_failed": {"type": "integer", "minimum": 0}
+      }
+    },
+    "guardrail": {
+      "$ref": "#/$defs/component",
+      "properties": {"name": {"const": "coordination"}}
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "categories", "kinds"],
+      "properties": {
+        "case_id": {"type": "string", "minLength": 1},
+        "categories": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "kinds": {"type": "array", "minItems": 1, "items": {"enum": ["provider_error", "schema_validation_failed", "fixture_mismatch", "evaluation_failure"]}}
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario", "fixtures"],
+      "properties": {
+        "scenario": {"type": "string", "minLength": 1},
+        "fixtures": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["component", "case_id"], "properties": {"component": {"type": "string", "minLength": 1}, "case_id": {"type": "string", "minLength": 1}}}}
+      }
+    }
+  }
+}
