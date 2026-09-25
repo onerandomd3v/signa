@@ -162,14 +162,9 @@ func (s *Store) Create(ctx context.Context, request CreateRequest) (CreateResult
 	alert.requestFingerprint = fingerprint
 
 	payload, err := json.Marshal(struct {
-		AlertID            string         `json:"alert_id"`
-		IncidentID         string         `json:"incident_id"`
-		AlertType          AlertType      `json:"alert_type"`
-		ConfidenceSnapshot string         `json:"confidence_snapshot"`
-		SeveritySnapshot   string         `json:"severity_snapshot"`
-		PrioritySnapshot   priority.Level `json:"priority_snapshot"`
-		CreatedAt          time.Time      `json:"created_at"`
-	}{alert.ID, alert.IncidentID, alert.AlertType, alert.ConfidenceSnapshot, alert.SeveritySnapshot, alert.PrioritySnapshot, alert.CreatedAt.UTC()})
+		AlertID    string `json:"alert_id"`
+		IncidentID string `json:"incident_id"`
+	}{alert.ID, alert.IncidentID})
 	if err != nil {
 		return CreateResult{}, fmt.Errorf("marshal alert event: %w", err)
 	}
