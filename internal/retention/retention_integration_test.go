@@ -52,12 +52,12 @@ func TestSweepMinimizesSensitiveDataInBatchesAndIsIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var userOldOne, userOldTwo, userYoung string
+	var userOldOne, userOldTwo, userYoung, userRace string
 	for _, row := range []struct {
 		id   *string
 		when time.Time
 	}{
-		{&userOldOne, old}, {&userOldTwo, old.Add(time.Minute)}, {&userYoung, young},
+		{&userRace, old.Add(-time.Minute)}, {&userOldOne, old}, {&userOldTwo, old.Add(time.Minute)}, {&userYoung, young},
 	} {
 		*row.id = uuid.NewString()
 		if _, err := db.Exec(ctx, `INSERT INTO user_locations (user_id, location, observed_at, updated_at) VALUES ($1, ST_SetSRID(ST_MakePoint(3.3, 6.5), 4326)::geography, $2, $2)`, *row.id, row.when); err != nil {
@@ -99,19 +99,52 @@ func TestSweepMinimizesSensitiveDataInBatchesAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	policy := Policy{ReportExactLocation: time.Hour, UserLocation: time.Hour, MediaMetadata: time.Hour, OperationalLogs: time.Hour, AuthSessions: time.Hour, SweepInterval: time.Minute, BatchSize: 1}
-	counts, err := store.Sweep(ctx, now, policy)
+	writerTx, err := db.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts.ReportLocations != 2 || counts.UserLocations != 2 || counts.MediaMetadata != 1 || counts.OutboxEvents != 1 || counts.IncidentHistory != 1 || counts.DeliveryAttempts != 1 || counts.DeliveryQuarantine != 1 || counts.AuthSessions != 2 {
+	if _, err := writerTx.Exec(ctx, `UPDATE user_locations SET observed_at = $1, updated_at = $1 WHERE user_id = $2`, now, userRace); err != nil {
+		_ = writerTx.Rollback(ctx)
+		t.Fatal(err)
+	}
+	type sweepResult struct {
+		counts Counts
+		err    error
+	}
+	done := make(chan sweepResult, 1)
+	go func() {
+		counts, sweepErr := store.Sweep(ctx, now, policy)
+		done <- sweepResult{counts: counts, err: sweepErr}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if err := writerTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	result := <-done
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	counts := result.counts
+	if counts.ReportLocations != 2 || counts.UserLocations != 2 || counts.MediaMetadata != 1 || counts.OutboxEvents != 1 || counts.AuthSessions != 2 {
 		t.Fatalf("sweep counts = %+v", counts)
 	}
 	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM reports WHERE claimed_location IS NOT NULL OR device_location IS NOT NULL`, 1)
-	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM user_locations`, 1)
+	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM user_locations`, 2)
 	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM report_media`, 0)
 	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM outbox_events`, 1)
+	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM incident_state_history`, 1)
+	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM delivery_attempts`, 1)
+	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM delivery_quarantine`, 1)
 	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM auth_sessions`, 1)
+	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM user_locations WHERE user_id = $1`, 1, userRace)
 	assertRetentionCount(t, ctx, db, `SELECT count(*) FROM user_location_deletions WHERE user_id = $1`, 1, userOldOne)
+	var raceObservedAt time.Time
+	if err := db.QueryRow(ctx, `SELECT observed_at FROM user_locations WHERE user_id = $1`, userRace).Scan(&raceObservedAt); err != nil {
+		t.Fatal(err)
+	}
+	if raceObservedAt.Before(now) {
+		t.Fatalf("race user location observed_at = %s, want at least %s", raceObservedAt, now)
+	}
 
 	second, err := store.Sweep(ctx, now, policy)
 	if err != nil {

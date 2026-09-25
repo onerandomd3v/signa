@@ -854,12 +854,17 @@ domain owns referential constraints. Exact user and report coordinates remain
 restricted internal data and are omitted from generic public representations.
 
 Route geometry is request-scoped in the MVP. The routing provider response is
-used for relevance evaluation and is not written to PostgreSQL. Repository-
-controlled media metadata, published operational records, and terminal auth
-sessions are swept in bounded batches when their explicit retention settings
-are present. The sweep removes PostgreSQL metadata only; external object
-storage objects remain outside the application deletion boundary until a safe
-storage-delete policy is approved.
+used for relevance evaluation and is not written to PostgreSQL. Privacy-
+sensitive report/user locations, repository-controlled media metadata,
+published outbox transport records, and terminal auth sessions are swept in
+bounded batches when their explicit retention settings are present. Incident
+state history and delivery attempts/quarantine are durable audit history for
+operator review and remain intact in this policy until a distinct approved
+retention policy exists. External OpenShip, Cloudflare, and Vercel logs remain
+deployment-policy boundaries rather than application deletion targets. The
+sweep removes PostgreSQL media metadata only; external object storage objects
+remain outside the application deletion boundary until a safe storage-delete
+policy is approved.
 
 ### 18.1 Public incident geometry
 

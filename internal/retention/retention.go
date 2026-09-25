@@ -16,10 +16,13 @@ type Policy struct {
 	ReportExactLocation time.Duration
 	UserLocation        time.Duration
 	MediaMetadata       time.Duration
-	OperationalLogs     time.Duration
-	AuthSessions        time.Duration
-	SweepInterval       time.Duration
-	BatchSize           int
+	// OperationalLogs applies only to safely expired, published outbox
+	// transport records. Durable incident and delivery audit history is not
+	// swept by this policy.
+	OperationalLogs time.Duration
+	AuthSessions    time.Duration
+	SweepInterval   time.Duration
+	BatchSize       int
 }
 
 func (p Policy) Validate() error {
@@ -42,14 +45,11 @@ func (p Policy) Validate() error {
 }
 
 type Counts struct {
-	ReportLocations    int64
-	UserLocations      int64
-	MediaMetadata      int64
-	OutboxEvents       int64
-	IncidentHistory    int64
-	DeliveryAttempts   int64
-	DeliveryQuarantine int64
-	AuthSessions       int64
+	ReportLocations int64
+	UserLocations   int64
+	MediaMetadata   int64
+	OutboxEvents    int64
+	AuthSessions    int64
 }
 
 type Store struct{ pool *pgxpool.Pool }
@@ -62,8 +62,9 @@ func NewStore(pool *pgxpool.Pool) (*Store, error) {
 }
 
 // Sweep applies one bounded, repeatable retention pass. It never deletes
-// reports, incidents, alerts, or deliveries, and it never deletes external
-// media objects because the storage abstraction has no safe delete contract.
+// reports, incidents, alerts, deliveries, or durable audit history, and it
+// never deletes external media objects because the storage abstraction has no
+// safe delete contract.
 func (s *Store) Sweep(ctx context.Context, now time.Time, policy Policy) (Counts, error) {
 	if s == nil || s.pool == nil {
 		return Counts{}, errors.New("retention database is required")
@@ -132,23 +133,18 @@ func (s *Store) Sweep(ctx context.Context, now time.Time, policy Policy) (Counts
 	}
 
 	operationalCutoff := now.Add(-policy.OperationalLogs)
-	operationalQueries := []struct {
-		name  string
-		query string
-		count *int64
-	}{
-		{"outbox events", `DELETE FROM outbox_events WHERE id IN (SELECT id FROM outbox_events WHERE published_at IS NOT NULL AND created_at < $1 ORDER BY created_at, id LIMIT $2)`, &counts.OutboxEvents},
-		{"incident history", `DELETE FROM incident_state_history WHERE id IN (SELECT id FROM incident_state_history WHERE transitioned_at < $1 ORDER BY transitioned_at, id LIMIT $2)`, &counts.IncidentHistory},
-		{"delivery attempts", `DELETE FROM delivery_attempts WHERE id IN (SELECT id FROM delivery_attempts WHERE completed_at IS NOT NULL AND completed_at < $1 ORDER BY completed_at, id LIMIT $2)`, &counts.DeliveryAttempts},
-		{"delivery quarantine", `DELETE FROM delivery_quarantine WHERE delivery_id IN (SELECT delivery_id FROM delivery_quarantine WHERE quarantined_at < $1 ORDER BY quarantined_at, delivery_id LIMIT $2)`, &counts.DeliveryQuarantine},
-	}
-	for _, item := range operationalQueries {
-		*item.count, err = sweepBatches(ctx, policy.BatchSize, func(ctx context.Context) (int64, error) {
-			return s.execBatch(ctx, item.query, operationalCutoff, policy.BatchSize)
-		})
-		if err != nil {
-			return counts, fmt.Errorf("delete %s: %w", item.name, err)
-		}
+	counts.OutboxEvents, err = sweepBatches(ctx, policy.BatchSize, func(ctx context.Context) (int64, error) {
+		return s.execBatch(ctx, `
+			DELETE FROM outbox_events
+			WHERE id IN (
+				SELECT id FROM outbox_events
+				WHERE published_at IS NOT NULL AND created_at < $1
+				ORDER BY created_at, id LIMIT $2
+			)
+		`, operationalCutoff, policy.BatchSize)
+	})
+	if err != nil {
+		return counts, fmt.Errorf("delete published outbox events: %w", err)
 	}
 	counts.AuthSessions, err = sweepBatches(ctx, policy.BatchSize, func(ctx context.Context) (int64, error) {
 		return s.execBatch(ctx, `
@@ -187,9 +183,6 @@ func (s *Store) RunSweep(ctx context.Context, policy Policy, logger *slog.Logger
 				"user_locations", counts.UserLocations,
 				"media_metadata", counts.MediaMetadata,
 				"outbox_events", counts.OutboxEvents,
-				"incident_history", counts.IncidentHistory,
-				"delivery_attempts", counts.DeliveryAttempts,
-				"delivery_quarantine", counts.DeliveryQuarantine,
 				"auth_sessions", counts.AuthSessions,
 			)
 		}
