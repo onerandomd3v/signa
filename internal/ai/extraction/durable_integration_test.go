@@ -53,7 +53,7 @@ func TestDurableExtractionPersistenceIntegration(t *testing.T) {
 	}
 	provider := &fakeProvider{result: []byte(validExtractionJSON())}
 	acker := &fakeAcker{}
-	processor := NewProcessor(NewPostgresReportReader(pool), provider, validator, NewDurableStore(pool), acker, "signa:report-events", "integration")
+	processor := NewProcessor(NewPostgresReportReader(pool), provider, validator, NewDurableStore(pool, validator), acker, "signa:report-events", "integration")
 	message := StreamMessage{ID: "message-1", Values: map[string]any{"event_id": "event-1", "event_name": ReportCreatedV1, "aggregate_type": "report", "payload": fmt.Sprintf(`{"report_id":"%s"}`, reportID)}}
 	if err := processor.Process(ctx, message); err != nil {
 		t.Fatal(err)
@@ -119,7 +119,8 @@ func TestDurableExtractionFailureDoesNotAckOrPersist(t *testing.T) {
 	}
 	provider := &fakeProvider{result: []byte(validExtractionJSON())}
 	acker := &fakeAcker{}
-	processor := NewProcessor(NewPostgresReportReader(pool), provider, &fakeValidator{result: Extraction{ContractVersion: "signa.ai.report-extraction.v0", TaxonomyVersion: "signa.event-taxonomy.v0"}}, NewDurableStore(pool), acker, "signa:report-events", "integration")
+	validator := &fakeValidator{result: Extraction{ContractVersion: "signa.ai.report-extraction.v0", TaxonomyVersion: "signa.event-taxonomy.v0"}}
+	processor := NewProcessor(NewPostgresReportReader(pool), provider, validator, NewDurableStore(pool, validator), acker, "signa:report-events", "integration")
 	err = processor.Process(ctx, StreamMessage{ID: "message-1", Values: map[string]any{"event_id": "event-1", "event_name": ReportCreatedV1, "aggregate_type": "report", "payload": fmt.Sprintf(`{"report_id":"%s"}`, reportID)}})
 	if err == nil || acker.calls != 0 {
 		t.Fatalf("Process() err = %v, acks = %d; want failure without ack", err, acker.calls)

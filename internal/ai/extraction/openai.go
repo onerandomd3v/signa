@@ -30,6 +30,8 @@ type OpenAIProvider struct {
 	generationSchema json.RawMessage
 }
 
+func (p *OpenAIProvider) ProviderName() string { return "openai" }
+
 func NewOpenAIProvider(config OpenAIConfig) (*OpenAIProvider, error) {
 	if strings.TrimSpace(config.APIKey) == "" {
 		return nil, fmt.Errorf("OpenAI API key is required")
@@ -65,8 +67,13 @@ func NewOpenAIProvider(config OpenAIConfig) (*OpenAIProvider, error) {
 }
 
 func (p *OpenAIProvider) Extract(ctx context.Context, rawText string) ([]byte, error) {
+	output, _, err := p.ExtractWithUsage(ctx, rawText)
+	return output, err
+}
+
+func (p *OpenAIProvider) ExtractWithUsage(ctx context.Context, rawText string) ([]byte, Usage, error) {
 	if p == nil || p.httpClient == nil {
-		return nil, fmt.Errorf("OpenAI provider is not initialized")
+		return nil, Usage{}, permanentProviderError("initialization", fmt.Errorf("OpenAI provider is not initialized"))
 	}
 	requestBody := struct {
 		Model          string         `json:"model"`
@@ -89,25 +96,28 @@ func (p *OpenAIProvider) Extract(ctx context.Context, rawText string) ([]byte, e
 	}
 	body, err := json.Marshal(requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshal OpenAI request: %w", err)
+		return nil, Usage{}, permanentProviderError("marshal request", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create OpenAI request: %w", err)
+		return nil, Usage{}, permanentProviderError("create request", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	response, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("call OpenAI: %w", err)
+		if ctx.Err() != nil {
+			return nil, Usage{}, ctx.Err()
+		}
+		return nil, Usage{}, transientProviderError("call OpenAI", err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("read OpenAI response: %w", err)
+		return nil, Usage{}, transientProviderError("read response", err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("OpenAI returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(responseBody)))
+		return nil, Usage{}, httpProviderError(response.StatusCode)
 	}
 	var envelope struct {
 		Choices []struct {
@@ -115,14 +125,24 @@ func (p *OpenAIProvider) Extract(ctx context.Context, rawText string) ([]byte, e
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(responseBody, &envelope); err != nil {
-		return nil, fmt.Errorf("decode OpenAI response: %w", err)
+		return nil, Usage{}, permanentProviderError("decode response", err)
 	}
 	if len(envelope.Choices) == 0 || strings.TrimSpace(envelope.Choices[0].Message.Content) == "" {
-		return nil, fmt.Errorf("OpenAI response contained no extraction content")
+		return nil, Usage{}, permanentProviderError("decode response", fmt.Errorf("response contained no extraction content"))
 	}
-	return []byte(envelope.Choices[0].Message.Content), nil
+	return []byte(envelope.Choices[0].Message.Content), Usage{
+		InputTokens:  safeNonNegative(envelope.Usage.PromptTokens),
+		OutputTokens: safeNonNegative(envelope.Usage.CompletionTokens),
+		TotalTokens:  safeNonNegative(envelope.Usage.TotalTokens),
+		Attempts:     1,
+	}, nil
 }
 
 // OpenAI's strict structured-output subset does not accept the conditional

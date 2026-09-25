@@ -11,9 +11,14 @@ import (
 
 // DurableStore persists only schema-validated extraction values. The unique
 // report/contract key makes redelivery and concurrent delivery idempotent.
-type DurableStore struct{ pool *pgxpool.Pool }
+type DurableStore struct {
+	pool      *pgxpool.Pool
+	validator ExtractionValidator
+}
 
-func NewDurableStore(pool *pgxpool.Pool) *DurableStore { return &DurableStore{pool: pool} }
+func NewDurableStore(pool *pgxpool.Pool, validator ExtractionValidator) *DurableStore {
+	return &DurableStore{pool: pool, validator: validator}
+}
 
 func (s *DurableStore) Find(ctx context.Context, reportID, contractVersion string) (Extraction, bool, error) {
 	if s == nil || s.pool == nil {
@@ -34,6 +39,9 @@ func (s *DurableStore) Find(ctx context.Context, reportID, contractVersion strin
 	if err := json.Unmarshal(result, &extraction); err != nil {
 		return Extraction{}, false, fmt.Errorf("decode durable extraction: %w", err)
 	}
+	if _, err := s.validate(extraction); err != nil {
+		return Extraction{}, false, fmt.Errorf("validate durable extraction: %w", err)
+	}
 	return extraction, true, nil
 }
 
@@ -41,9 +49,9 @@ func (s *DurableStore) Observe(ctx context.Context, reportID string, result Extr
 	if s == nil || s.pool == nil {
 		return fmt.Errorf("durable extraction store database is required")
 	}
-	encoded, err := json.Marshal(result)
+	encoded, err := s.validate(result)
 	if err != nil {
-		return fmt.Errorf("encode validated extraction: %w", err)
+		return fmt.Errorf("validate extraction before persistence: %w", err)
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -82,4 +90,18 @@ func (s *DurableStore) Observe(ctx context.Context, reportID string, result Extr
 		return fmt.Errorf("commit extraction transaction: %w", err)
 	}
 	return nil
+}
+
+func (s *DurableStore) validate(result Extraction) ([]byte, error) {
+	if s == nil || s.validator == nil {
+		return nil, fmt.Errorf("durable extraction validator is required")
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("encode extraction: %w", err)
+	}
+	if _, err := s.validator.Validate(encoded); err != nil {
+		return nil, err
+	}
+	return encoded, nil
 }

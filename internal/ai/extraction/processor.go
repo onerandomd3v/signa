@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -52,10 +53,16 @@ type Processor struct {
 	acker     Acknowledger
 	stream    string
 	group     string
+	metrics   Metrics
 }
 
 func NewProcessor(reader ReportReader, provider Provider, validator ExtractionValidator, observer Observer, acker Acknowledger, stream, group string) *Processor {
 	return &Processor{reader: reader, provider: provider, validator: validator, observer: observer, acker: acker, stream: stream, group: group}
+}
+
+func (p *Processor) WithMetrics(metrics Metrics) *Processor {
+	p.metrics = metrics
+	return p
 }
 
 func (p *Processor) Process(ctx context.Context, message StreamMessage) error {
@@ -93,21 +100,47 @@ func (p *Processor) Process(ctx context.Context, message StreamMessage) error {
 	if err != nil {
 		return fmt.Errorf("load report %s: %w", event.ReportID, err)
 	}
-	output, err := p.provider.Extract(ctx, rawText)
+	started := time.Now()
+	var output []byte
+	var usage Usage
+	if usageProvider, ok := p.provider.(UsageProvider); ok {
+		output, usage, err = usageProvider.ExtractWithUsage(ctx, rawText)
+	} else {
+		output, err = p.provider.Extract(ctx, rawText)
+		usage.Attempts = 1
+	}
+	providerDuration := time.Since(started)
 	if err != nil {
+		p.observeMetric(AIMetric{Provider: p.providerName(), Outcome: "provider_failure", FailureKind: failureKind(err), Duration: providerDuration, Attempts: usage.Attempts, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens})
 		return fmt.Errorf("extract report %s: %w", event.ReportID, err)
 	}
 	validated, err := p.validator.Validate(output)
 	if err != nil {
+		p.observeMetric(AIMetric{Provider: p.providerName(), Outcome: "malformed_output", FailureKind: FailurePermanent, Duration: providerDuration, Attempts: usage.Attempts, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens})
 		return fmt.Errorf("validate extraction for report %s: %w", event.ReportID, err)
 	}
 	if err := p.observer.Observe(ctx, event.ReportID, validated); err != nil {
+		p.observeMetric(AIMetric{Provider: p.providerName(), Outcome: "durable_persistence_failure", FailureKind: FailureTransient, Duration: providerDuration, Attempts: usage.Attempts, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens})
 		return fmt.Errorf("observe extraction for report %s: %w", event.ReportID, err)
 	}
+	p.observeMetric(AIMetric{Provider: p.providerName(), Outcome: "success", Duration: providerDuration, Attempts: usage.Attempts, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens})
 	if err := p.acker.Ack(ctx, p.stream, p.group, message.ID); err != nil {
 		return fmt.Errorf("ack extraction message %s: %w", message.ID, err)
 	}
 	return nil
+}
+
+func (p *Processor) providerName() string {
+	if named, ok := p.provider.(NamedProvider); ok && named.ProviderName() != "" {
+		return named.ProviderName()
+	}
+	return "provider"
+}
+
+func (p *Processor) observeMetric(metric AIMetric) {
+	if p.metrics != nil {
+		p.metrics.Observe(metric)
+	}
 }
 
 type PostgresReportReader struct {

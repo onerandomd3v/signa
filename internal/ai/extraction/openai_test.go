@@ -108,6 +108,25 @@ func TestOpenAIProviderReturnsHTTPError(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderReportsUsageWithoutReportContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"` + strings.ReplaceAll(validExtractionJSON(), `"`, `\"`) + `"}}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`))
+	}))
+	defer server.Close()
+	provider, err := NewOpenAIProvider(OpenAIConfig{APIKey: "test-key", Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), GenerationSchema: []byte(`{"type":"object"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, usage, err := provider.ExtractWithUsage(t.Context(), "private report text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.InputTokens != 11 || usage.OutputTokens != 7 || usage.TotalTokens != 18 || usage.Attempts != 1 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
 func TestOpenAIProviderRejectsMalformedResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
