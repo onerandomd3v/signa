@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_AI_PROVIDER_TIMEOUT", "SIGNA_AI_RETRY_MAX_ATTEMPTS", "SIGNA_AI_RETRY_BACKOFF", "SIGNA_WEB_ALLOWED_ORIGINS"} {
+	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_AI_PROVIDER_TIMEOUT", "SIGNA_AI_RETRY_MAX_ATTEMPTS", "SIGNA_AI_RETRY_BACKOFF", "SIGNA_DELIVERY_CONSUMER_GROUP", "SIGNA_DELIVERY_CONSUMER_NAME", "SIGNA_DELIVERY_POLL_INTERVAL", "SIGNA_DELIVERY_RETRY_MAX_ATTEMPTS", "SIGNA_DELIVERY_RETRY_BACKOFF", "SIGNA_DELIVERY_ATTEMPT_LEASE", "SIGNA_WEB_ALLOWED_ORIGINS"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("SIGNA_DATABASE_URL", "")
@@ -39,6 +39,9 @@ func TestLoadDefaults(t *testing.T) {
 	if got.AIProviderTimeout != defaultAIProviderTimeout || got.AIRetryMaxAttempts != defaultAIRetryMaxAttempts || got.AIRetryBackoff != defaultAIRetryBackoff {
 		t.Errorf("AI retry defaults = timeout %s, attempts %d, backoff %s", got.AIProviderTimeout, got.AIRetryMaxAttempts, got.AIRetryBackoff)
 	}
+	if got.DeliveryConsumerGroup != defaultDeliveryConsumerGroup || got.DeliveryPollInterval != defaultDeliveryPollInterval || got.DeliveryRetryMaxAttempts != defaultDeliveryRetryMaxAttempts || got.DeliveryRetryBackoff != defaultDeliveryRetryBackoff || got.DeliveryAttemptLease != defaultDeliveryAttemptLease {
+		t.Errorf("delivery defaults = %+v", got)
+	}
 	if !reflect.DeepEqual(got.WebAllowedOrigins, []string{defaultWebAllowedOrigin}) {
 		t.Fatalf("WebAllowedOrigins = %#v, want %#v", got.WebAllowedOrigins, []string{defaultWebAllowedOrigin})
 	}
@@ -65,6 +68,12 @@ func TestLoadEnvironment(t *testing.T) {
 	t.Setenv("SIGNA_AI_PROVIDER_TIMEOUT", "4s")
 	t.Setenv("SIGNA_AI_RETRY_MAX_ATTEMPTS", "5")
 	t.Setenv("SIGNA_AI_RETRY_BACKOFF", "125ms")
+	t.Setenv("SIGNA_DELIVERY_CONSUMER_GROUP", "delivery-test-group")
+	t.Setenv("SIGNA_DELIVERY_CONSUMER_NAME", "delivery-test-consumer")
+	t.Setenv("SIGNA_DELIVERY_POLL_INTERVAL", "900ms")
+	t.Setenv("SIGNA_DELIVERY_RETRY_MAX_ATTEMPTS", "4")
+	t.Setenv("SIGNA_DELIVERY_RETRY_BACKOFF", "300ms")
+	t.Setenv("SIGNA_DELIVERY_ATTEMPT_LEASE", "7m")
 	t.Setenv("SIGNA_WEB_ALLOWED_ORIGINS", " http://localhost:3000, https://staging.signa.test, http://localhost:3000 ")
 
 	got, err := Load()
@@ -93,6 +102,12 @@ func TestLoadEnvironment(t *testing.T) {
 		AIProviderTimeout:         4 * time.Second,
 		AIRetryMaxAttempts:        5,
 		AIRetryBackoff:            125 * time.Millisecond,
+		DeliveryConsumerGroup:     "delivery-test-group",
+		DeliveryConsumerName:      "delivery-test-consumer",
+		DeliveryPollInterval:      900 * time.Millisecond,
+		DeliveryRetryMaxAttempts:  4,
+		DeliveryRetryBackoff:      300 * time.Millisecond,
+		DeliveryAttemptLease:      7 * time.Minute,
 		WebAllowedOrigins:         []string{"http://localhost:3000", "https://staging.signa.test"},
 	}
 	if !reflect.DeepEqual(got, want) {

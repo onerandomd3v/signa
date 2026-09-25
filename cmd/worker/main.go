@@ -155,7 +155,6 @@ func run(parent context.Context, logger *slog.Logger) error {
 		return err
 	}
 	lifecycleConsumer := incidents.NewLifecycleConsumer(streamClient, lifecycleProcessor, outbox.IncidentEventsStream, "signa-incident-lifecycle", consumerName, cfg.AIPollInterval).WithLogger(logger)
-
 	errCh := make(chan error, 6)
 	go func() { errCh <- worker.Run(ctx, logger, cfg.WorkerInterval, publisher) }()
 	go func() { errCh <- consumer.Run(ctx) }()
