@@ -92,6 +92,84 @@ func TestConsumerDoesNotRetryUnresolvedDestination(t *testing.T) {
 	}
 }
 
+func TestConsumerDefersPermanentProviderFailureAcrossPendingCycles(t *testing.T) {
+	message := StreamMessage{ID: "1740000000000-0", Values: reportCreatedFields()}
+	client := &repeatingPendingStreamClient{message: message}
+	provider := &fakeProvider{err: &ProviderError{Kind: FailurePermanent, Operation: "test", Err: errors.New("invalid API request")}}
+	processor := NewProcessor(
+		&fakeReportReader{rawText: "raw report"},
+		provider,
+		&fakeValidator{result: Extraction{ContractVersion: "signa.ai.report-extraction.v0"}},
+		&fakeObserver{},
+		&fakeAcker{},
+		"signa:report-events",
+		"extractors",
+	)
+	consumer := NewConsumer(client, processor, "signa:report-events", "extractors", "worker-1", time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if err := consumer.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if client.pendingReads < 2 {
+		t.Fatalf("pending reads = %d, want repeated consumer cycles", client.pendingReads)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want one terminal attempt", provider.calls)
+	}
+}
+
+func TestConsumerDefersMalformedOutputAcrossPendingCycles(t *testing.T) {
+	message := StreamMessage{ID: "1740000000000-0", Values: reportCreatedFields()}
+	client := &repeatingPendingStreamClient{message: message}
+	provider := &fakeProvider{result: []byte(`{"malformed":true}`)}
+	processor := NewProcessor(
+		&fakeReportReader{rawText: "raw report"},
+		provider,
+		&fakeValidator{err: errors.New("schema validation failed")},
+		&fakeObserver{},
+		&fakeAcker{},
+		"signa:report-events",
+		"extractors",
+	)
+	consumer := NewConsumer(client, processor, "signa:report-events", "extractors", "worker-1", time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if err := consumer.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if client.pendingReads < 2 {
+		t.Fatalf("pending reads = %d, want repeated consumer cycles", client.pendingReads)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want one malformed-output attempt", provider.calls)
+	}
+}
+
+func TestConsumerRecoversFromTransientProviderFailureOnLaterCycle(t *testing.T) {
+	message := StreamMessage{ID: "1740000000000-0", Values: reportCreatedFields()}
+	client := &recoveringPendingStreamClient{message: message}
+	provider := &recoveringProvider{}
+	processor := NewProcessor(
+		&fakeReportReader{rawText: "raw report"},
+		provider,
+		&fakeValidator{result: Extraction{ContractVersion: "signa.ai.report-extraction.v0"}},
+		&fakeObserver{},
+		client,
+		"signa:report-events",
+		"extractors",
+	)
+	consumer := NewConsumer(client, processor, "signa:report-events", "extractors", "worker-1", time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if err := consumer.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if provider.calls != 2 || client.acks != 1 {
+		t.Fatalf("provider calls=%d acks=%d, want transient recovery on second cycle", provider.calls, client.acks)
+	}
+}
+
 func TestReadPendingCombinesLocalAndStaleMessagesWithoutDuplicates(t *testing.T) {
 	client := &combinedPendingStreamClient{
 		local:   []StreamMessage{{ID: "local-1"}},
@@ -146,6 +224,76 @@ type blockedPendingStreamClient struct {
 	message     StreamMessage
 	newRead     chan struct{}
 	newReadOnce sync.Once
+}
+
+type repeatingPendingStreamClient struct {
+	message      StreamMessage
+	pendingReads int
+}
+
+type recoveringPendingStreamClient struct {
+	message StreamMessage
+	acked   bool
+	acks    int
+}
+
+func (c *recoveringPendingStreamClient) EnsureGroup(context.Context, string, string) error {
+	return nil
+}
+
+func (c *recoveringPendingStreamClient) Read(ctx context.Context, _ string, _ string, _ string, pending bool, _ time.Duration) ([]StreamMessage, error) {
+	if pending && !c.acked {
+		return []StreamMessage{c.message}, nil
+	}
+	timer := time.NewTimer(time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return nil, nil
+	}
+}
+
+func (c *recoveringPendingStreamClient) Ack(context.Context, string, string, string) error {
+	c.acked = true
+	c.acks++
+	return nil
+}
+
+type recoveringProvider struct {
+	calls int
+}
+
+func (p *recoveringProvider) Extract(_ context.Context, _ string) ([]byte, error) {
+	p.calls++
+	if p.calls == 1 {
+		return nil, transientProviderError("test provider", errors.New("temporary outage"))
+	}
+	return []byte(validExtractionJSON()), nil
+}
+
+func (c *repeatingPendingStreamClient) EnsureGroup(context.Context, string, string) error {
+	return nil
+}
+
+func (c *repeatingPendingStreamClient) Read(ctx context.Context, _ string, _ string, _ string, pending bool, _ time.Duration) ([]StreamMessage, error) {
+	if pending {
+		c.pendingReads++
+		return []StreamMessage{c.message}, nil
+	}
+	timer := time.NewTimer(time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return nil, nil
+	}
+}
+
+func (c *repeatingPendingStreamClient) Ack(context.Context, string, string, string) error {
+	return nil
 }
 
 func (f *blockedPendingStreamClient) EnsureGroup(context.Context, string, string) error {

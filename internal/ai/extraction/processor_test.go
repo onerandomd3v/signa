@@ -65,6 +65,52 @@ func TestProcessorDoesNotAcknowledgeFailures(t *testing.T) {
 	}
 }
 
+func TestProcessorMalformedOutputCannotBeObservedOrAcknowledged(t *testing.T) {
+	observer := &fakeObserver{}
+	acker := &fakeAcker{}
+	processor := NewProcessor(
+		&fakeReportReader{rawText: "report"},
+		&fakeProvider{result: []byte(`{"not":"the extraction contract"}`)},
+		&fakeValidator{err: errors.New("schema validation failed")},
+		observer,
+		acker,
+		"signa:report-events",
+		"group-1",
+	)
+	err := processor.Process(context.Background(), StreamMessage{ID: "message-1", Values: map[string]any{
+		"event_id": "event-1", "event_name": ReportCreatedV1, "aggregate_type": "report",
+		"payload": `{"report_id":"11111111-1111-4111-8111-111111111111"}`,
+	}})
+	if err == nil {
+		t.Fatal("Process() error = nil")
+	}
+	if observer.result.ContractVersion != "" || acker.calls != 0 {
+		t.Fatalf("malformed output reached durable path: observer=%+v acks=%d", observer.result, acker.calls)
+	}
+}
+
+func TestProcessorRecordsSafeAIUsageMetric(t *testing.T) {
+	metrics := make([]AIMetric, 0, 1)
+	processor := NewProcessor(
+		&fakeReportReader{rawText: "private report text"},
+		&usageTestProvider{result: []byte(validExtractionJSON()), usage: measuredUsage(3, 4, 7)},
+		&fakeValidator{result: Extraction{ContractVersion: "signa.ai.report-extraction.v0"}},
+		&fakeObserver{},
+		&fakeAcker{},
+		"signa:report-events",
+		"group-1",
+	).WithMetrics(MetricsFunc(func(metric AIMetric) { metrics = append(metrics, metric) }))
+	if err := processor.Process(context.Background(), StreamMessage{ID: "message-1", Values: map[string]any{
+		"event_id": "event-1", "event_name": ReportCreatedV1, "aggregate_type": "report",
+		"payload": `{"report_id":"11111111-1111-4111-8111-111111111111"}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(metrics) != 1 || metrics[0].Outcome != "success" || metrics[0].InputTokens != 3 || metrics[0].OutputTokens != 4 || metrics[0].TotalTokens != 7 || !metrics[0].InputTokensAvailable || !metrics[0].OutputTokensAvailable || !metrics[0].TotalTokensAvailable {
+		t.Fatalf("metrics = %+v", metrics)
+	}
+}
+
 func TestLoggingObserverSurfacesDurableDestinationBlocker(t *testing.T) {
 	err := (LoggingObserver{}).Observe(context.Background(), "11111111-1111-4111-8111-111111111111", Extraction{ContractVersion: "signa.ai.report-extraction.v0"})
 	if !errors.Is(err, ErrDurableExtractionDestinationUnresolved) {
@@ -99,6 +145,19 @@ func (p *fakeProvider) Extract(_ context.Context, rawText string) ([]byte, error
 type fakeValidator struct {
 	result Extraction
 	err    error
+}
+
+type usageTestProvider struct {
+	result []byte
+	usage  Usage
+}
+
+func (p *usageTestProvider) Extract(context.Context, string) ([]byte, error) {
+	return p.result, nil
+}
+
+func (p *usageTestProvider) ExtractWithUsage(context.Context, string) ([]byte, Usage, error) {
+	return p.result, p.usage, nil
 }
 
 func (v *fakeValidator) Validate([]byte) (Extraction, error) { return v.result, v.err }

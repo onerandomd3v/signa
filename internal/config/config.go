@@ -24,6 +24,10 @@ const (
 	defaultAIGenerationSchemaPath       = "contracts/ai/extraction/v0/openai.schema.json"
 	defaultAIConsumerGroup              = "signa-ai-text-extraction"
 	defaultAIPollInterval               = time.Second
+	defaultAIProviderTimeout            = 15 * time.Second
+	defaultAIRetryMaxAttempts           = 3
+	defaultAIRetryBackoff               = 250 * time.Millisecond
+	maxAIRetryAttempts                  = 5
 	PublicIncidentGeometryPolicyVersion = "signa.public-incident-geometry.v1"
 )
 
@@ -46,6 +50,9 @@ type Config struct {
 	AIConsumerGroup           string
 	AIConsumerName            string
 	AIPollInterval            time.Duration
+	AIProviderTimeout         time.Duration
+	AIRetryMaxAttempts        int
+	AIRetryBackoff            time.Duration
 	WebAllowedOrigins         []string
 	ObjectStorageEndpoint     string
 	ObjectStorageRegion       string
@@ -263,6 +270,18 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	aiProviderTimeout, err := durationFromEnv("SIGNA_AI_PROVIDER_TIMEOUT", defaultAIProviderTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	aiRetryMaxAttempts, err := boundedIntFromEnv("SIGNA_AI_RETRY_MAX_ATTEMPTS", defaultAIRetryMaxAttempts, maxAIRetryAttempts)
+	if err != nil {
+		return Config{}, err
+	}
+	aiRetryBackoff, err := durationFromEnv("SIGNA_AI_RETRY_BACKOFF", defaultAIRetryBackoff)
+	if err != nil {
+		return Config{}, err
+	}
 	webAllowedOrigins, err := webAllowedOriginsFromEnv()
 	if err != nil {
 		return Config{}, err
@@ -319,6 +338,9 @@ func Load() (Config, error) {
 		AIConsumerGroup:           aiConsumerGroup,
 		AIConsumerName:            os.Getenv("SIGNA_AI_CONSUMER_NAME"),
 		AIPollInterval:            aiPollInterval,
+		AIProviderTimeout:         aiProviderTimeout,
+		AIRetryMaxAttempts:        aiRetryMaxAttempts,
+		AIRetryBackoff:            aiRetryBackoff,
 		WebAllowedOrigins:         webAllowedOrigins,
 		ObjectStorageEndpoint:     os.Getenv("SIGNA_OBJECT_STORAGE_ENDPOINT"),
 		ObjectStorageRegion:       os.Getenv("SIGNA_OBJECT_STORAGE_REGION"),
@@ -326,6 +348,18 @@ func Load() (Config, error) {
 		ObjectStorageAccessKeyID:  os.Getenv("SIGNA_OBJECT_STORAGE_ACCESS_KEY_ID"),
 		ObjectStorageSecret:       os.Getenv("SIGNA_OBJECT_STORAGE_SECRET_ACCESS_KEY"),
 	}, nil
+}
+
+func boundedIntFromEnv(name string, fallback, max int) (int, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 || parsed > max {
+		return 0, fmt.Errorf("%s must be between 1 and %d", name, max)
+	}
+	return parsed, nil
 }
 
 func intFromEnv(name string, fallback int) (int, error) {
