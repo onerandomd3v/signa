@@ -4,6 +4,13 @@ export type ClientOptions = {
     baseUrl: 'http://localhost:8080' | (string & {});
 };
 
+export type CurrentSession = {
+    /**
+     * Canonical user identity resolved by the API session store.
+     */
+    user_id: string;
+};
+
 export type HealthResponse = {
     /**
      * Health status returned by the API.
@@ -151,6 +158,35 @@ export type GetHealthResponses = {
 };
 
 export type GetHealthResponse = GetHealthResponses[keyof GetHealthResponses];
+
+export type GetCurrentSessionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/session';
+};
+
+export type GetCurrentSessionErrors = {
+    /**
+     * Missing, malformed, expired, or revoked session
+     */
+    401: ErrorResponse;
+    /**
+     * Authentication session store unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type GetCurrentSessionError = GetCurrentSessionErrors[keyof GetCurrentSessionErrors];
+
+export type GetCurrentSessionResponses = {
+    /**
+     * Authenticated session principal
+     */
+    200: CurrentSession;
+};
+
+export type GetCurrentSessionResponse = GetCurrentSessionResponses[keyof GetCurrentSessionResponses];
 
 export type CreateReportData = {
     body: CreateReportRequest;
