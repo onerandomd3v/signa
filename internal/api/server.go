@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/media"
 	"github.com/onerandomd3v/signa/internal/reports"
 )
@@ -30,6 +32,10 @@ func NewHandlerWithCORS(logger *slog.Logger, rateConfig RateLimitConfig, allowed
 }
 
 func NewHandlerWithMediaAndCORS(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, ingestors ...reports.Ingestor) http.Handler {
+	return NewHandlerWithMediaAndCORSAndPublicIncidents(logger, rateConfig, allowedOrigins, pool, storage, nil, config.PublicIncidentGeometryPolicy{}, ingestors...)
+}
+
+func NewHandlerWithMediaAndCORSAndPublicIncidents(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, ingestors ...reports.Ingestor) http.Handler {
 	var ingestor reports.Ingestor
 	if len(ingestors) > 0 {
 		ingestor = ingestors[0]
@@ -42,6 +48,10 @@ func NewHandlerWithMediaAndCORS(logger *slog.Logger, rateConfig RateLimitConfig,
 	handler := &mediaHandler{logger: logger, pool: pool, storage: storage}
 	router.With(mediaLimiter.Middleware).Post("/reports/{report_id}/media/uploads", handler.authorizeUpload)
 	router.With(mediaLimiter.Middleware).Post("/reports/{report_id}/media", handler.confirmUpload)
+	if publicReader != nil {
+		router.Get("/incidents", publicIncidentListHandler(logger, publicReader, publicPolicy))
+		router.Get("/incidents/{incident_id}", publicIncidentDetailHandler(logger, publicReader, publicPolicy))
+	}
 	return router
 }
 
@@ -59,9 +69,13 @@ func NewServerWithMedia(addr string, logger *slog.Logger, rateConfig RateLimitCo
 }
 
 func NewServerWithMediaAndCORS(addr string, logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, ingestors ...reports.Ingestor) *http.Server {
+	return NewServerWithMediaAndCORSAndPublicIncidents(addr, logger, rateConfig, allowedOrigins, pool, storage, nil, config.PublicIncidentGeometryPolicy{}, ingestors...)
+}
+
+func NewServerWithMediaAndCORSAndPublicIncidents(addr string, logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, ingestors ...reports.Ingestor) *http.Server {
 	return &http.Server{
 		Addr:              addr,
-		Handler:           NewHandlerWithMediaAndCORS(logger, rateConfig, allowedOrigins, pool, storage, ingestors...),
+		Handler:           NewHandlerWithMediaAndCORSAndPublicIncidents(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, ingestors...),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,
