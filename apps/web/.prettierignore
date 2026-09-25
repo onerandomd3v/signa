@@ -4,3 +4,4 @@ out/
 build/
 coverage/
 lib/api/generated/
+public/maplibre/
