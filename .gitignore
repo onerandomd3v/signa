@@ -12,6 +12,7 @@ node_modules/
 dist/
 build/
 .next/
+apps/web/public/maplibre/
 coverage/
 *.tsbuildinfo
 

@@ -7,7 +7,9 @@
   },
   "scripts": {
     "dev": "next dev",
+    "predev": "node scripts/copy-maplibre-worker.mjs",
     "build": "next build",
+    "prebuild": "node scripts/copy-maplibre-worker.mjs",
     "start": "next start",
     "lint": "eslint .",
     "format": "prettier --write . ../../README.md",
@@ -23,6 +25,7 @@
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
     "lucide-react": "^1.47.0",
+    "maplibre-gl": "6.11.2",
     "next": "^16.3.6",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
