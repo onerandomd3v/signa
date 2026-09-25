@@ -35,12 +35,9 @@ func (s *DurableStore) Find(ctx context.Context, reportID, contractVersion strin
 	if err != nil {
 		return Extraction{}, false, fmt.Errorf("load durable extraction: %w", err)
 	}
-	var extraction Extraction
-	if err := json.Unmarshal(result, &extraction); err != nil {
-		return Extraction{}, false, fmt.Errorf("decode durable extraction: %w", err)
-	}
-	if _, err := s.validate(extraction); err != nil {
-		return Extraction{}, false, fmt.Errorf("validate durable extraction: %w", err)
+	extraction, err := s.decodeStoredExtraction(result)
+	if err != nil {
+		return Extraction{}, false, err
 	}
 	return extraction, true, nil
 }
@@ -104,4 +101,21 @@ func (s *DurableStore) validate(result Extraction) ([]byte, error) {
 		return nil, err
 	}
 	return encoded, nil
+}
+
+func (s *DurableStore) decodeStoredExtraction(data []byte) (Extraction, error) {
+	if s == nil || s.validator == nil {
+		return Extraction{}, fmt.Errorf("durable extraction validator is required")
+	}
+	// Validate the original JSON bytes before decoding into Extraction. This
+	// preserves schema constraints such as additionalProperties: false that a
+	// typed round-trip would otherwise erase.
+	if _, err := s.validator.Validate(data); err != nil {
+		return Extraction{}, fmt.Errorf("%w: validate stored extraction: %v", ErrInvalidStructuredOutput, err)
+	}
+	var extraction Extraction
+	if err := json.Unmarshal(data, &extraction); err != nil {
+		return Extraction{}, fmt.Errorf("%w: decode stored extraction: %v", ErrInvalidStructuredOutput, err)
+	}
+	return extraction, nil
 }
