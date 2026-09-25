@@ -58,6 +58,24 @@ func TestRequestValidation(t *testing.T) {
 	}
 }
 
+func TestGeoJSONLineStringValidation(t *testing.T) {
+	valid := GeoJSONLineString{Type: "LineString", Coordinates: [][]float64{{3.3, 6.5}, {3.4, 6.6}}}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid geometry rejected: %v", err)
+	}
+	for _, geometry := range []GeoJSONLineString{
+		{Type: "Point", Coordinates: [][]float64{{3.3, 6.5}, {3.4, 6.6}}},
+		{Type: "LineString", Coordinates: [][]float64{{3.3, 6.5}}},
+		{Type: "LineString", Coordinates: [][]float64{{181, 6.5}, {3.4, 6.6}}},
+		{Type: "LineString", Coordinates: [][]float64{{3.3, 91}, {3.4, 6.6}}},
+		{Type: "LineString", Coordinates: [][]float64{{math.NaN(), 6.5}, {3.4, 6.6}}},
+	} {
+		if err := geometry.Validate(); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("geometry %+v error = %v, want ErrInvalidRequest", geometry, err)
+		}
+	}
+}
+
 func TestOSRMProviderRejectsInvalidGeometryAndMetrics(t *testing.T) {
 	cases := []string{
 		`{"code":"Ok","routes":[{"geometry":{"type":"Point","coordinates":[[1,2],[3,4]]},"distance":1,"duration":1}]}`,

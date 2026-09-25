@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/geospatial"
+	"github.com/onerandomd3v/signa/internal/routing"
 )
 
 type Service struct {
@@ -76,6 +77,76 @@ func (s *Service) EvaluateIncident(ctx context.Context, incidentID uuid.UUID, as
 		evaluations = append(evaluations, Evaluation{UserID: result.UserID, Decision: decision})
 	}
 	return evaluations, nil
+}
+
+// EvaluateIncidentForRoute evaluates one user's request-scoped route without
+// persisting or returning its geometry. Geospatial storage performs the
+// intersection and only its categorical result crosses into the v2 policy.
+func (s *Service) EvaluateIncidentForRoute(ctx context.Context, incidentID uuid.UUID, proximity geospatial.ProximityResult, route routing.Route, asOf time.Time) (Evaluation, error) {
+	if s == nil || s.pool == nil || s.proximity == nil {
+		return Evaluation{}, errors.New("priority service dependencies are required")
+	}
+	if incidentID == uuid.Nil || proximity.UserID == uuid.Nil || asOf.IsZero() {
+		return Evaluation{}, errors.New("incident id, user id, and as_of are required")
+	}
+	incident, err := s.loadIncidentForRoute(ctx, incidentID)
+	if err != nil {
+		return Evaluation{}, err
+	}
+	relevance, err := s.proximity.FindIncidentRouteRelevance(ctx, incidentID, route.Geometry)
+	if err != nil {
+		return Evaluation{}, fmt.Errorf("query incident route relevance: %w", err)
+	}
+	decision, err := EvaluateRoute(s.policy, Input{
+		Now:      asOf,
+		Incident: incident,
+		Proximity: Proximity{
+			DistanceMeters: proximity.DistanceMeters,
+			AccuracyMeters: proximity.AccuracyMeters,
+			ObservedAt:     proximity.ObservedAt,
+		},
+	}, routeRelevanceFromGeospatial(relevance))
+	if err != nil {
+		return Evaluation{}, fmt.Errorf("evaluate route-aware priority for user %s: %w", proximity.UserID, err)
+	}
+	return Evaluation{UserID: proximity.UserID, Decision: decision}, nil
+}
+
+func (s *Service) loadIncidentForRoute(ctx context.Context, incidentID uuid.UUID) (Incident, error) {
+	var incident Incident
+	var severity *string
+	var activityAt *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT status, confidence_state, severity,
+		       COALESCE(last_signal_at, started_at, created_at)
+		FROM incidents
+		WHERE id = $1
+	`, incidentID).Scan(&incident.Status, &incident.Confidence, &severity, &activityAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Incident{}, fmt.Errorf("incident %s was not found", incidentID)
+	}
+	if err != nil {
+		return Incident{}, fmt.Errorf("load incident %s for route evaluation: %w", incidentID, err)
+	}
+	if severity != nil {
+		incident.Severity = *severity
+	}
+	if activityAt == nil {
+		return Incident{}, fmt.Errorf("incident %s has no activity time", incidentID)
+	}
+	incident.ActivityAt = *activityAt
+	return incident, nil
+}
+
+func routeRelevanceFromGeospatial(value geospatial.RouteRelevance) RouteRelevance {
+	switch value {
+	case geospatial.RouteRelevanceRelevant:
+		return RouteRelevant
+	case geospatial.RouteRelevanceNotRelevant:
+		return RouteNotRelevant
+	default:
+		return RouteUnknown
+	}
 }
 
 func (s *Service) loadIncident(ctx context.Context, incidentID uuid.UUID) (Incident, geospatial.Point, error) {

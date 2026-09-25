@@ -37,6 +37,20 @@ type Route struct {
 	Duration       time.Duration
 }
 
+// Validate checks a request-scoped route geometry before it crosses into a
+// spatial query. It does not retain or serialize the geometry.
+func (g GeoJSONLineString) Validate() error {
+	if g.Type != "LineString" || len(g.Coordinates) < 2 {
+		return errors.Join(ErrInvalidRequest, errors.New("route geometry must be a LineString with at least two coordinates"))
+	}
+	for _, coordinate := range g.Coordinates {
+		if len(coordinate) < 2 || !finite(coordinate[0]) || !finite(coordinate[1]) || coordinate[0] < -180 || coordinate[0] > 180 || coordinate[1] < -90 || coordinate[1] > 90 {
+			return errors.Join(ErrInvalidRequest, errors.New("route geometry coordinate is invalid"))
+		}
+	}
+	return nil
+}
+
 type Provider interface {
 	Route(context.Context, Request) (Route, error)
 }
@@ -71,16 +85,11 @@ func finite(value float64) bool {
 }
 
 func validateRoute(route Route) error {
-	if route.Geometry.Type != "LineString" || len(route.Geometry.Coordinates) < 2 {
-		return ErrInvalidResponse
+	if err := route.Geometry.Validate(); err != nil {
+		return errors.Join(ErrInvalidResponse, err)
 	}
 	if !finite(route.DistanceMeters) || route.DistanceMeters < 0 || route.Duration < 0 {
 		return ErrInvalidResponse
-	}
-	for _, coordinate := range route.Geometry.Coordinates {
-		if len(coordinate) < 2 || !finite(coordinate[0]) || !finite(coordinate[1]) || coordinate[0] < -180 || coordinate[0] > 180 || coordinate[1] < -90 || coordinate[1] > 90 {
-			return ErrInvalidResponse
-		}
 	}
 	return nil
 }
