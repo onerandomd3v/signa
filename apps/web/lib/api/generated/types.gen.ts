@@ -81,6 +81,29 @@ export type ReportMedia = {
     created_at: string;
 };
 
+/**
+ * Active incident projection with generalized public geometry; exact internal coordinates and report evidence are omitted.
+ */
+export type PublicIncident = {
+    id: string;
+    event_type: string | null;
+    status: 'OPEN' | 'RESOLVING';
+    confidence_state: string;
+    severity: string | null;
+    public_geometry: PublicIncidentGeometry;
+    started_at: string | null;
+    last_signal_at: string | null;
+    updated_at: string;
+};
+
+/**
+ * GeoJSON-compatible generalized incident area in EPSG:4326.
+ */
+export type PublicIncidentGeometry = {
+    type: 'Polygon' | 'MultiPolygon';
+    coordinates: Array<unknown>;
+};
+
 export type ErrorResponse = {
     error: {
         code: string;
@@ -97,6 +120,8 @@ export type ReportLocation = {
 };
 
 export type ReportId = string;
+
+export type IncidentId = string;
 
 export type GetHealthData = {
     body?: never;
@@ -153,6 +178,66 @@ export type CreateReportResponses = {
 };
 
 export type CreateReportResponse = CreateReportResponses[keyof CreateReportResponses];
+
+export type ListIncidentsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/incidents';
+};
+
+export type ListIncidentsErrors = {
+    /**
+     * Internal server error
+     */
+    500: ErrorResponse;
+};
+
+export type ListIncidentsError = ListIncidentsErrors[keyof ListIncidentsErrors];
+
+export type ListIncidentsResponses = {
+    /**
+     * Active public incidents ordered deterministically by update time.
+     */
+    200: Array<PublicIncident>;
+};
+
+export type ListIncidentsResponse = ListIncidentsResponses[keyof ListIncidentsResponses];
+
+export type GetIncidentData = {
+    body?: never;
+    path: {
+        incident_id: string;
+    };
+    query?: never;
+    url: '/incidents/{incident_id}';
+};
+
+export type GetIncidentErrors = {
+    /**
+     * Invalid incident identifier
+     */
+    400: ErrorResponse;
+    /**
+     * Active incident not found
+     */
+    404: ErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ErrorResponse;
+};
+
+export type GetIncidentError = GetIncidentErrors[keyof GetIncidentErrors];
+
+export type GetIncidentResponses = {
+    /**
+     * Public incident
+     */
+    200: PublicIncident;
+};
+
+export type GetIncidentResponse = GetIncidentResponses[keyof GetIncidentResponses];
 
 export type AuthorizeReportMediaUploadData = {
     body: MediaUploadRequest;
