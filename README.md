@@ -133,4 +133,5 @@ go test -tags=integration ./...
 ```
 
 These tests create and remove uniquely named temporary databases. They use `SIGNA_TEST_DATABASE_URL` when set, otherwise the local Compose connection, and never run rollback checks against the application database itself.
+
 - The incident worker also requires `SIGNA_PRIORITY_P1_RADIUS_METERS`, `SIGNA_PRIORITY_P2_RADIUS_METERS`, `SIGNA_PRIORITY_LOCATION_MAX_AGE`, and `SIGNA_PRIORITY_INCIDENT_MAX_AGE`; the radii must be positive with P1 smaller than P2, durations must be positive, and none has a product-policy default.
