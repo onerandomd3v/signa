@@ -161,53 +161,6 @@ func (s *Store) FindUsersWithinRadius(ctx context.Context, query ProximityQuery)
 	return results, nil
 }
 
-// FindUsersPossiblyWithinRadius returns deterministic, privacy-safe proximity
-// data for snapshots whose uncertainty bounds may overlap the requested
-// radius. Known accuracy uses max(0, distance-accuracy) <= radius; unknown
-// accuracy remains conservative and uses the raw distance <= radius. The
-// result count is always bounded by the query limit (or maxProximityLimit).
-func (s *Store) FindUsersPossiblyWithinRadius(ctx context.Context, query ProximityQuery) ([]ProximityResult, error) {
-	if s == nil || s.pool == nil {
-		return nil, errors.New("geospatial store dependencies are required")
-	}
-	if err := query.Validate(); err != nil {
-		return nil, err
-	}
-	queryString := `
-		SELECT ul.user_id, ST_Distance(ul.location, target.point), ul.accuracy_meters, ul.observed_at
-		FROM user_locations AS ul
-		CROSS JOIN (
-			SELECT ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography AS point
-		) AS target
-		WHERE ul.observed_at >= $4
-		  AND ul.observed_at <= $5
-		  AND GREATEST(0, ST_Distance(ul.location, target.point) - COALESCE(ul.accuracy_meters, 0)) <= $3
-		ORDER BY ST_Distance(ul.location, target.point), ul.user_id
-		LIMIT $6
-	`
-	effectiveLimit := query.Limit
-	if effectiveLimit == 0 {
-		effectiveLimit = maxProximityLimit
-	}
-	rows, err := s.pool.Query(ctx, queryString, query.Target.Latitude, query.Target.Longitude, query.RadiusMeters, query.AsOf.Add(-query.MaxAge), query.AsOf, effectiveLimit)
-	if err != nil {
-		return nil, fmt.Errorf("find users possibly within radius: %w", err)
-	}
-	defer rows.Close()
-	results := make([]ProximityResult, 0)
-	for rows.Next() {
-		var result ProximityResult
-		if err := rows.Scan(&result.UserID, &result.DistanceMeters, &result.AccuracyMeters, &result.ObservedAt); err != nil {
-			return nil, fmt.Errorf("scan possible proximity result: %w", err)
-		}
-		results = append(results, result)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate possible proximity results: %w", err)
-	}
-	return results, nil
-}
-
 func lockUserLocation(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, userID.String()); err != nil {
 		return fmt.Errorf("lock user location %s: %w", userID, err)
