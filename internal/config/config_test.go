@@ -355,6 +355,59 @@ func TestLoadPriorityPolicyRequiresExplicitValidConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadRetentionPolicyRequiresExplicitValidConfiguration(t *testing.T) {
+	setRetentionEnv(t, "24h", "1h", "168h", "720h", "24h", "15m", "100")
+	got, err := LoadRetentionPolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BatchSize != 100 || got.ReportExactLocation != 24*time.Hour || got.UserLocation != time.Hour {
+		t.Fatalf("retention policy = %+v", got)
+	}
+
+	for _, name := range []string{"SIGNA_RETENTION_REPORT_EXACT_LOCATION", "SIGNA_RETENTION_USER_LOCATION", "SIGNA_RETENTION_MEDIA_METADATA", "SIGNA_RETENTION_OPERATIONAL_LOGS", "SIGNA_RETENTION_AUTH_SESSIONS", "SIGNA_RETENTION_SWEEP_INTERVAL", "SIGNA_RETENTION_BATCH_SIZE"} {
+		t.Run("missing "+name, func(t *testing.T) {
+			setRetentionEnv(t, "24h", "1h", "168h", "720h", "24h", "15m", "100")
+			t.Setenv(name, "")
+			if _, err := LoadRetentionPolicy(); err == nil {
+				t.Fatal("LoadRetentionPolicy() error = nil")
+			}
+		})
+	}
+	for _, value := range []string{"0s", "-1h", "not-a-duration"} {
+		t.Run("invalid duration "+value, func(t *testing.T) {
+			setRetentionEnv(t, "24h", "1h", "168h", "720h", "24h", "15m", "100")
+			t.Setenv("SIGNA_RETENTION_USER_LOCATION", value)
+			if _, err := LoadRetentionPolicy(); err == nil {
+				t.Fatal("LoadRetentionPolicy() error = nil")
+			}
+		})
+	}
+	for _, value := range []string{"0", "10001", "bad"} {
+		t.Run("invalid batch "+value, func(t *testing.T) {
+			setRetentionEnv(t, "24h", "1h", "168h", "720h", "24h", "15m", value)
+			if _, err := LoadRetentionPolicy(); err == nil {
+				t.Fatal("LoadRetentionPolicy() error = nil")
+			}
+		})
+	}
+}
+
+func setRetentionEnv(t *testing.T, report, user, media, operational, sessions, sweep, batch string) {
+	t.Helper()
+	for name, value := range map[string]string{
+		"SIGNA_RETENTION_REPORT_EXACT_LOCATION": report,
+		"SIGNA_RETENTION_USER_LOCATION":         user,
+		"SIGNA_RETENTION_MEDIA_METADATA":        media,
+		"SIGNA_RETENTION_OPERATIONAL_LOGS":      operational,
+		"SIGNA_RETENTION_AUTH_SESSIONS":         sessions,
+		"SIGNA_RETENTION_SWEEP_INTERVAL":        sweep,
+		"SIGNA_RETENTION_BATCH_SIZE":            batch,
+	} {
+		t.Setenv(name, value)
+	}
+}
+
 func setPriorityEnv(t *testing.T, p1, p2, locationAge, incidentAge string) {
 	t.Helper()
 	t.Setenv("SIGNA_PRIORITY_P1_RADIUS_METERS", p1)
