@@ -139,6 +139,43 @@ func TestPublicIncidentGeometryIntegration(t *testing.T) {
 	if len(items) != maxPublicIncidentLimit {
 		t.Fatalf("public incident count = %d, want bounded limit %d", len(items), maxPublicIncidentLimit)
 	}
+
+	truncatedRouteAffectedID := uuid.New()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO incidents (id, event_type, status, confidence_state, affected_geometry, started_at, last_signal_at, created_at, updated_at)
+		VALUES ($1, 'older_route_intersection', 'OPEN', 'EMERGING',
+			ST_GeomFromText('POLYGON((10.000 10.000, 10.010 10.000, 10.010 10.010, 10.000 10.010, 10.000 10.000))', 4326)::geography,
+			$2, $2, $2, $2)
+	`, truncatedRouteAffectedID, base.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < maxPublicIncidentLimit+5; i++ {
+		id := uuid.New()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO incidents (id, event_type, status, confidence_state, center_point, started_at, last_signal_at, created_at, updated_at)
+			VALUES ($1, 'newer_non_intersecting', 'OPEN', 'UNVERIFIED', ST_SetSRID(ST_MakePoint(20, 20), 4326)::geography, $2, $2, $2, $2)
+		`, id, base.Add(time.Duration(i+10)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	truncatedRoute := routing.GeoJSONLineString{Type: "LineString", Coordinates: [][]float64{{9.99, 10.005}, {10.02, 10.005}}}
+	truncatedClassification, truncatedIncidents, err := store.FindPublicRouteRelevance(ctx, truncatedRoute, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncatedClassification != geospatial.RouteRelevanceRelevant {
+		t.Fatalf("truncated route classification = %q, want RELEVANT", truncatedClassification)
+	}
+	if len(truncatedIncidents) != maxPublicIncidentLimit {
+		t.Fatalf("truncated route incident count = %d, want bounded limit %d", len(truncatedIncidents), maxPublicIncidentLimit)
+	}
+	for _, incident := range truncatedIncidents {
+		if incident.ID == truncatedRouteAffectedID {
+			t.Fatalf("older intersecting incident %s was returned despite projection truncation", truncatedRouteAffectedID)
+		}
+	}
 	for _, item := range items {
 		if item.Status != "OPEN" && item.Status != "RESOLVING" {
 			t.Fatalf("inactive incident returned: %+v", item)
