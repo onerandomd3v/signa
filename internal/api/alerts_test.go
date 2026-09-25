@@ -18,11 +18,15 @@ import (
 )
 
 type alertReaderForAPITest struct {
-	read alerts.AlertRead
-	err  error
+	read    alerts.AlertRead
+	err     error
+	userID  uuid.UUID
+	alertID uuid.UUID
 }
 
-func (f *alertReaderForAPITest) ReadAuthorized(context.Context, uuid.UUID, uuid.UUID) (alerts.AlertRead, error) {
+func (f *alertReaderForAPITest) ReadAuthorized(_ context.Context, userID, alertID uuid.UUID) (alerts.AlertRead, error) {
+	f.userID = userID
+	f.alertID = alertID
 	return f.read, f.err
 }
 
@@ -35,8 +39,9 @@ func TestAuthenticatedAlertReadRoute(t *testing.T) {
 		Message: "safe summary", AsOf: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC),
 		CreatedAt: time.Date(2026, 9, 25, 12, 0, 1, 0, time.UTC),
 	}}
+	principal := auth.Principal{UserID: uuid.New()}
 	server := NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(nil, DefaultRateLimitConfig(), nil, nil, nil, nil, config.PublicIncidentGeometryPolicy{}, AuthConfig{
-		Store:  sessionStoreForAPITest{secret: "cookie-secret", principal: auth.Principal{UserID: uuid.New()}},
+		Store:  sessionStoreForAPITest{secret: "cookie-secret", principal: principal},
 		Alerts: &reader,
 	})
 
@@ -67,6 +72,9 @@ func TestAuthenticatedAlertReadRoute(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil || decoded.ID != alertID || decoded.Message != "safe summary" {
 			t.Fatalf("decoded response = %+v, err = %v", decoded, err)
 		}
+		if reader.userID != principal.UserID || reader.alertID != alertID {
+			t.Fatalf("reader identity = %s/%s, want authenticated principal and path alert", reader.userID, reader.alertID)
+		}
 	})
 	t.Run("not visible is privacy safe 404", func(t *testing.T) {
 		reader.err = alerts.ErrAlertNotVisible
@@ -84,7 +92,7 @@ func TestAuthenticatedAlertReadRoute(t *testing.T) {
 }
 
 func requestAlert(handler http.Handler, alertID string, cookie *http.Cookie) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(http.MethodGet, "/alerts/"+alertID, nil)
+	request := httptest.NewRequest(http.MethodGet, "/alerts/"+alertID+"?user_id="+uuid.NewString(), nil)
 	if cookie != nil {
 		request.AddCookie(cookie)
 	}
