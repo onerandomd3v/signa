@@ -157,6 +157,28 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /events:
+    get:
+      operationId: streamRealtimeEvents
+      security:
+        - CookieAuth: []
+      summary: Stream authorized incident and alert updates
+      description: Authenticated SSE stream protected by the ADR-0012 HttpOnly signa_session cookie. Clients reconnect with Last-Event-ID and reconcile authoritative state after disconnect gaps.
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: { type: string }
+          description: Opaque base64url cursor returned in each SSE event id.
+      responses:
+        '200':
+          description: Long-lived authorized event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '400': { description: Invalid reconnect cursor, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: Realtime source unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   /reports/{report_id}/media/uploads:
     post:
       operationId: authorizeReportMediaUpload

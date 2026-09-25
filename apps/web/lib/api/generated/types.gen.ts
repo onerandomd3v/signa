@@ -288,6 +288,45 @@ export type GetIncidentResponses = {
 
 export type GetIncidentResponse = GetIncidentResponses[keyof GetIncidentResponses];
 
+export type StreamRealtimeEventsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Opaque base64url cursor returned in each SSE event id.
+         */
+        'Last-Event-ID'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/events';
+};
+
+export type StreamRealtimeEventsErrors = {
+    /**
+     * Invalid reconnect cursor
+     */
+    400: ErrorResponse;
+    /**
+     * Authentication required
+     */
+    401: ErrorResponse;
+    /**
+     * Realtime source unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type StreamRealtimeEventsError = StreamRealtimeEventsErrors[keyof StreamRealtimeEventsErrors];
+
+export type StreamRealtimeEventsResponses = {
+    /**
+     * Long-lived authorized event stream.
+     */
+    200: string;
+};
+
+export type StreamRealtimeEventsResponse = StreamRealtimeEventsResponses[keyof StreamRealtimeEventsResponses];
+
 export type AuthorizeReportMediaUploadData = {
     body: MediaUploadRequest;
     path: {

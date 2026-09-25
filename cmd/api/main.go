@@ -17,6 +17,8 @@ import (
 	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/logging"
 	"github.com/onerandomd3v/signa/internal/media"
+	platformredis "github.com/onerandomd3v/signa/internal/platform/redis"
+	"github.com/onerandomd3v/signa/internal/realtime"
 	"github.com/onerandomd3v/signa/internal/reports"
 )
 
@@ -49,6 +51,12 @@ func run(parent context.Context, logger *slog.Logger) error {
 	if err := pool.Ping(ctx); err != nil {
 		return err
 	}
+	redisClient, err := platformredis.Connect(ctx, cfg.RedisAddr)
+	if err != nil {
+		logger.Warn("redis unavailable; realtime events are disabled until restart", "error", err)
+	} else {
+		defer func() { _ = redisClient.Close() }()
+	}
 
 	var storage media.Storage
 	if cfg.ObjectStorageEndpoint != "" || cfg.ObjectStorageBucket != "" || cfg.ObjectStorageAccessKeyID != "" || cfg.ObjectStorageSecret != "" {
@@ -65,15 +73,20 @@ func run(parent context.Context, logger *slog.Logger) error {
 		}
 	}
 
+	var realtimeSource realtime.Source
+	if redisClient != nil {
+		realtimeSource = &realtime.RedisSource{Client: redisClient, Block: cfg.SSEHeartbeatInterval}
+	}
+	sseHandler := realtime.NewHandlerWithContext(ctx, realtimeSource, realtime.ScopeAuthorizer{Resolver: realtime.NewPostgresScopeResolver(pool)}, cfg.SSEHeartbeatInterval)
 	sessionStore := auth.NewPostgresStore(pool)
-	server := api.NewServerWithMediaAndCORSAndPublicIncidentsAndAuth(cfg.APIAddr, logger, api.RateLimitConfig{
+	server := api.NewServerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(cfg.APIAddr, logger, api.RateLimitConfig{
 		PerClientRatePerMinute: cfg.ReportRatePerMinute,
 		PerClientBurst:         cfg.ReportRateBurst,
 		GlobalRatePerMinute:    cfg.GlobalReportRatePerMinute,
 		GlobalBurst:            cfg.GlobalReportRateBurst,
 	}, cfg.WebAllowedOrigins, pool, storage, incidents.NewStore(pool), publicGeometryPolicy, api.AuthConfig{
 		Store: sessionStore,
-	}, reports.NewStore(pool))
+	}, sseHandler, reports.NewStore(pool))
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("api starting", "addr", cfg.APIAddr)

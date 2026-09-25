@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_AI_PROVIDER_TIMEOUT", "SIGNA_AI_RETRY_MAX_ATTEMPTS", "SIGNA_AI_RETRY_BACKOFF", "SIGNA_DELIVERY_CONSUMER_GROUP", "SIGNA_DELIVERY_CONSUMER_NAME", "SIGNA_DELIVERY_POLL_INTERVAL", "SIGNA_DELIVERY_RETRY_MAX_ATTEMPTS", "SIGNA_DELIVERY_RETRY_BACKOFF", "SIGNA_DELIVERY_ATTEMPT_LEASE", "SIGNA_WEB_ALLOWED_ORIGINS", "SIGNA_SESSION_COOKIE_SECURE", "SIGNA_SESSION_COOKIE_SAME_SITE"} {
+	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_SSE_HEARTBEAT_INTERVAL", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_AI_PROVIDER_TIMEOUT", "SIGNA_AI_RETRY_MAX_ATTEMPTS", "SIGNA_AI_RETRY_BACKOFF", "SIGNA_DELIVERY_CONSUMER_GROUP", "SIGNA_DELIVERY_CONSUMER_NAME", "SIGNA_DELIVERY_POLL_INTERVAL", "SIGNA_DELIVERY_RETRY_MAX_ATTEMPTS", "SIGNA_DELIVERY_RETRY_BACKOFF", "SIGNA_DELIVERY_ATTEMPT_LEASE", "SIGNA_WEB_ALLOWED_ORIGINS", "SIGNA_SESSION_COOKIE_SECURE", "SIGNA_SESSION_COOKIE_SAME_SITE"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("SIGNA_DATABASE_URL", "")
@@ -29,6 +29,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if got.ShutdownTimeout != defaultShutdownTimeout {
 		t.Errorf("ShutdownTimeout = %s, want %s", got.ShutdownTimeout, defaultShutdownTimeout)
+	}
+	if got.SSEHeartbeatInterval != defaultSSEHeartbeatInterval {
+		t.Errorf("SSEHeartbeatInterval = %s, want %s", got.SSEHeartbeatInterval, defaultSSEHeartbeatInterval)
 	}
 	if got.WorkerInterval != defaultWorkerInterval {
 		t.Errorf("WorkerInterval = %s, want %s", got.WorkerInterval, defaultWorkerInterval)
@@ -55,6 +58,7 @@ func TestLoadEnvironment(t *testing.T) {
 	t.Setenv("SIGNA_DATABASE_URL", "postgres://user:password@localhost:5432/example?sslmode=disable")
 	t.Setenv("SIGNA_REDIS_ADDR", "127.0.0.1:6380")
 	t.Setenv("SIGNA_SHUTDOWN_TIMEOUT", "2s")
+	t.Setenv("SIGNA_SSE_HEARTBEAT_INTERVAL", "3s")
 	t.Setenv("SIGNA_WORKER_INTERVAL", "250ms")
 	t.Setenv("SIGNA_REPORT_RATE_PER_MINUTE", "10")
 	t.Setenv("SIGNA_REPORT_RATE_BURST", "4")
@@ -91,6 +95,7 @@ func TestLoadEnvironment(t *testing.T) {
 		DatabaseURL:               "postgres://user:password@localhost:5432/example?sslmode=disable",
 		RedisAddr:                 "127.0.0.1:6380",
 		ShutdownTimeout:           2 * time.Second,
+		SSEHeartbeatInterval:      3 * time.Second,
 		WorkerInterval:            250 * time.Millisecond,
 		ReportRatePerMinute:       10,
 		ReportRateBurst:           4,

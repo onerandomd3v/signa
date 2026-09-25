@@ -13,6 +13,7 @@ const (
 	defaultDatabaseURL                  = "postgres://signa:signa_local@localhost:5432/signa?sslmode=disable"
 	defaultRedisAddr                    = "localhost:6379"
 	defaultShutdownTimeout              = 10 * time.Second
+	defaultSSEHeartbeatInterval         = 25 * time.Second
 	defaultWorkerInterval               = 500 * time.Millisecond
 	defaultReportRatePerMinute          = 6
 	defaultReportRateBurst              = 3
@@ -44,6 +45,7 @@ type Config struct {
 	DatabaseURL               string
 	RedisAddr                 string
 	ShutdownTimeout           time.Duration
+	SSEHeartbeatInterval      time.Duration
 	WorkerInterval            time.Duration
 	ReportRatePerMinute       int
 	ReportRateBurst           int
@@ -261,6 +263,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	sseHeartbeatInterval, err := durationFromEnv("SIGNA_SSE_HEARTBEAT_INTERVAL", defaultSSEHeartbeatInterval)
+	if err != nil {
+		return Config{}, err
+	}
 	workerInterval, err := durationFromEnv("SIGNA_WORKER_INTERVAL", defaultWorkerInterval)
 	if err != nil {
 		return Config{}, err
@@ -374,6 +380,7 @@ func Load() (Config, error) {
 		DatabaseURL:               databaseURL,
 		RedisAddr:                 redisAddr,
 		ShutdownTimeout:           shutdownTimeout,
+		SSEHeartbeatInterval:      sseHeartbeatInterval,
 		WorkerInterval:            workerInterval,
 		ReportRatePerMinute:       reportRatePerMinute,
 		ReportRateBurst:           reportRateBurst,
