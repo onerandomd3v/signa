@@ -103,11 +103,17 @@ export type PublicIncidentGeometry = PublicIncidentPolygonGeometry | PublicIncid
 
 export type PublicIncidentPolygonGeometry = {
     type: 'Polygon';
+    /**
+     * GeoJSON positions use [longitude, latitude] ordering.
+     */
     coordinates: Array<Array<Array<number>>>;
 };
 
 export type PublicIncidentMultiPolygonGeometry = {
     type: 'MultiPolygon';
+    /**
+     * GeoJSON positions use [longitude, latitude] ordering.
+     */
     coordinates: Array<Array<Array<Array<number>>>>;
 };
 
