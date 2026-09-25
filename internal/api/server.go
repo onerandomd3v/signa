@@ -100,7 +100,7 @@ func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger *slog
 				routeLimiterConfig.GlobalRouteRatePerMinute = defaultGlobalRouteRatePerMinute
 			}
 			if routeLimiterConfig.GlobalRouteBurst <= 0 {
-				routeLimiterConfig.GlobalRouteBurst = defaultGlobalRouteBurst
+				routeLimiterConfig.GlobalRouteBurst = defaultGlobalRouteRateBurst
 			}
 			routeLimiter := NewRateLimiter(RateLimitConfig{
 				PerClientRatePerMinute: routeLimiterConfig.PerClientRouteRatePerMinute,
