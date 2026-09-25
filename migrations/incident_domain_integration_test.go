@@ -272,12 +272,7 @@ func TestIncidentDomainMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runGoose(t, ctx, testDatabaseURL.String(), "down")
-	runGoose(t, ctx, testDatabaseURL.String(), "down")
-	runGoose(t, ctx, testDatabaseURL.String(), "down")
-	runGoose(t, ctx, testDatabaseURL.String(), "down")
-	runGoose(t, ctx, testDatabaseURL.String(), "down")
-	runGoose(t, ctx, testDatabaseURL.String(), "down")
+	runGooseTo(t, ctx, testDatabaseURL.String(), "202609230004")
 	assertTableMissing(t, ctx, connection, "public", "incidents")
 	assertTableExists(t, ctx, connection, "public", "reports")
 	runGoose(t, ctx, testDatabaseURL.String(), "up")

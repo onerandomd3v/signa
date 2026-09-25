@@ -61,13 +61,13 @@ func TestAlertMigrationUpDownReapplyAndConstraints(t *testing.T) {
 	if _, err := connection.Exec(ctx, `INSERT INTO incidents (id, status, confidence_state) VALUES ('00000000-0000-0000-0000-000000000001', 'OPEN', 'EMERGING')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := connection.Exec(ctx, `INSERT INTO alerts (incident_id, alert_type, confidence_snapshot, severity_snapshot, status_snapshot, priority_snapshot, freshness_snapshot, message, eligibility_policy_version, eligibility_reasons, as_of, idempotency_key) VALUES ('00000000-0000-0000-0000-000000000001', 'IMMEDIATE', 'EMERGING', 'CRITICAL', 'OPEN', 'P1', 'FRESH', 'safe message', 'signa.alert-eligibility.v1', '[]', now(), 'migration-key')`); err != nil {
+	if _, err := connection.Exec(ctx, `INSERT INTO alerts (incident_id, alert_type, confidence_snapshot, severity_snapshot, status_snapshot, priority_snapshot, freshness_snapshot, message, eligibility_policy_version, eligibility_reasons, as_of, idempotency_key, request_fingerprint) VALUES ('00000000-0000-0000-0000-000000000001', 'IMMEDIATE', 'EMERGING', 'CRITICAL', 'OPEN', 'P1', 'FRESH', 'safe message', 'signa.alert-eligibility.v1', '[]', now(), 'migration-key', 'fingerprint-1')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := connection.Exec(ctx, `INSERT INTO alerts (incident_id, alert_type, confidence_snapshot, severity_snapshot, status_snapshot, priority_snapshot, freshness_snapshot, message, eligibility_policy_version, eligibility_reasons, as_of, idempotency_key) VALUES ('00000000-0000-0000-0000-000000000001', 'IMMEDIATE', 'EMERGING', 'CRITICAL', 'OPEN', 'P1', 'FRESH', 'safe message', 'signa.alert-eligibility.v1', '[]', now(), 'migration-key')`); err == nil {
+	if _, err := connection.Exec(ctx, `INSERT INTO alerts (incident_id, alert_type, confidence_snapshot, severity_snapshot, status_snapshot, priority_snapshot, freshness_snapshot, message, eligibility_policy_version, eligibility_reasons, as_of, idempotency_key, request_fingerprint) VALUES ('00000000-0000-0000-0000-000000000001', 'IMMEDIATE', 'EMERGING', 'CRITICAL', 'OPEN', 'P1', 'FRESH', 'safe message', 'signa.alert-eligibility.v1', '[]', now(), 'migration-key', 'fingerprint-1')`); err == nil {
 		t.Fatal("duplicate idempotency key was accepted")
 	}
-	if _, err := connection.Exec(ctx, `INSERT INTO alerts (incident_id, alert_type, confidence_snapshot, severity_snapshot, status_snapshot, priority_snapshot, freshness_snapshot, message, eligibility_policy_version, eligibility_reasons, as_of, idempotency_key) VALUES ('00000000-0000-0000-0000-000000000099', 'IMMEDIATE', 'EMERGING', 'CRITICAL', 'OPEN', 'P1', 'FRESH', 'safe message', 'signa.alert-eligibility.v1', '[]', now(), 'foreign-key-key')`); err == nil {
+	if _, err := connection.Exec(ctx, `INSERT INTO alerts (incident_id, alert_type, confidence_snapshot, severity_snapshot, status_snapshot, priority_snapshot, freshness_snapshot, message, eligibility_policy_version, eligibility_reasons, as_of, idempotency_key, request_fingerprint) VALUES ('00000000-0000-0000-0000-000000000099', 'IMMEDIATE', 'EMERGING', 'CRITICAL', 'OPEN', 'P1', 'FRESH', 'safe message', 'signa.alert-eligibility.v1', '[]', now(), 'foreign-key-key', 'fingerprint-foreign')`); err == nil {
 		t.Fatal("foreign incident reference was accepted")
 	}
 	runGooseAlerts(t, ctx, testURL.String(), "down")

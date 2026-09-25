@@ -361,12 +361,22 @@ func TestReportAndOutboxMigration(t *testing.T) {
 }
 
 func runGoose(t *testing.T, ctx context.Context, databaseURL string, command string) {
+	runGooseCommand(t, ctx, databaseURL, command)
+}
+
+func runGooseTo(t *testing.T, ctx context.Context, databaseURL string, version string) {
+	runGooseCommand(t, ctx, databaseURL, "down-to", version)
+}
+
+func runGooseCommand(t *testing.T, ctx context.Context, databaseURL string, command string, args ...string) {
 	t.Helper()
 	goBinary := filepath.Join(runtime.GOROOT(), "bin", "go")
 	if runtime.GOOS == "windows" {
 		goBinary += ".exe"
 	}
-	goose := exec.CommandContext(ctx, goBinary, "run", "github.com/pressly/goose/v3/cmd/goose@v3.27.0", "-dir", ".", "postgres", databaseURL, command)
+	gooseArgs := []string{"run", "github.com/pressly/goose/v3/cmd/goose@v3.27.0", "-dir", ".", "postgres", databaseURL, command}
+	gooseArgs = append(gooseArgs, args...)
+	goose := exec.CommandContext(ctx, goBinary, gooseArgs...)
 	goose.Dir = "."
 	output, err := goose.CombinedOutput()
 	if err != nil {
