@@ -11,6 +11,24 @@ export type CurrentSession = {
     user_id: string;
 };
 
+/**
+ * Immutable, privacy-safe alert snapshot authorized by the authenticated user's durable delivery relationship. Delivery/provider internals, reporter identity, raw evidence, and exact private coordinates are omitted.
+ */
+export type AlertRead = {
+    alert_id: string;
+    incident_id: string;
+    alert_type: 'IMMEDIATE' | 'NEARBY';
+    confidence_snapshot: 'UNVERIFIED' | 'EMERGING' | 'CORROBORATED' | 'HIGH_CONFIDENCE' | 'DISPUTED';
+    severity_snapshot: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+    status_snapshot: 'OPEN' | 'RESOLVING' | 'RESOLVED' | 'EXPIRED';
+    priority_snapshot: 'P1' | 'P2' | 'P3' | 'NONE';
+    freshness_snapshot: 'FRESH' | 'STALE' | 'UNKNOWN';
+    message: string;
+    as_of: string;
+    created_at: string;
+    supersedes_alert_id: string | null;
+};
+
 export type HealthResponse = {
     /**
      * Health status returned by the API.
@@ -159,6 +177,8 @@ export type IncidentId = string;
 
 export type SubscriptionId = string;
 
+export type AlertId = string;
+
 export type GetHealthData = {
     body?: never;
     path?: never;
@@ -203,6 +223,49 @@ export type GetCurrentSessionResponses = {
 };
 
 export type GetCurrentSessionResponse = GetCurrentSessionResponses[keyof GetCurrentSessionResponses];
+
+export type GetAlertData = {
+    body?: never;
+    path: {
+        alert_id: string;
+    };
+    query?: never;
+    url: '/alerts/{alert_id}';
+};
+
+export type GetAlertErrors = {
+    /**
+     * Invalid alert identifier
+     */
+    400: ErrorResponse;
+    /**
+     * Missing, malformed, expired, or revoked session
+     */
+    401: ErrorResponse;
+    /**
+     * Alert is not visible to the authenticated user
+     */
+    404: ErrorResponse;
+    /**
+     * Internal alert read failure
+     */
+    500: ErrorResponse;
+    /**
+     * Alert or authentication store unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type GetAlertError = GetAlertErrors[keyof GetAlertErrors];
+
+export type GetAlertResponses = {
+    /**
+     * Authorized alert snapshot
+     */
+    200: AlertRead;
+};
+
+export type GetAlertResponse = GetAlertResponses[keyof GetAlertResponses];
 
 export type CreateReportData = {
     body: CreateReportRequest;

@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, GetCurrentSessionData, GetCurrentSessionErrors, GetCurrentSessionResponses, GetHealthData, GetHealthResponses, GetIncidentData, GetIncidentErrors, GetIncidentResponses, ListIncidentsData, ListIncidentsErrors, ListIncidentsResponses, RegisterPushSubscriptionData, RegisterPushSubscriptionErrors, RegisterPushSubscriptionResponses, RevokePushSubscriptionData, RevokePushSubscriptionErrors, RevokePushSubscriptionResponses, StreamRealtimeEventsData, StreamRealtimeEventsErrors, StreamRealtimeEventsResponse, StreamRealtimeEventsResponses } from './types.gen';
+import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, GetAlertData, GetAlertErrors, GetAlertResponses, GetCurrentSessionData, GetCurrentSessionErrors, GetCurrentSessionResponses, GetHealthData, GetHealthResponses, GetIncidentData, GetIncidentErrors, GetIncidentResponses, ListIncidentsData, ListIncidentsErrors, ListIncidentsResponses, RegisterPushSubscriptionData, RegisterPushSubscriptionErrors, RegisterPushSubscriptionResponses, RevokePushSubscriptionData, RevokePushSubscriptionErrors, RevokePushSubscriptionResponses, StreamRealtimeEventsData, StreamRealtimeEventsErrors, StreamRealtimeEventsResponse, StreamRealtimeEventsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -35,6 +35,21 @@ export const getCurrentSession = <ThrowOnError extends boolean = false>(options?
             type: 'apiKey'
         }],
     url: '/auth/session',
+    ...options
+});
+
+/**
+ * Read an authorized alert snapshot
+ *
+ * Returns the immutable, privacy-safe alert snapshot for the authenticated user's non-terminal delivery relationship. A stale, superseded, resolving, resolved, or expired snapshot is returned as stored; SSE remains a change notification and this response is authoritative.
+ */
+export const getAlert = <ThrowOnError extends boolean = false>(options: Options<GetAlertData, ThrowOnError>): RequestResult<GetAlertResponses, GetAlertErrors, ThrowOnError> => (options.client ?? client).get<GetAlertResponses, GetAlertErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'signa_session',
+            type: 'apiKey'
+        }],
+    url: '/alerts/{alert_id}',
     ...options
 });
 
