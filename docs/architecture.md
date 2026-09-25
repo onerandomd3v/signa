@@ -1266,6 +1266,7 @@ ADR-0006: SSE for foreground realtime updates
 ADR-0007: OpenAPI contract between Go and TypeScript
 ADR-0008: AI interpretation separated from deterministic decisions
 ADR-0009: Location minimization and approximate public geography
+ADR-0011: OSRM-compatible routing adapter for request-scoped route geometry
 ```
 
 ---
@@ -1306,19 +1307,18 @@ The architecture direction and foundation decisions above are established. Sever
 1. PostgreSQL hosting provider.
 2. Redis hosting provider.
 3. Authentication provider vs in-house session implementation.
-4. Initial routing provider.
-5. R2 vs another S3-compatible storage provider.
-6. Exact MVP incident state machine.
-7. Initial confidence transition rules.
-8. Exact P1/P2/P3 thresholds.
-9. Exact location-retention precision and duration.
-10. Media size/type limits.
-11. Initial alert delivery SLO.
-12. Pilot scale assumptions.
-13. Error monitoring provider.
-14. CI/CD provider and environment strategy.
+4. R2 vs another S3-compatible storage provider.
+5. Exact MVP incident state machine.
+6. Initial confidence transition rules.
+7. Exact P1/P2/P3 thresholds.
+8. Exact location-retention precision and duration.
+9. Media size/type limits.
+10. Initial alert delivery SLO.
+11. Pilot scale assumptions.
+12. Error monitoring provider.
+13. CI/CD provider and environment strategy.
 
-These choices must not be silently embedded in implementation code.
+These choices must not be silently embedded in implementation code. The initial routing-provider choice is resolved by ADR-0011.
 
 ---
 
