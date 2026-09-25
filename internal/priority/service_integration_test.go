@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/geospatial"
+	"github.com/onerandomd3v/signa/internal/routing"
 )
 
 func TestServiceUsesPrivacySafeProximityStore(t *testing.T) {
@@ -104,6 +105,73 @@ func TestServiceUsesPrivacySafeProximityStore(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "latitude") || strings.Contains(string(encoded), "longitude") {
 		t.Fatalf("priority evaluation exposed exact coordinates: %s", encoded)
+	}
+}
+
+func TestServiceEvaluatesRouteRelevanceWithoutExposingRouteGeometry(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	databaseURL := os.Getenv("SIGNA_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = "postgres://signa:signa_local@localhost:5432/signa?sslmode=disable"
+	}
+	testURL, maintenance, databaseName := createPriorityIntegrationDatabase(t, ctx, databaseURL)
+	defer func() {
+		_, _ = maintenance.Exec(context.Background(), `DROP DATABASE IF EXISTS `+databaseName)
+		_ = maintenance.Close(context.Background())
+	}()
+	runPriorityGoose(t, ctx, testURL)
+
+	pool, err := pgxpool.New(ctx, testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	proximityStore, err := geospatial.NewStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	incidentID := uuid.New()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO incidents (id, status, confidence_state, severity, center_point, affected_geometry, started_at, last_signal_at, created_at, updated_at)
+		VALUES ($1, 'OPEN', 'EMERGING', 'CRITICAL',
+		        ST_SetSRID(ST_MakePoint(3.3792, 6.5244), 4326)::geography,
+		        ST_GeomFromText('POLYGON((3.37 6.51, 3.39 6.51, 3.39 6.54, 3.37 6.54, 3.37 6.51))', 4326)::geography,
+		        $2, $2, $2, $2)
+	`, incidentID, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	userID := uuid.New()
+	accuracy := 0.0
+	proximity := geospatial.ProximityResult{UserID: userID, DistanceMeters: 1000, AccuracyMeters: &accuracy, ObservedAt: now.Add(-time.Minute)}
+	route := routing.Route{Geometry: routing.GeoJSONLineString{Type: "LineString", Coordinates: [][]float64{{3.36, 6.525}, {3.40, 6.525}}}}
+	service, err := NewService(pool, proximityStore, testPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluation, err := service.EvaluateIncidentForRoute(ctx, incidentID, proximity, route, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evaluation.UserID != userID || evaluation.Decision.Level != P2 || !contains(evaluation.Decision.Reasons, "route_relevant") || !contains(evaluation.Decision.Reasons, "route_promoted_to_p2") {
+		t.Fatalf("route evaluation = %+v, want route-promoted P2", evaluation)
+	}
+	encoded, err := json.Marshal(evaluation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "3.36") || strings.Contains(string(encoded), "6.525") || strings.Contains(string(encoded), "coordinates") {
+		t.Fatalf("route evaluation exposed route geometry: %s", encoded)
+	}
+
+	nonIntersecting := routing.Route{Geometry: routing.GeoJSONLineString{Type: "LineString", Coordinates: [][]float64{{3.36, 6.60}, {3.40, 6.60}}}}
+	nonRelevant, err := service.EvaluateIncidentForRoute(ctx, incidentID, proximity, nonIntersecting, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nonRelevant.Decision.Level != None || !contains(nonRelevant.Decision.Reasons, "route_not_relevant") {
+		t.Fatalf("non-relevant route evaluation = %+v, want v1 NONE", nonRelevant)
 	}
 }
 

@@ -1,7 +1,9 @@
 # Deterministic priority policy
 
-The policy version is `signa.priority.v1`. Priority is calculated per user and
-does not change incident status, confidence, or severity.
+The location-only policy version is `signa.priority.v1`. Route-aware
+evaluation uses `signa.priority.v2`; v1 remains available and unchanged.
+Priority is calculated per user and does not change incident status,
+confidence, or severity.
 
 ## Rule table
 
@@ -36,3 +38,22 @@ The worker requires these values without product-policy defaults:
 
 Both radii and both durations must be positive, and P1 radius must be smaller
 than P2 radius.
+
+## Route-aware v2 rule table
+
+The spatial layer evaluates the request-scoped route against private incident
+`affected_geometry` and passes only one categorical value to the pure policy:
+`UNKNOWN`, `NOT_RELEVANT`, or `RELEVANT`. Center points alone produce
+`UNKNOWN`; v2 does not invent a route corridor or reuse proximity radii.
+
+| Route result | v2 behavior |
+| --- | --- |
+| `UNKNOWN` | Preserve the v1 level and add `route_relevance_unknown`. |
+| `NOT_RELEVANT` | Preserve the v1 level and add `route_not_relevant`. |
+| `RELEVANT` + existing P1/P2 | Preserve the existing level and add `route_relevant`. |
+| `RELEVANT` + active/fresh actionable evidence | Promote a v1 `P3`/`NONE` result to `P2`; add `route_relevant` and `route_promoted_to_p2`. |
+| `RELEVANT` + weaker or disputed evidence | At most `P3`; add `route_relevant` and, when promoted from `NONE`, `route_relevance_p3`. |
+| terminal or stale incident | Always `NONE`, regardless of route result. |
+
+Route geometry is validated, used only for the PostGIS intersection query, and
+is never persisted, returned, or included in reasons/logs.
