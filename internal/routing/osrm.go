@@ -100,10 +100,17 @@ func (p *OSRMProvider) Route(ctx context.Context, request Request) (Route, error
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return Route{}, ErrInvalidResponse
 	}
-	if payload.Code == "NoRoute" || len(payload.Routes) == 0 {
+	switch payload.Code {
+	case "NoRoute":
 		return Route{}, ErrNoRoute
-	}
-	if payload.Code != "" && payload.Code != "Ok" {
+	case "Ok":
+		if len(payload.Routes) == 0 {
+			return Route{}, ErrNoRoute
+		}
+	default:
+		if payload.Code == "" {
+			return Route{}, ErrInvalidResponse
+		}
 		return Route{}, ErrUpstream
 	}
 	first := payload.Routes[0]

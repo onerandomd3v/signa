@@ -1,4 +1,4 @@
-# ADR-0010: OSRM-compatible routing adapter for request-scoped route geometry
+# ADR-0011: OSRM-compatible routing adapter for request-scoped route geometry
 
 - Status: Accepted
 - Date: 2026-09-25

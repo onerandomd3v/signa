@@ -844,15 +844,6 @@ The snapshot's `user_id` is an opaque boundary until the future user/auth
 domain owns referential constraints. Exact user and report coordinates remain
 restricted internal data and are omitted from generic public representations.
 
-The public incident geometry contract is versioned as
-`signa.public-incident-geometry.v1`. The API requires explicit positive
-`SIGNA_PUBLIC_INCIDENT_GRID_METERS`, `SIGNA_PUBLIC_INCIDENT_MIN_RADIUS_METERS`,
-and `SIGNA_PUBLIC_INCIDENT_SIMPLIFY_METERS` settings; it provides no hidden
-product defaults. Public reads snap and simplify stored affected geometry in a
-metric projection, or snap the internal center and buffer it to the configured
-minimum radius when no affected geometry exists. Only generalized GeoJSON
-`Polygon` or `MultiPolygon` output is returned, never the internal center point.
-
 ---
 
 # 19. Incident Lifecycle
@@ -1275,7 +1266,7 @@ ADR-0006: SSE for foreground realtime updates
 ADR-0007: OpenAPI contract between Go and TypeScript
 ADR-0008: AI interpretation separated from deterministic decisions
 ADR-0009: Location minimization and approximate public geography
-ADR-0010: OSRM-compatible routing adapter for request-scoped route geometry
+ADR-0011: OSRM-compatible routing adapter for request-scoped route geometry
 ```
 
 ---
@@ -1327,7 +1318,7 @@ The architecture direction and foundation decisions above are established. Sever
 12. Error monitoring provider.
 13. CI/CD provider and environment strategy.
 
-These choices must not be silently embedded in implementation code. The initial routing-provider choice is resolved by ADR-0010.
+These choices must not be silently embedded in implementation code. The initial routing-provider choice is resolved by ADR-0011.
 
 ---
 

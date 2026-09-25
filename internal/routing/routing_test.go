@@ -92,6 +92,8 @@ func TestOSRMProviderErrorsAndCancellation(t *testing.T) {
 		{name: "5xx", status: http.StatusBadGateway, body: "upstream details", want: ErrUpstream},
 		{name: "malformed", status: http.StatusOK, body: "{", want: ErrInvalidResponse},
 		{name: "no route", status: http.StatusOK, body: `{"code":"NoRoute","routes":[]}`, want: ErrNoRoute},
+		{name: "missing code", status: http.StatusOK, body: `{"routes":[{"geometry":{"type":"LineString","coordinates":[[3.3,6.5],[3.4,6.6]]},"distance":10,"duration":5}]}`, want: ErrInvalidResponse},
+		{name: "unexpected code without routes", status: http.StatusOK, body: `{"code":"InvalidQuery","routes":[]}`, want: ErrUpstream},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
