@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,7 +38,10 @@ func (s *PostgresStore) Lookup(ctx context.Context, secret string) (Principal, e
 		  AND expires_at > now()
 	`, hash).Scan(&userID)
 	if err != nil {
-		return Principal{}, ErrUnauthenticated
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Principal{}, ErrUnauthenticated
+		}
+		return Principal{}, fmt.Errorf("%w: %v", ErrSessionStoreUnavailable, err)
 	}
 	return Principal{UserID: userID}, nil
 }

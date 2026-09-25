@@ -79,6 +79,20 @@ func TestPostgresStoreRejectsMalformedExpiredOrRevokedLookup(t *testing.T) {
 	}
 }
 
+func TestPostgresStorePreservesOperationalLookupFailure(t *testing.T) {
+	db := &fakeDB{row: fakeRow{err: errors.New("connection refused")}}
+	_, err := NewPostgresStore(db).Lookup(context.Background(), func() string {
+		secret, secretErr := NewSessionSecret()
+		if secretErr != nil {
+			t.Fatal(secretErr)
+		}
+		return secret
+	}())
+	if !errors.Is(err, ErrSessionStoreUnavailable) {
+		t.Fatalf("lookup error = %v, want ErrSessionStoreUnavailable", err)
+	}
+}
+
 func TestPostgresStoreCreatesAndRevokesOpaqueSession(t *testing.T) {
 	db := &fakeDB{}
 	store := NewPostgresStore(db)

@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -91,6 +93,29 @@ func TestMiddlewareInjectsCanonicalPrincipalAndIgnoresClientUserID(t *testing.T)
 	}
 	if got != principal {
 		t.Fatalf("principal = %#v, want %#v", got, principal)
+	}
+}
+
+func TestMiddlewareReturnsJSONServiceUnavailableForOperationalStoreErrors(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	store := &fakeSessionStore{secret: "valid-secret", err: errors.New("connection refused")}
+	handler := RequirePrincipalWithLogger(store, logger)(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		t.Fatal("protected handler ran during store outage")
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request.AddCookie(&http.Cookie{Name: DefaultCookieName, Value: "valid-secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", response.Code)
+	}
+	if response.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", response.Header().Get("Content-Type"))
+	}
+	if strings.Contains(response.Body.String(), "valid-secret") || strings.Contains(logs.String(), "valid-secret") {
+		t.Fatal("session credential leaked in response or logs")
 	}
 }
 

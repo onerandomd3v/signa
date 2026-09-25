@@ -171,6 +171,10 @@ export type GetCurrentSessionErrors = {
      * Missing, malformed, expired, or revoked session
      */
     401: ErrorResponse;
+    /**
+     * Authentication session store unavailable
+     */
+    503: ErrorResponse;
 };
 
 export type GetCurrentSessionError = GetCurrentSessionErrors[keyof GetCurrentSessionErrors];

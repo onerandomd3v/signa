@@ -62,7 +62,7 @@ func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger *slog.Logger, ra
 		router.Get("/incidents/{incident_id}", publicIncidentDetailHandler(logger, publicReader, publicPolicy))
 	}
 	if authConfig.Store != nil {
-		router.With(auth.RequirePrincipal(authConfig.Store)).Get("/auth/session", currentSessionHandler)
+		router.With(auth.RequirePrincipalWithLogger(authConfig.Store, logger)).Get("/auth/session", currentSessionHandler)
 	}
 	return router
 }

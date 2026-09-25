@@ -2,7 +2,9 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -11,6 +13,7 @@ import (
 const DefaultCookieName = "signa_session"
 
 var ErrUnauthenticated = errors.New("unauthenticated")
+var ErrSessionStoreUnavailable = errors.New("session store unavailable")
 
 type Principal struct {
 	UserID uuid.UUID
@@ -32,20 +35,35 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 }
 
 func RequirePrincipal(store SessionStore) func(http.Handler) http.Handler {
-	return RequirePrincipalWithCookieName(store, DefaultCookieName)
+	return RequirePrincipalWithLogger(store, nil)
 }
 
 func RequirePrincipalWithCookieName(store SessionStore, cookieName string) func(http.Handler) http.Handler {
+	return requirePrincipal(store, cookieName, nil)
+}
+
+func RequirePrincipalWithLogger(store SessionStore, logger *slog.Logger) func(http.Handler) http.Handler {
+	return requirePrincipal(store, DefaultCookieName, logger)
+}
+
+func requirePrincipal(store SessionStore, cookieName string, logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			cookie, err := request.Cookie(cookieName)
 			if err != nil || cookie.Value == "" {
-				unauthorized(writer)
+				writeError(writer, http.StatusUnauthorized, "unauthenticated", "authentication is required")
 				return
 			}
 			principal, err := store.Lookup(request.Context(), cookie.Value)
 			if err != nil {
-				unauthorized(writer)
+				if errors.Is(err, ErrUnauthenticated) {
+					writeError(writer, http.StatusUnauthorized, "unauthenticated", "authentication is required")
+					return
+				}
+				if logger != nil {
+					logger.Error("session lookup failed", "error", err)
+				}
+				writeError(writer, http.StatusServiceUnavailable, "authentication_unavailable", "authentication service is unavailable")
 				return
 			}
 			next.ServeHTTP(writer, request.WithContext(WithPrincipal(request.Context(), principal)))
@@ -53,6 +71,10 @@ func RequirePrincipalWithCookieName(store SessionStore, cookieName string) func(
 	}
 }
 
-func unauthorized(writer http.ResponseWriter) {
-	http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+func writeError(writer http.ResponseWriter, status int, code, message string) {
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(status)
+	_ = json.NewEncoder(writer).Encode(map[string]any{
+		"error": map[string]string{"code": code, "message": message},
+	})
 }
