@@ -68,6 +68,17 @@ func TestStoreCreateIdempotencyEligibilityAndSupersession(t *testing.T) {
 	if alertCount != 1 {
 		t.Fatalf("duplicate alert count = %d", alertCount)
 	}
+	conflicting := request
+	conflicting.Message = "different safe alert message"
+	if _, err := store.Create(ctx, conflicting); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("conflicting idempotency error = %v, want ErrIdempotencyConflict", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE event_type = 'alert.created' AND aggregate_id = $1`, created.Alert.ID).Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if outboxCount != 1 {
+		t.Fatalf("conflicting idempotency outbox count = %d", outboxCount)
+	}
 
 	payloadBytes := []byte{}
 	if err := pool.QueryRow(ctx, `SELECT payload FROM outbox_events WHERE event_type = 'alert.created' AND aggregate_id = $1`, created.Alert.ID).Scan(&payloadBytes); err != nil {

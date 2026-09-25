@@ -2,6 +2,8 @@ package alerts
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 
 var (
 	ErrIneligible              = errors.New("alert is not eligible")
+	ErrIdempotencyConflict     = errors.New("idempotency key was reused with a different request")
 	ErrSupersedesNotFound      = errors.New("superseded alert was not found")
 	ErrSupersedesOtherIncident = errors.New("superseded alert belongs to another incident")
 )
@@ -44,6 +47,7 @@ type Alert struct {
 	SupersedesAlertID        *string
 	IdempotencyKey           string
 	CreatedAt                time.Time
+	requestFingerprint       string
 }
 
 type CreateResult struct {
@@ -71,6 +75,10 @@ func (s *Store) Create(ctx context.Context, request CreateRequest) (CreateResult
 	if request.AsOf.IsZero() {
 		return CreateResult{}, fmt.Errorf("alert as_of is required")
 	}
+	fingerprint, err := requestFingerprint(request)
+	if err != nil {
+		return CreateResult{}, fmt.Errorf("fingerprint alert request: %w", err)
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -81,6 +89,9 @@ func (s *Store) Create(ctx context.Context, request CreateRequest) (CreateResult
 	if existing, err := loadByIdempotencyKey(ctx, tx, request.IdempotencyKey); err != nil {
 		return CreateResult{}, err
 	} else if existing != nil {
+		if existing.requestFingerprint != fingerprint {
+			return CreateResult{}, ErrIdempotencyConflict
+		}
 		return CreateResult{Alert: *existing, Decision: Decision{Eligible: true, AlertType: existing.AlertType, Reasons: []string{"idempotent_reuse"}, PolicyVersion: EligibilityPolicyVersion}, Reused: true}, nil
 	}
 
@@ -111,14 +122,14 @@ func (s *Store) Create(ctx context.Context, request CreateRequest) (CreateResult
 			incident_id, alert_type, confidence_snapshot, severity_snapshot,
 			status_snapshot, priority_snapshot, freshness_snapshot, message,
 			eligibility_policy_version, eligibility_reasons, as_of,
-			supersedes_alert_id, idempotency_key
+			supersedes_alert_id, idempotency_key, request_fingerprint
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14)
 		ON CONFLICT (idempotency_key) DO NOTHING
 		RETURNING id::text, created_at
 	`, request.IncidentID, decision.AlertType, request.Eligibility.Confidence, request.Eligibility.Severity,
 		request.Eligibility.Status, request.Eligibility.Priority, request.Eligibility.Freshness, request.Message,
-		EligibilityPolicyVersion, reasons, request.AsOf.UTC(), supersedes, request.IdempotencyKey).Scan(&alert.ID, &alert.CreatedAt)
+		EligibilityPolicyVersion, reasons, request.AsOf.UTC(), supersedes, request.IdempotencyKey, fingerprint).Scan(&alert.ID, &alert.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, loadErr := loadByIdempotencyKey(ctx, tx, request.IdempotencyKey)
 		if loadErr != nil {
@@ -126,6 +137,9 @@ func (s *Store) Create(ctx context.Context, request CreateRequest) (CreateResult
 		}
 		if existing == nil {
 			return CreateResult{}, fmt.Errorf("idempotent alert insert returned no canonical row")
+		}
+		if existing.requestFingerprint != fingerprint {
+			return CreateResult{}, ErrIdempotencyConflict
 		}
 		return CreateResult{Alert: *existing, Decision: Decision{Eligible: true, AlertType: existing.AlertType, Reasons: []string{"idempotent_reuse"}, PolicyVersion: EligibilityPolicyVersion}, Reused: true}, nil
 	}
@@ -145,6 +159,7 @@ func (s *Store) Create(ctx context.Context, request CreateRequest) (CreateResult
 	alert.AsOf = request.AsOf.UTC()
 	alert.SupersedesAlertID = request.SupersedesAlertID
 	alert.IdempotencyKey = request.IdempotencyKey
+	alert.requestFingerprint = fingerprint
 
 	payload, err := json.Marshal(struct {
 		AlertID            string         `json:"alert_id"`
@@ -179,12 +194,12 @@ func loadByIdempotencyKey(ctx context.Context, tx pgx.Tx, key string) (*Alert, e
 		       severity_snapshot, status_snapshot, priority_snapshot,
 		       freshness_snapshot, message, eligibility_policy_version,
 		       eligibility_reasons, as_of, supersedes_alert_id::text,
-		       idempotency_key, created_at
+		       idempotency_key, request_fingerprint, created_at
 		FROM alerts WHERE idempotency_key = $1
 	`, key).Scan(&alert.ID, &alert.IncidentID, &alert.AlertType, &alert.ConfidenceSnapshot,
 		&alert.SeveritySnapshot, &alert.StatusSnapshot, &alert.PrioritySnapshot,
 		&alert.FreshnessSnapshot, &alert.Message, &alert.EligibilityPolicyVersion,
-		&reasons, &alert.AsOf, &supersedes, &alert.IdempotencyKey, &alert.CreatedAt)
+		&reasons, &alert.AsOf, &supersedes, &alert.IdempotencyKey, &alert.requestFingerprint, &alert.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -211,4 +226,25 @@ func validateSupersession(ctx context.Context, tx pgx.Tx, incidentID, supersedes
 		return ErrSupersedesOtherIncident
 	}
 	return nil
+}
+
+func requestFingerprint(request CreateRequest) (string, error) {
+	encoded, err := json.Marshal(struct {
+		IncidentID        string           `json:"incident_id"`
+		Eligibility       EligibilityInput `json:"eligibility"`
+		Message           string           `json:"message"`
+		AsOf              time.Time        `json:"as_of"`
+		SupersedesAlertID *string          `json:"supersedes_alert_id,omitempty"`
+	}{
+		IncidentID:        request.IncidentID,
+		Eligibility:       request.Eligibility,
+		Message:           request.Message,
+		AsOf:              request.AsOf.UTC(),
+		SupersedesAlertID: request.SupersedesAlertID,
+	})
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
 }

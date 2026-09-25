@@ -14,6 +14,7 @@ CREATE TABLE alerts (
     as_of TIMESTAMPTZ NOT NULL,
     supersedes_alert_id UUID REFERENCES alerts(id) ON DELETE RESTRICT,
     idempotency_key TEXT NOT NULL UNIQUE,
+    request_fingerprint TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT alerts_not_self_superseding CHECK (supersedes_alert_id IS NULL OR supersedes_alert_id <> id),
     CONSTRAINT alerts_eligibility_reasons_array CHECK (jsonb_typeof(eligibility_reasons) = 'array')
