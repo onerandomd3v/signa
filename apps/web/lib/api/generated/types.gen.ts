@@ -247,10 +247,6 @@ export type GetAlertErrors = {
      */
     404: ErrorResponse;
     /**
-     * Internal alert read failure
-     */
-    500: ErrorResponse;
-    /**
      * Alert or authentication store unavailable
      */
     503: ErrorResponse;
