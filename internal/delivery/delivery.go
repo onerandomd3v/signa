@@ -89,8 +89,6 @@ type Adapter interface {
 	Deliver(context.Context, Attempt) (ProviderResult, error)
 }
 
-// UnavailableAdapter keeps the generic worker runnable until a channel provider
-// (for example Web Push in COD-217) is configured behind this boundary.
 func ParseRequest(fields map[string]any) (Request, error) {
 	eventID, err := stringField(fields, "event_id")
 	if err != nil {

@@ -71,10 +71,17 @@ func (s *PostgresStore) StartAttempt(ctx context.Context, request Request, now t
 		return StartResult{NotDue: true, RetryAfter: s.config.Lease - now.Sub(*lastAttempt)}, nil
 	}
 	if attempts >= s.config.MaxAttempts {
-		if _, err := tx.Exec(ctx, `UPDATE deliveries SET state = 'QUARANTINED', updated_at = $2 WHERE id = $1`, request.DeliveryID, now); err != nil {
+		reason := "maximum delivery attempts exhausted"
+		if activeAttemptNo != nil {
+			reason = "lease expired; maximum delivery attempts exhausted"
+			if _, err := tx.Exec(ctx, `UPDATE delivery_attempts SET state = 'STALE', failure_kind = $3, error_message = $4, completed_at = $5 WHERE delivery_id = $1 AND attempt_no = $2 AND state = 'STARTED'`, request.DeliveryID, *activeAttemptNo, string(FailurePermanent), reason, now); err != nil {
+				return StartResult{}, fmt.Errorf("close expired delivery attempt: %w", err)
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE deliveries SET state = 'QUARANTINED', active_attempt_no = NULL, last_error = $2, updated_at = $3 WHERE id = $1`, request.DeliveryID, reason, now); err != nil {
 			return StartResult{}, err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO delivery_quarantine (delivery_id, reason) VALUES ($1, $2) ON CONFLICT (delivery_id) DO NOTHING`, request.DeliveryID, "maximum delivery attempts exhausted"); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_quarantine (delivery_id, reason) VALUES ($1, $2) ON CONFLICT (delivery_id) DO UPDATE SET reason = EXCLUDED.reason, quarantined_at = now()`, request.DeliveryID, reason); err != nil {
 			return StartResult{}, err
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -128,7 +135,7 @@ func (s *PostgresStore) FinishAttempt(ctx context.Context, attempt Attempt, prov
 		return FinishResult{}, fmt.Errorf("load delivery result state: %w", err)
 	}
 	if activeAttemptNo == nil || *activeAttemptNo != attempt.Attempt {
-		if _, err := tx.Exec(ctx, `UPDATE delivery_attempts SET state = 'STALE', failure_kind = $3, error_message = $4, provider_response = $5, completed_at = $6 WHERE delivery_id = $1 AND attempt_no = $2 AND state = 'STARTED'`, attempt.DeliveryID, attempt.Attempt, string(kind), truncateErrorValue(deliveryErr), truncate(provider.Response), now); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE delivery_attempts SET state = 'STALE', failure_kind = COALESCE(NULLIF($3, ''), failure_kind), error_message = COALESCE(NULLIF($4, ''), error_message), provider_response = COALESCE(NULLIF($5, ''), provider_response), completed_at = COALESCE(completed_at, $6) WHERE delivery_id = $1 AND attempt_no = $2 AND state IN ('STARTED', 'STALE')`, attempt.DeliveryID, attempt.Attempt, string(kind), truncateErrorValue(deliveryErr), truncate(provider.Response), now); err != nil {
 			return FinishResult{}, fmt.Errorf("record stale delivery attempt: %w", err)
 		}
 		if err := tx.Commit(ctx); err != nil {

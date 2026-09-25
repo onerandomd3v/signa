@@ -137,7 +137,8 @@ func TestPostgresStoreFencesStaleAttemptAndProtectsFinalLease(t *testing.T) {
 	}
 	staleDeliveryID := "00000000-0000-0000-0000-000000000014"
 	finalDeliveryID := "00000000-0000-0000-0000-000000000015"
-	for _, item := range []struct{ id, key string }{{staleDeliveryID, "stale-delivery-key"}, {finalDeliveryID, "final-delivery-key"}} {
+	exhaustedDeliveryID := "00000000-0000-0000-0000-000000000016"
+	for _, item := range []struct{ id, key string }{{staleDeliveryID, "stale-delivery-key"}, {finalDeliveryID, "final-delivery-key"}, {exhaustedDeliveryID, "exhausted-delivery-key"}} {
 		if _, err := pool.Exec(ctx, `INSERT INTO deliveries (id, alert_id, user_id, priority, channel, idempotency_key, payload) VALUES ($1, $2, $3, 'P1', 'TEST', $4, '{"safe":"payload"}')`, item.id, alertID, userID, item.key); err != nil {
 			t.Fatal(err)
 		}
@@ -206,6 +207,57 @@ func TestPostgresStoreFencesStaleAttemptAndProtectsFinalLease(t *testing.T) {
 	}
 	if state != StateInFlight {
 		t.Fatalf("active final state = %s, want in-flight", state)
+	}
+
+	exhaustedStore, err := NewPostgresStore(pool, PostgresConfig{MaxAttempts: 1, Backoff: time.Millisecond, Lease: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exhaustedRequest := Request{DeliveryID: exhaustedDeliveryID, AlertID: alertID, IdempotencyKey: "exhausted-delivery-key"}
+	startedAt := time.Now().UTC()
+	first, err := exhaustedStore.StartAttempt(ctx, exhaustedRequest, startedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exhausted, err := exhaustedStore.StartAttempt(ctx, exhaustedRequest, startedAt.Add(2*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exhausted.Terminal || exhausted.NotDue {
+		t.Fatalf("expired final attempt = %+v, want terminal quarantine", exhausted)
+	}
+	var lastError string
+	var attemptState, attemptError, providerResponse string
+	if err := pool.QueryRow(ctx, `SELECT state, active_attempt_no, last_error FROM deliveries WHERE id = $1`, exhaustedDeliveryID).Scan(&state, &active, &lastError); err != nil {
+		t.Fatal(err)
+	}
+	if state != StateQuarantined || active != nil || lastError != "lease expired; maximum delivery attempts exhausted" {
+		t.Fatalf("expired final delivery = state=%s active=%v last_error=%q", state, active, lastError)
+	}
+	if err := pool.QueryRow(ctx, `SELECT state, error_message, COALESCE(provider_response, '') FROM delivery_attempts WHERE delivery_id = $1 AND attempt_no = 1`, exhaustedDeliveryID).Scan(&attemptState, &attemptError, &providerResponse); err != nil {
+		t.Fatal(err)
+	}
+	if attemptState == "STARTED" || attemptError != lastError {
+		t.Fatalf("expired attempt = state=%q error=%q, want closed with lease reason", attemptState, attemptError)
+	}
+	lateResult, err := exhaustedStore.FinishAttempt(ctx, first.Attempt, ProviderResult{Response: "accepted-late"}, "", nil, startedAt.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lateResult.Stale || lateResult.Terminal {
+		t.Fatalf("late result = %+v, want stale nonterminal", lateResult)
+	}
+	if err := pool.QueryRow(ctx, `SELECT state, active_attempt_no FROM deliveries WHERE id = $1`, exhaustedDeliveryID).Scan(&state, &active); err != nil {
+		t.Fatal(err)
+	}
+	if state != StateQuarantined || active != nil {
+		t.Fatalf("late result mutated quarantined delivery: state=%s active=%v", state, active)
+	}
+	if err := pool.QueryRow(ctx, `SELECT state, error_message, provider_response FROM delivery_attempts WHERE delivery_id = $1 AND attempt_no = 1`, exhaustedDeliveryID).Scan(&attemptState, &attemptError, &providerResponse); err != nil {
+		t.Fatal(err)
+	}
+	if attemptState != "STALE" || attemptError != lastError || providerResponse != "accepted-late" {
+		t.Fatalf("late attempt audit = state=%q error=%q response=%q", attemptState, attemptError, providerResponse)
 	}
 }
 
