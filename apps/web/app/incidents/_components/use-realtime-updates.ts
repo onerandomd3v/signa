@@ -123,6 +123,7 @@ export function useRealtimeUpdates({
             lastEventId: cursor,
             onConnection: () => {
               lastError = undefined;
+              reconnectDelay = MIN_RECONNECT_DELAY_MS;
               if (!signal.aborted) setStatus("live");
             },
             onSseEvent: (event) => {

@@ -34,17 +34,22 @@ export type IncidentFeedState =
 export function RealtimeConnectionStatusMessage({
   status,
   alertUpdateReceived,
+  onRetry,
 }: {
-  status: RealtimeConnectionStatus;
+  status: RealtimeConnectionStatus | "degraded";
   alertUpdateReceived: boolean;
+  onRetry?: () => void;
 }) {
-  const messages: Record<RealtimeConnectionStatus, string> = {
+  const messages: Record<RealtimeConnectionStatus | "degraded", string> = {
     connecting: "Connecting to incident updates…",
     live: "Connected to realtime updates.",
     reconnecting: "Realtime connection interrupted. Reconnecting…",
     unavailable:
       "Realtime updates unavailable. Incident information remains available.",
+    degraded:
+      "Realtime updates are degraded. Couldn’t refresh incidents; displayed information may be out of date.",
   };
+  const isDegraded = status === "degraded";
 
   return (
     <div className="space-y-1">
@@ -56,6 +61,15 @@ export function RealtimeConnectionStatusMessage({
       >
         {messages[status]}
       </p>
+      {isDegraded && onRetry && (
+        <button
+          className="inline-flex min-h-11 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          onClick={onRetry}
+          type="button"
+        >
+          Retry incident refresh
+        </button>
+      )}
       {alertUpdateReceived && (
         <p className="text-xs text-muted-foreground">
           An alert event was received. Alert details aren’t available in the

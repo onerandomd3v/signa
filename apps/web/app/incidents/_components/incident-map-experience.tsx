@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { PublicIncident } from "@/lib/api/generated";
 import type { RealtimeConnector } from "./use-realtime-updates";
@@ -64,6 +64,8 @@ export function IncidentMapExperience({
 }) {
   const [state, setState] = useState<LoadState>("loading");
   const [incidents, setIncidents] = useState<PublicIncident[]>([]);
+  const [reconciliationFailed, setReconciliationFailed] = useState(false);
+  const hasLoadedRef = useRef(false);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const featureCollection: IncidentFeatureCollection = useMemo(
@@ -74,11 +76,17 @@ export function IncidentMapExperience({
   const refresh = useCoalescedRefresh({
     load: loadIncidents,
     onSuccess: (loadedIncidents: PublicIncident[]) => {
+      hasLoadedRef.current = true;
+      setReconciliationFailed(false);
       setIncidents(loadedIncidents);
       setState("ready");
     },
     onError: () => {
-      setState((current) => (current === "ready" ? "ready" : "error"));
+      if (hasLoadedRef.current) {
+        setReconciliationFailed(true);
+      } else {
+        setState("error");
+      }
     },
   });
   const realtime = useRealtimeUpdates({
@@ -256,7 +264,8 @@ export function IncidentMapExperience({
     <div className="space-y-3">
       <RealtimeConnectionStatusMessage
         alertUpdateReceived={realtime.alertUpdateReceived}
-        status={realtime.status}
+        status={reconciliationFailed ? "degraded" : realtime.status}
+        onRetry={refresh}
       />
       {content}
     </div>

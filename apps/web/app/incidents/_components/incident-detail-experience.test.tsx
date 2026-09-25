@@ -141,6 +141,64 @@ describe("IncidentDetailExperience", () => {
     expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
   });
 
+  it("preserves detail through failed reconciliations and recovers on explicit retry", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    vi.mocked(fetchPublicIncident)
+      .mockResolvedValueOnce({ status: "ready", incident: publicIncident })
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ status: "error" })
+      .mockResolvedValueOnce({
+        status: "ready",
+        incident: { ...publicIncident, confidence_state: "CORROBORATED" },
+      });
+    const connectRealtime: RealtimeConnector = async (options) => {
+      options.onConnection?.();
+      emit = options.onSseEvent;
+      return idleRealtime(options);
+    };
+    render(
+      <IncidentDetailExperience
+        connectRealtime={connectRealtime}
+        incidentId="incident-1"
+      />,
+    );
+
+    expect(await screen.findByText("Emerging")).toBeTruthy();
+    expect(screen.getByText("Connected to realtime updates.")).toBeTruthy();
+    act(() =>
+      emit?.({ event: "incident.updated.v1", id: "cursor-1", data: {} }),
+    );
+    expect(
+      await screen.findByText(/displayed information may be out of date/i),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Road Closure" })).toBeTruthy();
+    expect(screen.getByText("Emerging")).toBeTruthy();
+    expect(screen.queryByText("Connected to realtime updates.")).toBeNull();
+
+    act(() => {
+      for (let index = 0; index < 12; index += 1) {
+        emit?.({
+          event: "incident.updated.v1",
+          id: `cursor-${index + 2}`,
+          data: { confidence_state: "ignored" },
+        });
+      }
+    });
+    await waitFor(() => expect(fetchPublicIncident).toHaveBeenCalledTimes(3));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(fetchPublicIncident).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("Emerging")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry incident refresh" }),
+    );
+    expect(await screen.findByText("Corroborated")).toBeTruthy();
+    expect(screen.getByText("Connected to realtime updates.")).toBeTruthy();
+    expect(fetchPublicIncident).toHaveBeenCalledTimes(4);
+  });
+
   it("preserves the existing incident when the stream returns 503", async () => {
     vi.mocked(fetchPublicIncident).mockResolvedValue({
       status: "ready",

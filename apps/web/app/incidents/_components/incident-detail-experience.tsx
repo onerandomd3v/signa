@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { PublicIncident } from "@/lib/api/generated";
 import { fetchPublicIncident } from "@/lib/api/incidents";
 import { useCoalescedRefresh } from "./use-coalesced-refresh";
@@ -37,6 +37,8 @@ export function IncidentDetailExperience({
   const [state, setState] = useState<IncidentDetailState>({
     status: "loading",
   });
+  const [reconciliationFailed, setReconciliationFailed] = useState(false);
+  const loadedIncidentIdRef = useRef<string | null>(null);
 
   const refresh = useCoalescedRefresh({
     key: incidentId,
@@ -44,22 +46,30 @@ export function IncidentDetailExperience({
       fetchPublicIncident(incidentId, globalThis.fetch, signal),
     onSuccess: (result) => {
       if (result.status === "ready") {
+        loadedIncidentIdRef.current = incidentId;
+        setReconciliationFailed(false);
         setState({
           status: "ready",
           incident: toIncidentView(result.incident),
         });
       } else if (result.status === "error") {
-        setState((current) =>
-          current.status === "ready" ? current : { status: "error" },
-        );
+        if (loadedIncidentIdRef.current === incidentId) {
+          setReconciliationFailed(true);
+        } else {
+          setState({ status: "error" });
+        }
       } else {
+        loadedIncidentIdRef.current = null;
+        setReconciliationFailed(false);
         setState({ status: result.status });
       }
     },
     onError: () => {
-      setState((current) =>
-        current.status === "ready" ? current : { status: "error" },
-      );
+      if (loadedIncidentIdRef.current === incidentId) {
+        setReconciliationFailed(true);
+      } else {
+        setState({ status: "error" });
+      }
     },
   });
   const realtime = useRealtimeUpdates({
@@ -73,14 +83,25 @@ export function IncidentDetailExperience({
       : state;
   const detailState: IncidentDetailState =
     visibleState.status === "error"
-      ? { ...visibleState, onRetry: refresh }
+      ? {
+          ...visibleState,
+          onRetry: () => {
+            setState({ status: "loading" });
+            refresh();
+          },
+        }
       : visibleState;
+  const isReconciliationFailed =
+    reconciliationFailed &&
+    state.status === "ready" &&
+    state.incident.id === incidentId;
 
   return (
     <div className="space-y-3">
       <RealtimeConnectionStatusMessage
         alertUpdateReceived={realtime.alertUpdateReceived}
-        status={realtime.status}
+        status={isReconciliationFailed ? "degraded" : realtime.status}
+        onRetry={refresh}
       />
       <IncidentDetail state={detailState} />
     </div>

@@ -179,6 +179,70 @@ describe("IncidentMapExperience", () => {
     expect(await screen.findByText("Resolving")).toBeTruthy();
   });
 
+  it("keeps the map list visible and exposes explicit recovery after reconciliation failures", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    const updatedIncident: PublicIncident = {
+      ...incident,
+      status: "RESOLVING",
+    };
+    const loadIncidents = vi
+      .fn<(signal: AbortSignal) => Promise<PublicIncident[]>>()
+      .mockResolvedValueOnce([incident])
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockRejectedValueOnce(new Error("still unavailable"))
+      .mockResolvedValueOnce([updatedIncident]);
+    const connectRealtime: RealtimeConnector = async (options) => {
+      options.onConnection?.();
+      emit = options.onSseEvent;
+      return idleRealtime(options);
+    };
+
+    render(
+      <IncidentMapExperience
+        connectRealtime={connectRealtime}
+        loadIncidents={loadIncidents}
+        mapStyleUrl={null}
+      />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Road Closure" }),
+    ).toBeTruthy();
+    expect(screen.getByText("Connected to realtime updates.")).toBeTruthy();
+
+    act(() =>
+      emit?.({ event: "incident.updated.v1", id: "cursor-1", data: {} }),
+    );
+    expect(
+      await screen.findByText(/displayed information may be out of date/i),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Road Closure" })).toBeTruthy();
+    expect(screen.getByText("Open")).toBeTruthy();
+    expect(screen.queryByText("Connected to realtime updates.")).toBeNull();
+
+    act(() => {
+      for (let index = 0; index < 12; index += 1) {
+        emit?.({
+          event: "incident.updated.v1",
+          id: `cursor-${index + 2}`,
+          data: { status: "ignored" },
+        });
+      }
+    });
+    await waitFor(() => expect(loadIncidents).toHaveBeenCalledTimes(3));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(loadIncidents).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("Open")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry incident refresh" }),
+    );
+    expect(await screen.findByText("Resolving")).toBeTruthy();
+    expect(screen.getByText("Connected to realtime updates.")).toBeTruthy();
+    expect(loadIncidents).toHaveBeenCalledTimes(4);
+  });
+
   it("keeps fetched incidents visible when realtime authentication is unavailable", async () => {
     const connectRealtime: RealtimeConnector = async (options) => {
       options.onSseError?.(new Error("SSE failed: 401 Unauthorized"));

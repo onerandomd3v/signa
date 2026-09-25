@@ -123,6 +123,34 @@ describe("useRealtimeUpdates", () => {
     unmount();
   });
 
+  it("resets outer reconnect backoff after a recovered connection then clean EOF", async () => {
+    let calls = 0;
+    const connect: RealtimeConnector = vi.fn(async (options) => {
+      calls += 1;
+      if (calls <= 3) {
+        options.onSseError?.(new Error("network disconnected"));
+        return completedStream();
+      }
+      if (calls === 4) {
+        options.onConnection?.();
+        return completedStream();
+      }
+      options.onConnection?.();
+      return waitingStream(options.signal);
+    });
+    const delays: number[] = [];
+    const sleep = vi.fn(async (ms: number) => {
+      delays.push(ms);
+    });
+    const { unmount } = renderHook(() =>
+      useRealtimeUpdates({ onInvalidation: vi.fn(), connect, sleep }),
+    );
+
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(5));
+    expect(delays).toEqual([1_000, 2_000, 4_000, 1_000]);
+    unmount();
+  });
+
   it("does not start a duplicate stream after rerender and aborts it on unmount", async () => {
     let streamSignal: AbortSignal | undefined;
     const connect: RealtimeConnector = vi.fn(async (options) => {
