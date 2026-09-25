@@ -37,7 +37,7 @@ func NewHandlerWithMediaAndCORS(logger *slog.Logger, rateConfig RateLimitConfig,
 }
 
 func NewHandlerWithMediaAndCORSAndPublicIncidents(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, ingestors ...reports.Ingestor) http.Handler {
-	return NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, AuthConfig{}, ingestors...)
+	return NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, AuthConfig{}, nil, ingestors...)
 }
 
 type AuthConfig struct {
@@ -45,6 +45,10 @@ type AuthConfig struct {
 }
 
 func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, ingestors ...reports.Ingestor) http.Handler {
+	return NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, authConfig, nil, ingestors...)
+}
+
+func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, realtimeHandler http.Handler, ingestors ...reports.Ingestor) http.Handler {
 	var ingestor reports.Ingestor
 	if len(ingestors) > 0 {
 		ingestor = ingestors[0]
@@ -62,7 +66,11 @@ func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger *slog.Logger, ra
 		router.Get("/incidents/{incident_id}", publicIncidentDetailHandler(logger, publicReader, publicPolicy))
 	}
 	if authConfig.Store != nil {
-		router.With(auth.RequirePrincipalWithLogger(authConfig.Store, logger)).Get("/auth/session", currentSessionHandler)
+		principalMiddleware := auth.RequirePrincipalWithLogger(authConfig.Store, logger)
+		router.With(principalMiddleware).Get("/auth/session", currentSessionHandler)
+		if realtimeHandler != nil {
+			router.With(principalMiddleware).Get("/events", realtimeHandler.ServeHTTP)
+		}
 	}
 	return router
 }
@@ -85,13 +93,17 @@ func NewServerWithMediaAndCORS(addr string, logger *slog.Logger, rateConfig Rate
 }
 
 func NewServerWithMediaAndCORSAndPublicIncidents(addr string, logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, ingestors ...reports.Ingestor) *http.Server {
-	return NewServerWithMediaAndCORSAndPublicIncidentsAndAuth(addr, logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, AuthConfig{}, ingestors...)
+	return NewServerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(addr, logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, AuthConfig{}, nil, ingestors...)
 }
 
 func NewServerWithMediaAndCORSAndPublicIncidentsAndAuth(addr string, logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, ingestors ...reports.Ingestor) *http.Server {
+	return NewServerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(addr, logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, authConfig, nil, ingestors...)
+}
+
+func NewServerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(addr string, logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, realtimeHandler http.Handler, ingestors ...reports.Ingestor) *http.Server {
 	return &http.Server{
 		Addr:              addr,
-		Handler:           NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, authConfig, ingestors...),
+		Handler:           NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, authConfig, realtimeHandler, ingestors...),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,

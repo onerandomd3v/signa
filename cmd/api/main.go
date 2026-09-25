@@ -18,8 +18,8 @@ import (
 	"github.com/onerandomd3v/signa/internal/logging"
 	"github.com/onerandomd3v/signa/internal/media"
 	platformredis "github.com/onerandomd3v/signa/internal/platform/redis"
-	"github.com/onerandomd3v/signa/internal/reports"
 	"github.com/onerandomd3v/signa/internal/realtime"
+	"github.com/onerandomd3v/signa/internal/reports"
 )
 
 func main() {
@@ -77,7 +77,7 @@ func run(parent context.Context, logger *slog.Logger) error {
 	if redisClient != nil {
 		realtimeSource = &realtime.RedisSource{Client: redisClient, Block: cfg.SSEHeartbeatInterval}
 	}
-	sseHandler := realtime.NewHandlerWithContext(ctx, realtimeSource, realtime.ScopeAuthorizer{}, cfg.SSEHeartbeatInterval)
+	sseHandler := realtime.NewHandlerWithContext(ctx, realtimeSource, realtime.ScopeAuthorizer{Resolver: realtime.NewPostgresScopeResolver(pool)}, cfg.SSEHeartbeatInterval)
 	sessionStore := auth.NewPostgresStore(pool)
 	server := api.NewServerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(cfg.APIAddr, logger, api.RateLimitConfig{
 		PerClientRatePerMinute: cfg.ReportRatePerMinute,

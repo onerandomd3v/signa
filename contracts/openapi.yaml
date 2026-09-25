@@ -160,9 +160,10 @@ paths:
   /events:
     get:
       operationId: streamRealtimeEvents
-      security: []
+      security:
+        - CookieAuth: []
       summary: Stream authorized incident and alert updates
-      description: Authenticated SSE stream. The auth layer supplies the request principal; clients reconnect with Last-Event-ID and reconcile authoritative state after disconnect gaps.
+      description: Authenticated SSE stream protected by the ADR-0012 HttpOnly signa_session cookie. Clients reconnect with Last-Event-ID and reconcile authoritative state after disconnect gaps.
       parameters:
         - name: Last-Event-ID
           in: header

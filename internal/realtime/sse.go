@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/onerandomd3v/signa/internal/auth"
 	"github.com/onerandomd3v/signa/internal/outbox"
 	goRedis "github.com/redis/go-redis/v9"
 )
@@ -20,23 +23,6 @@ const (
 	StreamAlert    = "alert"
 	defaultCount   = 100
 )
-
-type Principal struct {
-	UserID      string
-	IncidentIDs map[string]struct{}
-	AlertIDs    map[string]struct{}
-}
-
-type principalKey struct{}
-
-func WithPrincipal(request *http.Request, principal Principal) *http.Request {
-	return request.WithContext(context.WithValue(request.Context(), principalKey{}, principal))
-}
-
-func PrincipalFromContext(ctx context.Context) (Principal, bool) {
-	principal, ok := ctx.Value(principalKey{}).(Principal)
-	return principal, ok && strings.TrimSpace(principal.UserID) != ""
-}
 
 type Event struct {
 	Stream      string
@@ -57,29 +43,77 @@ type Cursor struct {
 type Source interface {
 	Read(context.Context, Cursor) ([]Event, error)
 }
+
 type Authorizer interface {
-	Authorize(context.Context, Principal, Event) bool
+	Authorize(context.Context, auth.Principal, Event) (bool, error)
 }
 
 type AllowAllAuthorizer struct{}
 
-func (AllowAllAuthorizer) Authorize(context.Context, Principal, Event) bool { return true }
+func (AllowAllAuthorizer) Authorize(context.Context, auth.Principal, Event) (bool, error) {
+	return true, nil
+}
 
-type ScopeAuthorizer struct{}
+type ScopeResolver interface {
+	Authorize(context.Context, uuid.UUID, Event) (bool, error)
+}
 
-func (ScopeAuthorizer) Authorize(_ context.Context, principal Principal, event Event) bool {
-	if event.Stream == StreamIncident {
-		_, ok := principal.IncidentIDs[event.AggregateID]
-		return ok
+type ScopeAuthorizer struct {
+	Resolver ScopeResolver
+}
+
+func (a ScopeAuthorizer) Authorize(ctx context.Context, principal auth.Principal, event Event) (bool, error) {
+	if a.Resolver == nil || principal.UserID == uuid.Nil {
+		return false, nil
 	}
-	if event.Stream == StreamAlert {
-		if _, ok := principal.AlertIDs[event.AggregateID]; ok {
-			return true
-		}
-		_, ok := principal.IncidentIDs[event.IncidentID]
-		return event.IncidentID != "" && ok
+	return a.Resolver.Authorize(ctx, principal.UserID, event)
+}
+
+type QueryRower interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+// PostgresScopeResolver resolves delivery-backed event visibility from the
+// authenticated user. Scope is never accepted from the client or stored in the
+// authentication principal.
+type PostgresScopeResolver struct {
+	db QueryRower
+}
+
+func NewPostgresScopeResolver(db QueryRower) *PostgresScopeResolver {
+	return &PostgresScopeResolver{db: db}
+}
+
+func (r *PostgresScopeResolver) Authorize(ctx context.Context, userID uuid.UUID, event Event) (bool, error) {
+	if r == nil || r.db == nil || userID == uuid.Nil {
+		return false, nil
 	}
-	return false
+	var authorized bool
+	var err error
+	switch event.Stream {
+	case StreamIncident:
+		err = r.db.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM alerts a
+				JOIN deliveries d ON d.alert_id = a.id
+				WHERE d.user_id = $1 AND a.incident_id = $2
+				  AND d.state NOT IN ('SKIPPED', 'QUARANTINED')
+			)`, userID, event.AggregateID).Scan(&authorized)
+	case StreamAlert:
+		err = r.db.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM alerts a
+				JOIN deliveries d ON d.alert_id = a.id
+				WHERE d.user_id = $1
+				  AND (a.id::text = $2 OR a.incident_id = $3)
+				  AND d.state NOT IN ('SKIPPED', 'QUARANTINED')
+			)`, userID, event.AggregateID, event.IncidentID).Scan(&authorized)
+	default:
+		return false, nil
+	}
+	return authorized, err
 }
 
 type Handler struct {
@@ -110,8 +144,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	defer stopShutdown()
 	request = request.WithContext(requestContext)
 
-	principal, ok := PrincipalFromContext(request.Context())
-	if !ok {
+	principal, ok := auth.PrincipalFromContext(request.Context())
+	if !ok || principal.UserID == uuid.Nil {
 		writeJSONError(writer, http.StatusUnauthorized, "authentication_required")
 		return
 	}
@@ -164,7 +198,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				if err := advanceCursor(&cursor, event); err != nil {
 					return
 				}
-				if !h.authorizer.Authorize(request.Context(), principal, event) {
+				allowed, authorizeErr := h.authorizer.Authorize(request.Context(), principal, event)
+				if authorizeErr != nil || !allowed {
 					continue
 				}
 				if err := writeEvent(writer, flusher, cursor, event); err != nil {
