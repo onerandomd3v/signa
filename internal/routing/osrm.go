@@ -79,7 +79,7 @@ func (p *OSRMProvider) Route(ctx context.Context, request Request) (Route, error
 		}
 		return Route{}, ErrUpstream
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return Route{}, ErrUpstream
 	}
