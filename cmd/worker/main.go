@@ -4,19 +4,24 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/ai/extraction"
 	"github.com/onerandomd3v/signa/internal/ai/similarity"
 	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/delivery"
 	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/incidents/confidence"
 	"github.com/onerandomd3v/signa/internal/incidents/lifecycle"
 	"github.com/onerandomd3v/signa/internal/logging"
 	"github.com/onerandomd3v/signa/internal/outbox"
+	"github.com/onerandomd3v/signa/internal/push"
+	"github.com/onerandomd3v/signa/internal/webpush"
 	"github.com/onerandomd3v/signa/internal/worker"
 	goRedis "github.com/redis/go-redis/v9"
 )
@@ -155,13 +160,26 @@ func run(parent context.Context, logger *slog.Logger) error {
 		return err
 	}
 	lifecycleConsumer := incidents.NewLifecycleConsumer(streamClient, lifecycleProcessor, outbox.IncidentEventsStream, "signa-incident-lifecycle", consumerName, cfg.AIPollInterval).WithLogger(logger)
-	errCh := make(chan error, 6)
+	deliveryStore, err := delivery.NewPostgresStore(database, delivery.PostgresConfig{MaxAttempts: cfg.DeliveryRetryMaxAttempts, Backoff: cfg.DeliveryRetryBackoff, Lease: cfg.DeliveryAttemptLease})
+	if err != nil {
+		return err
+	}
+	var deliveryConsumer *delivery.Consumer
+	deliveryConsumer, err = newWebPushDeliveryConsumer(push.NewStore(database), deliveryStore, streamClient, cfg, logger)
+	if err != nil && logger != nil {
+		logger.Warn("web push delivery disabled; queued delivery work remains pending", "error", err)
+		deliveryConsumer = nil
+	}
+	errCh := make(chan error, 7)
 	go func() { errCh <- worker.Run(ctx, logger, cfg.WorkerInterval, publisher) }()
 	go func() { errCh <- consumer.Run(ctx) }()
 	go func() { errCh <- incidentConsumer.Run(ctx) }()
 	go func() { errCh <- evidencePolicyConsumer.Run(ctx) }()
 	go func() { errCh <- lifecycleConsumer.Run(ctx) }()
 	go func() { errCh <- lifecycleProcessor.RunSweep(ctx, lifecyclePolicyConfig.SweepInterval, logger) }()
+	if deliveryConsumer != nil {
+		go func() { errCh <- deliveryConsumer.Run(ctx) }()
+	}
 
 	select {
 	case <-ctx.Done():
@@ -169,4 +187,30 @@ func run(parent context.Context, logger *slog.Logger) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func newWebPushDeliveryConsumer(subscriptionStore push.DeliveryStore, deliveryStore delivery.Store, streamClient delivery.StreamClient, cfg config.Config, logger *slog.Logger) (*delivery.Consumer, error) {
+	providerConfig, err := config.LoadWebPushConfig()
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := webpush.NewConfiguredAdapter(subscriptionStore, webpush.Config{
+		Subscriber:      providerConfig.Subscriber,
+		VAPIDPublicKey:  providerConfig.VAPIDPublicKey,
+		VAPIDPrivateKey: providerConfig.VAPIDPrivateKey,
+		TTL:             int(providerConfig.TTL / time.Second),
+		Timeout:         providerConfig.Timeout,
+	}, &http.Client{Timeout: providerConfig.Timeout})
+	if err != nil {
+		return nil, err
+	}
+	consumerName := cfg.DeliveryConsumerName
+	if consumerName == "" {
+		hostname, hostnameErr := os.Hostname()
+		if hostnameErr != nil || hostname == "" {
+			hostname = "worker"
+		}
+		consumerName = hostname
+	}
+	return delivery.NewConsumer(streamClient, delivery.NewProcessor(deliveryStore, adapter, cfg.DeliveryRetryBackoff).WithLogger(logger), outbox.DeliveryEventsStream, cfg.DeliveryConsumerGroup, consumerName, cfg.DeliveryPollInterval).WithLogger(logger), nil
 }

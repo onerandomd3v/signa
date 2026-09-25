@@ -73,6 +73,9 @@ func TestPostgresStoreRecordsAttemptAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if started.Attempt.UserID.String() != userID {
+		t.Fatalf("attempt user_id = %s, want %s", started.Attempt.UserID, userID)
+	}
 	if _, err := store.FinishAttempt(ctx, started.Attempt, ProviderResult{Response: "accepted"}, "", nil, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}

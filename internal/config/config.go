@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,8 @@ const (
 	defaultDeliveryRetryMaxAttempts     = 3
 	defaultDeliveryRetryBackoff         = 500 * time.Millisecond
 	defaultDeliveryAttemptLease         = 5 * time.Minute
+	defaultWebPushTTL                   = 5 * time.Minute
+	defaultWebPushTimeout               = 10 * time.Second
 	defaultSessionCookieSecure          = false
 	defaultSessionCookieSameSite        = "lax"
 	maxAIRetryAttempts                  = 5
@@ -76,6 +79,49 @@ type Config struct {
 	ObjectStorageBucket       string
 	ObjectStorageAccessKeyID  string
 	ObjectStorageSecret       string
+}
+
+type WebPushConfig struct {
+	Subscriber      string
+	VAPIDPublicKey  string
+	VAPIDPrivateKey string
+	TTL             time.Duration
+	Timeout         time.Duration
+}
+
+func LoadWebPushConfig() (WebPushConfig, error) {
+	subscriber, err := requiredEnv("SIGNA_WEB_PUSH_VAPID_SUBJECT")
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	publicKey, err := requiredEnv("SIGNA_WEB_PUSH_VAPID_PUBLIC_KEY")
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	privateKey, err := requiredEnv("SIGNA_WEB_PUSH_VAPID_PRIVATE_KEY")
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	ttl, err := durationFromEnv("SIGNA_WEB_PUSH_TTL", defaultWebPushTTL)
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	if ttl > 2_419_200*time.Second {
+		return WebPushConfig{}, fmt.Errorf("SIGNA_WEB_PUSH_TTL must be at most 2419200s")
+	}
+	timeout, err := durationFromEnv("SIGNA_WEB_PUSH_TIMEOUT", defaultWebPushTimeout)
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	return WebPushConfig{Subscriber: subscriber, VAPIDPublicKey: publicKey, VAPIDPrivateKey: privateKey, TTL: ttl, Timeout: timeout}, nil
+}
+
+func requiredEnv(name string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return "", fmt.Errorf("%s is required for Web Push delivery", name)
+	}
+	return value, nil
 }
 
 type IncidentPolicy struct {

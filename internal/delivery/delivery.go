@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const DeliveryRequestedV1 = "delivery.requested.v1"
@@ -56,6 +58,7 @@ type Request struct {
 type Attempt struct {
 	DeliveryID     string
 	AlertID        string
+	UserID         uuid.UUID
 	Channel        string
 	Priority       string
 	Payload        json.RawMessage

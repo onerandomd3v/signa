@@ -228,6 +228,49 @@ paths:
         '409': { description: Media attachment conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '429': { description: Rate limit exceeded, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '503': { description: Media storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /push-subscriptions:
+    post:
+      operationId: registerPushSubscription
+      summary: Register the authenticated browser's Web Push subscription
+      description: Stores the subscription for the authenticated user. Endpoint and key material are never returned.
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushSubscriptionRequest'
+      responses:
+        '201':
+          description: Push subscription registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushSubscriptionResponse'
+        '200':
+          description: Existing subscription updated idempotently
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushSubscriptionResponse'
+        '400': { description: Invalid subscription, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '409': { description: Subscription belongs to another user, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { description: Subscription persistence failure, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /push-subscriptions/{subscription_id}:
+    delete:
+      operationId: revokePushSubscription
+      summary: Revoke one authenticated user's Web Push subscription
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SubscriptionID'
+      responses:
+        '204': { description: Push subscription revoked }
+        '401': { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Push subscription not found for this user, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { description: Subscription persistence failure, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 components:
   securitySchemes:
     CookieAuth:
@@ -245,6 +288,13 @@ components:
         format: uuid
     IncidentID:
       name: incident_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SubscriptionID:
+      name: subscription_id
       in: path
       required: true
       schema:
@@ -400,6 +450,30 @@ components:
         content_type: { type: string }
         size_bytes: { type: integer, format: int64 }
         created_at: { type: string, format: date-time }
+    PushSubscriptionRequest:
+      type: object
+      required: [endpoint, keys]
+      additionalProperties: false
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          maxLength: 2048
+        keys:
+          type: object
+          required: [p256dh, auth]
+          additionalProperties: false
+          properties:
+            p256dh: { type: string, minLength: 1, maxLength: 256 }
+            auth: { type: string, minLength: 1, maxLength: 128 }
+    PushSubscriptionResponse:
+      type: object
+      required: [id, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     PublicIncident:
       type: object
       description: Active incident projection with generalized public geometry; exact internal coordinates and report evidence are omitted.
