@@ -31,6 +31,10 @@ type AlertRead struct {
 	SupersedesAlertID  *uuid.UUID     `json:"supersedes_alert_id"`
 }
 
+type AlertReader interface {
+	ReadAuthorized(context.Context, uuid.UUID, uuid.UUID) (AlertRead, error)
+}
+
 type alertReadQueryRower interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }

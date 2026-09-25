@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/alerts"
 	"github.com/onerandomd3v/signa/internal/auth"
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/incidents"
@@ -42,7 +43,8 @@ func NewHandlerWithMediaAndCORSAndPublicIncidents(logger *slog.Logger, rateConfi
 }
 
 type AuthConfig struct {
-	Store auth.SessionStore
+	Store  auth.SessionStore
+	Alerts alerts.AlertReader
 }
 
 func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, ingestors ...reports.Ingestor) http.Handler {
@@ -69,6 +71,13 @@ func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger *slog
 	if authConfig.Store != nil {
 		principalMiddleware := auth.RequirePrincipalWithLogger(authConfig.Store, logger)
 		router.With(principalMiddleware).Get("/auth/session", currentSessionHandler)
+		alertReader := authConfig.Alerts
+		if alertReader == nil && pool != nil {
+			alertReader = alerts.NewStore(pool)
+		}
+		if alertReader != nil {
+			router.With(principalMiddleware).Get("/alerts/{alert_id}", alertReadHandler(logger, alertReader))
+		}
 		if realtimeHandler != nil {
 			router.With(principalMiddleware).Get("/events", realtimeHandler.ServeHTTP)
 		}
