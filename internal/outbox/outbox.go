@@ -17,6 +17,7 @@ const (
 	ReportEventsStream          = "signa:report-events"
 	IncidentEventsStream        = "signa:incident-events"
 	AlertEventsStream           = "signa:alert-events"
+	DeliveryEventsStream        = "signa:delivery-events"
 	MediaEventsStream           = "signa:media-events"
 	ReportCreatedV1             = "report.created.v1"
 	MediaAttachedV1             = "report.media_attached.v1"
@@ -107,7 +108,7 @@ func (p *Publisher) publishOne(ctx context.Context, attempted map[string]struct{
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	query := `SELECT id::text, event_type, aggregate_type, aggregate_id::text, payload, created_at
-		FROM outbox_events WHERE published_at IS NULL AND event_type IN ('report.created', 'report.media_attached', 'report.ai_processed', 'incident.created', 'incident.report_attached', 'incident.confidence_changed', 'incident.severity_changed', 'incident.status_changed', 'incident.resolved', 'alert.created')`
+		FROM outbox_events WHERE published_at IS NULL AND event_type IN ('report.created', 'report.media_attached', 'report.ai_processed', 'incident.created', 'incident.report_attached', 'incident.confidence_changed', 'incident.severity_changed', 'incident.status_changed', 'incident.resolved', 'alert.created', 'delivery.requested')`
 	args := make([]any, 0, len(attempted))
 	if len(attempted) > 0 {
 		placeholders := make([]string, 0, len(attempted))
@@ -139,6 +140,9 @@ func (p *Publisher) publishOne(ctx context.Context, attempted map[string]struct{
 	}
 	if event.EventType == "alert.created" && stream == ReportEventsStream {
 		stream = AlertEventsStream
+	}
+	if event.EventType == "delivery.requested" && stream == ReportEventsStream {
+		stream = DeliveryEventsStream
 	}
 	_, err = p.redis.XAdd(ctx, &goRedis.XAddArgs{Stream: stream, Values: map[string]any{
 		"event_id": streamEvent.EventID, "event_name": streamEvent.EventName, "aggregate_type": streamEvent.AggregateType,
@@ -210,6 +214,7 @@ func MapEvent(event Event) (StreamEvent, error) {
 		"incident.status_changed":     IncidentStatusChangedV1,
 		"incident.resolved":           IncidentResolvedV1,
 		"alert.created":               AlertCreatedV1,
+		"delivery.requested":          "delivery.requested.v1",
 	}[event.EventType]
 	if eventName == "" {
 		return StreamEvent{}, fmt.Errorf("unsupported outbox event type %q", event.EventType)
@@ -239,6 +244,8 @@ func eventName(event *Event) string {
 		return IncidentResolvedV1
 	case "alert.created":
 		return AlertCreatedV1
+	case "delivery.requested":
+		return "delivery.requested.v1"
 	}
 	return event.EventType
 }

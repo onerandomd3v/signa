@@ -71,3 +71,10 @@ func TestMapEventAlertCreatedV1(t *testing.T) {
 		t.Fatalf("MapEvent(alert.created) = %+v, err = %v", got, err)
 	}
 }
+
+func TestMapEventDeliveryRequestedV1(t *testing.T) {
+	got, err := MapEvent(Event{ID: "event-delivery", EventType: "delivery.requested", AggregateType: "delivery", AggregateID: "delivery-1", Payload: json.RawMessage(`{"delivery_id":"delivery-1","alert_id":"alert-1","idempotency_key":"delivery-key"}`), CreatedAt: time.Unix(0, 0)})
+	if err != nil || got.EventName != "delivery.requested.v1" || got.AggregateType != "delivery" {
+		t.Fatalf("MapEvent(delivery.requested) = %+v, err = %v", got, err)
+	}
+}

@@ -27,6 +27,11 @@ const (
 	defaultAIProviderTimeout            = 15 * time.Second
 	defaultAIRetryMaxAttempts           = 3
 	defaultAIRetryBackoff               = 250 * time.Millisecond
+	defaultDeliveryConsumerGroup        = "signa-delivery"
+	defaultDeliveryPollInterval         = time.Second
+	defaultDeliveryRetryMaxAttempts     = 3
+	defaultDeliveryRetryBackoff         = 500 * time.Millisecond
+	defaultDeliveryAttemptLease         = 5 * time.Minute
 	maxAIRetryAttempts                  = 5
 	PublicIncidentGeometryPolicyVersion = "signa.public-incident-geometry.v1"
 )
@@ -53,6 +58,12 @@ type Config struct {
 	AIProviderTimeout         time.Duration
 	AIRetryMaxAttempts        int
 	AIRetryBackoff            time.Duration
+	DeliveryConsumerGroup     string
+	DeliveryConsumerName      string
+	DeliveryPollInterval      time.Duration
+	DeliveryRetryMaxAttempts  int
+	DeliveryRetryBackoff      time.Duration
+	DeliveryAttemptLease      time.Duration
 	WebAllowedOrigins         []string
 	ObjectStorageEndpoint     string
 	ObjectStorageRegion       string
@@ -282,6 +293,22 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	deliveryPollInterval, err := durationFromEnv("SIGNA_DELIVERY_POLL_INTERVAL", defaultDeliveryPollInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	deliveryRetryMaxAttempts, err := boundedIntFromEnv("SIGNA_DELIVERY_RETRY_MAX_ATTEMPTS", defaultDeliveryRetryMaxAttempts, 10)
+	if err != nil {
+		return Config{}, err
+	}
+	deliveryRetryBackoff, err := durationFromEnv("SIGNA_DELIVERY_RETRY_BACKOFF", defaultDeliveryRetryBackoff)
+	if err != nil {
+		return Config{}, err
+	}
+	deliveryAttemptLease, err := durationFromEnv("SIGNA_DELIVERY_ATTEMPT_LEASE", defaultDeliveryAttemptLease)
+	if err != nil {
+		return Config{}, err
+	}
 	webAllowedOrigins, err := webAllowedOriginsFromEnv()
 	if err != nil {
 		return Config{}, err
@@ -319,6 +346,10 @@ func Load() (Config, error) {
 	if aiConsumerGroup == "" {
 		aiConsumerGroup = defaultAIConsumerGroup
 	}
+	deliveryConsumerGroup := os.Getenv("SIGNA_DELIVERY_CONSUMER_GROUP")
+	if deliveryConsumerGroup == "" {
+		deliveryConsumerGroup = defaultDeliveryConsumerGroup
+	}
 
 	return Config{
 		APIAddr:                   apiAddr,
@@ -341,6 +372,12 @@ func Load() (Config, error) {
 		AIProviderTimeout:         aiProviderTimeout,
 		AIRetryMaxAttempts:        aiRetryMaxAttempts,
 		AIRetryBackoff:            aiRetryBackoff,
+		DeliveryConsumerGroup:     deliveryConsumerGroup,
+		DeliveryConsumerName:      os.Getenv("SIGNA_DELIVERY_CONSUMER_NAME"),
+		DeliveryPollInterval:      deliveryPollInterval,
+		DeliveryRetryMaxAttempts:  deliveryRetryMaxAttempts,
+		DeliveryRetryBackoff:      deliveryRetryBackoff,
+		DeliveryAttemptLease:      deliveryAttemptLease,
 		WebAllowedOrigins:         webAllowedOrigins,
 		ObjectStorageEndpoint:     os.Getenv("SIGNA_OBJECT_STORAGE_ENDPOINT"),
 		ObjectStorageRegion:       os.Getenv("SIGNA_OBJECT_STORAGE_REGION"),
