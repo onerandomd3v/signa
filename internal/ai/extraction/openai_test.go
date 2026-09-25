@@ -122,7 +122,7 @@ func TestOpenAIProviderReportsUsageWithoutReportContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if usage.InputTokens != 11 || usage.OutputTokens != 7 || usage.TotalTokens != 18 || usage.Attempts != 1 {
+	if usage.InputTokens != 11 || usage.OutputTokens != 7 || usage.TotalTokens != 18 || usage.Attempts != 1 || !usage.InputTokensAvailable || !usage.OutputTokensAvailable || !usage.TotalTokensAvailable {
 		t.Fatalf("usage = %+v", usage)
 	}
 }

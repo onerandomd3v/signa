@@ -25,10 +25,13 @@ type NamedProvider interface {
 }
 
 type Usage struct {
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
-	Attempts     int
+	InputTokens           int
+	OutputTokens          int
+	TotalTokens           int
+	InputTokensAvailable  bool
+	OutputTokensAvailable bool
+	TotalTokensAvailable  bool
+	Attempts              int
 }
 
 type FailureKind string
@@ -92,11 +95,25 @@ func failureKind(err error) FailureKind {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return FailureTransient
 	}
+	if errors.Is(err, context.Canceled) {
+		return FailureTransient
+	}
 	return FailurePermanent
 }
 
 func isTransientFailure(err error) bool {
 	return failureKind(err) == FailureTransient || errors.Is(err, context.DeadlineExceeded)
+}
+
+func normalizeProviderError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var providerErr *ProviderError
+	if errors.As(err, &providerErr) {
+		return err
+	}
+	return &ProviderError{Kind: failureKind(err), Operation: "extract", Err: err}
 }
 
 type RetryConfig struct {
@@ -155,10 +172,11 @@ func (p *RetryingProvider) ExtractWithUsage(ctx context.Context, rawText string)
 	if p == nil || p.provider == nil {
 		return nil, Usage{}, fmt.Errorf("retrying provider is not initialized")
 	}
-	var lastUsage Usage
+	var totalUsage Usage
 	for attempt := 1; attempt <= p.config.MaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return nil, lastUsage, err
+			totalUsage.Attempts = attempt - 1
+			return nil, totalUsage, err
 		}
 		attemptContext, cancel := context.WithTimeout(ctx, p.config.Timeout)
 		var output []byte
@@ -171,21 +189,38 @@ func (p *RetryingProvider) ExtractWithUsage(ctx context.Context, rawText string)
 		}
 		cancel()
 		usage.Attempts = attempt
-		lastUsage = usage
+		totalUsage = addUsage(totalUsage, usage)
 		if err == nil {
-			return output, usage, nil
+			return output, totalUsage, nil
 		}
 		if ctx.Err() != nil {
-			return nil, usage, ctx.Err()
+			return nil, totalUsage, ctx.Err()
 		}
 		if !isTransientFailure(err) || attempt == p.config.MaxAttempts {
-			return nil, usage, err
+			return nil, totalUsage, err
 		}
 		if err := waitForRetry(ctx, p.config.Backoff); err != nil {
-			return nil, usage, err
+			return nil, totalUsage, err
 		}
 	}
-	return nil, lastUsage, fmt.Errorf("provider retry loop exhausted")
+	return nil, totalUsage, fmt.Errorf("provider retry loop exhausted")
+}
+
+func addUsage(total, attempt Usage) Usage {
+	if attempt.InputTokensAvailable {
+		total.InputTokens += attempt.InputTokens
+		total.InputTokensAvailable = true
+	}
+	if attempt.OutputTokensAvailable {
+		total.OutputTokens += attempt.OutputTokens
+		total.OutputTokensAvailable = true
+	}
+	if attempt.TotalTokensAvailable {
+		total.TotalTokens += attempt.TotalTokens
+		total.TotalTokensAvailable = true
+	}
+	total.Attempts = attempt.Attempts
+	return total
 }
 
 func waitForRetry(ctx context.Context, backoff time.Duration) error {

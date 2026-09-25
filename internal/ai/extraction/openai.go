@@ -125,10 +125,10 @@ func (p *OpenAIProvider) ExtractWithUsage(ctx context.Context, rawText string) (
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+		Usage *struct {
+			PromptTokens     *int `json:"prompt_tokens"`
+			CompletionTokens *int `json:"completion_tokens"`
+			TotalTokens      *int `json:"total_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(responseBody, &envelope); err != nil {
@@ -137,12 +137,22 @@ func (p *OpenAIProvider) ExtractWithUsage(ctx context.Context, rawText string) (
 	if len(envelope.Choices) == 0 || strings.TrimSpace(envelope.Choices[0].Message.Content) == "" {
 		return nil, Usage{}, permanentProviderError("decode response", fmt.Errorf("response contained no extraction content"))
 	}
-	return []byte(envelope.Choices[0].Message.Content), Usage{
-		InputTokens:  safeNonNegative(envelope.Usage.PromptTokens),
-		OutputTokens: safeNonNegative(envelope.Usage.CompletionTokens),
-		TotalTokens:  safeNonNegative(envelope.Usage.TotalTokens),
-		Attempts:     1,
-	}, nil
+	usage := Usage{Attempts: 1}
+	if envelope.Usage != nil {
+		if envelope.Usage.PromptTokens != nil {
+			usage.InputTokens = safeNonNegative(*envelope.Usage.PromptTokens)
+			usage.InputTokensAvailable = true
+		}
+		if envelope.Usage.CompletionTokens != nil {
+			usage.OutputTokens = safeNonNegative(*envelope.Usage.CompletionTokens)
+			usage.OutputTokensAvailable = true
+		}
+		if envelope.Usage.TotalTokens != nil {
+			usage.TotalTokens = safeNonNegative(*envelope.Usage.TotalTokens)
+			usage.TotalTokensAvailable = true
+		}
+	}
+	return []byte(envelope.Choices[0].Message.Content), usage, nil
 }
 
 // OpenAI's strict structured-output subset does not accept the conditional

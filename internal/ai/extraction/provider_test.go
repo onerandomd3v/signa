@@ -26,6 +26,73 @@ func TestRetryingProviderRetriesTemporaryOutageAndPreservesAttempts(t *testing.T
 	}
 }
 
+func TestRetryingProviderAccumulatesUsageAcrossSuccessfulRetries(t *testing.T) {
+	provider := &usageSequenceProvider{responses: []usageResponse{
+		{usage: measuredUsage(2, 1, 3), err: transientProviderError("request", errors.New("temporary outage"))},
+		{usage: Usage{InputTokens: 3, InputTokensAvailable: true, OutputTokensAvailable: true}, err: transientProviderError("request", errors.New("temporary outage"))},
+		{result: []byte(`{"status":"unknown"}`), usage: measuredUsage(5, 7, 12)},
+	}}
+	retrying, err := NewRetryingProvider(provider, RetryConfig{Timeout: time.Second, MaxAttempts: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, usage, err := retrying.ExtractWithUsage(context.Background(), "report")
+	if err != nil {
+		t.Fatalf("ExtractWithUsage() error = %v", err)
+	}
+	if usage.InputTokens != 10 || usage.OutputTokens != 8 || usage.TotalTokens != 15 || usage.Attempts != 3 || !usage.InputTokensAvailable || !usage.OutputTokensAvailable || !usage.TotalTokensAvailable {
+		t.Fatalf("usage = %+v, want accumulated measured usage", usage)
+	}
+}
+
+func TestRetryingProviderAccumulatesUsageWhenRetriesAreExhausted(t *testing.T) {
+	provider := &usageSequenceProvider{responses: []usageResponse{
+		{usage: measuredUsage(4, 0, 4), err: transientProviderError("request", errors.New("temporary outage"))},
+		{usage: measuredUsage(6, 2, 8), err: transientProviderError("request", errors.New("temporary outage"))},
+	}}
+	retrying, err := NewRetryingProvider(provider, RetryConfig{Timeout: time.Second, MaxAttempts: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, usage, err := retrying.ExtractWithUsage(context.Background(), "report")
+	if err == nil || usage.InputTokens != 10 || usage.OutputTokens != 2 || usage.TotalTokens != 12 || usage.Attempts != 2 {
+		t.Fatalf("error=%v usage=%+v, want exhausted retry usage", err, usage)
+	}
+}
+
+func TestRetryingProviderDistinguishesUnavailableUsageFromMeasuredZero(t *testing.T) {
+	provider := &usageSequenceProvider{responses: []usageResponse{{
+		result: []byte(`{"status":"unknown"}`),
+		usage:  Usage{InputTokens: 0, InputTokensAvailable: true, TotalTokens: 0, TotalTokensAvailable: true},
+	}}}
+	retrying, err := NewRetryingProvider(provider, RetryConfig{Timeout: time.Second, MaxAttempts: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, usage, err := retrying.ExtractWithUsage(context.Background(), "report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.InputTokens != 0 || !usage.InputTokensAvailable || usage.OutputTokensAvailable || usage.OutputTokens != 0 || !usage.TotalTokensAvailable {
+		t.Fatalf("usage = %+v, want measured zero and unavailable output", usage)
+	}
+}
+
+func TestRetryingProviderRetainsUsageFromFailureBeforeCancellation(t *testing.T) {
+	provider := &usageSequenceProvider{responses: []usageResponse{{
+		usage: measuredUsage(9, 2, 11),
+		err:   transientProviderError("request", errors.New("temporary outage")),
+	}}}
+	retrying, err := NewRetryingProvider(provider, RetryConfig{Timeout: time.Second, MaxAttempts: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, usage, err := retrying.ExtractWithUsage(context.Background(), "report")
+	if err == nil || usage.InputTokens != 9 || usage.OutputTokens != 2 || usage.TotalTokens != 11 || usage.Attempts != 1 {
+		t.Fatalf("error=%v usage=%+v, want failure usage", err, usage)
+	}
+}
+
 func TestRetryingProviderDoesNotRetryPermanentFailure(t *testing.T) {
 	provider := &retrySequenceProvider{errors: []error{permanentProviderError("decode response", errors.New("malformed envelope"))}}
 	retrying, err := NewRetryingProvider(provider, RetryConfig{Timeout: time.Second, MaxAttempts: 5})
@@ -92,6 +159,32 @@ type retrySequenceProvider struct {
 	errors         []error
 	waitForContext bool
 	calls          int
+}
+
+type usageResponse struct {
+	result []byte
+	usage  Usage
+	err    error
+}
+
+type usageSequenceProvider struct {
+	responses []usageResponse
+	calls     int
+}
+
+func (p *usageSequenceProvider) Extract(ctx context.Context, rawText string) ([]byte, error) {
+	result, _, err := p.ExtractWithUsage(ctx, rawText)
+	return result, err
+}
+
+func (p *usageSequenceProvider) ExtractWithUsage(_ context.Context, _ string) ([]byte, Usage, error) {
+	response := p.responses[p.calls]
+	p.calls++
+	return response.result, response.usage, response.err
+}
+
+func measuredUsage(input, output, total int) Usage {
+	return Usage{InputTokens: input, OutputTokens: output, TotalTokens: total, InputTokensAvailable: true, OutputTokensAvailable: true, TotalTokensAvailable: true}
 }
 
 func (p *retrySequenceProvider) Extract(ctx context.Context, _ string) ([]byte, error) {

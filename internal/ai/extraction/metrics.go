@@ -6,14 +6,17 @@ import (
 )
 
 type AIMetric struct {
-	Provider     string
-	Outcome      string
-	FailureKind  FailureKind
-	Duration     time.Duration
-	Attempts     int
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
+	Provider              string
+	Outcome               string
+	FailureKind           FailureKind
+	Duration              time.Duration
+	Attempts              int
+	InputTokens           int
+	OutputTokens          int
+	TotalTokens           int
+	InputTokensAvailable  bool
+	OutputTokensAvailable bool
+	TotalTokensAvailable  bool
 }
 
 type Metrics interface {
@@ -47,7 +50,10 @@ func (m SlogMetrics) Observe(metric AIMetric) {
 		"duration_ms", metric.Duration.Milliseconds(),
 		"attempts", metric.Attempts,
 		"input_tokens", metric.InputTokens,
+		"input_tokens_available", metric.InputTokensAvailable,
 		"output_tokens", metric.OutputTokens,
+		"output_tokens_available", metric.OutputTokensAvailable,
 		"total_tokens", metric.TotalTokens,
+		"total_tokens_available", metric.TotalTokensAvailable,
 	)
 }

@@ -14,6 +14,11 @@ import (
 // against COD-191; production wiring now uses DurableStore instead.
 var ErrDurableExtractionDestinationUnresolved = errors.New("durable extraction result destination requires owner direction")
 
+// ErrInvalidStructuredOutput marks provider output that failed the canonical
+// extraction contract. It remains pending without being sent through an
+// endless provider retry loop.
+var ErrInvalidStructuredOutput = errors.New("invalid structured extraction output")
+
 // LoggingObserver is a test-only compatibility boundary and must not be wired
 // into the worker. DurableStore is the production observer.
 type LoggingObserver struct{ Logger *slog.Logger }
@@ -111,19 +116,20 @@ func (p *Processor) Process(ctx context.Context, message StreamMessage) error {
 	}
 	providerDuration := time.Since(started)
 	if err != nil {
-		p.observeMetric(AIMetric{Provider: p.providerName(), Outcome: "provider_failure", FailureKind: failureKind(err), Duration: providerDuration, Attempts: usage.Attempts, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens})
+		err = normalizeProviderError(err)
+		p.observeMetric(metricFor(p.providerName(), "provider_failure", failureKind(err), providerDuration, usage))
 		return fmt.Errorf("extract report %s: %w", event.ReportID, err)
 	}
 	validated, err := p.validator.Validate(output)
 	if err != nil {
-		p.observeMetric(AIMetric{Provider: p.providerName(), Outcome: "malformed_output", FailureKind: FailurePermanent, Duration: providerDuration, Attempts: usage.Attempts, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens})
-		return fmt.Errorf("validate extraction for report %s: %w", event.ReportID, err)
+		p.observeMetric(metricFor(p.providerName(), "malformed_output", FailurePermanent, providerDuration, usage))
+		return fmt.Errorf("%w: validate extraction for report %s: %v", ErrInvalidStructuredOutput, event.ReportID, err)
 	}
 	if err := p.observer.Observe(ctx, event.ReportID, validated); err != nil {
-		p.observeMetric(AIMetric{Provider: p.providerName(), Outcome: "durable_persistence_failure", FailureKind: FailureTransient, Duration: providerDuration, Attempts: usage.Attempts, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens})
+		p.observeMetric(metricFor(p.providerName(), "durable_persistence_failure", FailureTransient, providerDuration, usage))
 		return fmt.Errorf("observe extraction for report %s: %w", event.ReportID, err)
 	}
-	p.observeMetric(AIMetric{Provider: p.providerName(), Outcome: "success", Duration: providerDuration, Attempts: usage.Attempts, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens})
+	p.observeMetric(metricFor(p.providerName(), "success", "", providerDuration, usage))
 	if err := p.acker.Ack(ctx, p.stream, p.group, message.ID); err != nil {
 		return fmt.Errorf("ack extraction message %s: %w", message.ID, err)
 	}
@@ -140,6 +146,22 @@ func (p *Processor) providerName() string {
 func (p *Processor) observeMetric(metric AIMetric) {
 	if p.metrics != nil {
 		p.metrics.Observe(metric)
+	}
+}
+
+func metricFor(provider, outcome string, kind FailureKind, duration time.Duration, usage Usage) AIMetric {
+	return AIMetric{
+		Provider:              provider,
+		Outcome:               outcome,
+		FailureKind:           kind,
+		Duration:              duration,
+		Attempts:              usage.Attempts,
+		InputTokens:           usage.InputTokens,
+		OutputTokens:          usage.OutputTokens,
+		TotalTokens:           usage.TotalTokens,
+		InputTokensAvailable:  usage.InputTokensAvailable,
+		OutputTokensAvailable: usage.OutputTokensAvailable,
+		TotalTokensAvailable:  usage.TotalTokensAvailable,
 	}
 }
 

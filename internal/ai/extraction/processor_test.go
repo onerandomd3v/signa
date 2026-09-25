@@ -93,7 +93,7 @@ func TestProcessorRecordsSafeAIUsageMetric(t *testing.T) {
 	metrics := make([]AIMetric, 0, 1)
 	processor := NewProcessor(
 		&fakeReportReader{rawText: "private report text"},
-		&usageTestProvider{result: []byte(validExtractionJSON()), usage: Usage{InputTokens: 3, OutputTokens: 4, TotalTokens: 7}},
+		&usageTestProvider{result: []byte(validExtractionJSON()), usage: measuredUsage(3, 4, 7)},
 		&fakeValidator{result: Extraction{ContractVersion: "signa.ai.report-extraction.v0"}},
 		&fakeObserver{},
 		&fakeAcker{},
@@ -106,7 +106,7 @@ func TestProcessorRecordsSafeAIUsageMetric(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(metrics) != 1 || metrics[0].Outcome != "success" || metrics[0].InputTokens != 3 || metrics[0].OutputTokens != 4 || metrics[0].TotalTokens != 7 {
+	if len(metrics) != 1 || metrics[0].Outcome != "success" || metrics[0].InputTokens != 3 || metrics[0].OutputTokens != 4 || metrics[0].TotalTokens != 7 || !metrics[0].InputTokensAvailable || !metrics[0].OutputTokensAvailable || !metrics[0].TotalTokensAvailable {
 		t.Fatalf("metrics = %+v", metrics)
 	}
 }
