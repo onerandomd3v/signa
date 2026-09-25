@@ -135,6 +135,40 @@ export type PublicIncident = {
     updated_at: string;
 };
 
+export type RouteRelevanceRequest = {
+    origin: RouteCoordinate;
+    destination: RouteCoordinate;
+    /**
+     * Optional ordered intermediate points; no continuous tracking is accepted.
+     */
+    waypoints?: Array<RouteCoordinate>;
+};
+
+export type RouteCoordinate = {
+    latitude: number;
+    longitude: number;
+};
+
+export type RouteRelevanceResponse = {
+    /**
+     * Server-authoritative route relevance; NOT_RELEVANT does not mean safe or clear.
+     */
+    classification: 'RELEVANT' | 'NOT_RELEVANT' | 'UNKNOWN';
+    route_geometry: RouteLineString;
+    /**
+     * Existing browser-safe public incident projections associated with the route evaluation.
+     */
+    incidents: Array<PublicIncident>;
+};
+
+/**
+ * Request-scoped validated GeoJSON LineString in EPSG:4326 returned only to the authenticated requester for map display.
+ */
+export type RouteLineString = {
+    type: 'LineString';
+    coordinates: Array<Array<number>>;
+};
+
 /**
  * GeoJSON-compatible generalized incident area in EPSG:4326.
  */
@@ -223,6 +257,51 @@ export type GetCurrentSessionResponses = {
 };
 
 export type GetCurrentSessionResponse = GetCurrentSessionResponses[keyof GetCurrentSessionResponses];
+
+export type EvaluateRouteRelevanceData = {
+    body: RouteRelevanceRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/route-relevance';
+};
+
+export type EvaluateRouteRelevanceErrors = {
+    /**
+     * Invalid coordinate, waypoint, or request body.
+     */
+    400: ErrorResponse;
+    /**
+     * Missing, malformed, expired, or revoked canonical session.
+     */
+    401: ErrorResponse;
+    /**
+     * Request origin is not allowed for this browser-facing operation.
+     */
+    403: ErrorResponse;
+    /**
+     * Route-work rate limit exceeded.
+     */
+    429: ErrorResponse;
+    /**
+     * Internal server error.
+     */
+    500: ErrorResponse;
+    /**
+     * Routing or public incident data dependency unavailable or timed out.
+     */
+    503: ErrorResponse;
+};
+
+export type EvaluateRouteRelevanceError = EvaluateRouteRelevanceErrors[keyof EvaluateRouteRelevanceErrors];
+
+export type EvaluateRouteRelevanceResponses = {
+    /**
+     * Authoritative route relevance result and browser-display geometry.
+     */
+    200: RouteRelevanceResponse;
+};
+
+export type EvaluateRouteRelevanceResponse = EvaluateRouteRelevanceResponses[keyof EvaluateRouteRelevanceResponses];
 
 export type GetAlertData = {
     body?: never;

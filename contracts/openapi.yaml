@@ -47,6 +47,71 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/route-relevance:
+    post:
+      operationId: evaluateRouteRelevance
+      summary: Evaluate route relevance against public incidents
+      description: >-
+        Evaluates one authenticated, request-scoped origin-to-destination route
+        with optional waypoints. The server owns the relevance classification.
+        Route inputs and returned geometry are not persisted, published, or
+        included in application logs. NOT_RELEVANT does not mean that a route
+        is safe or clear.
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteRelevanceRequest'
+      responses:
+        '200':
+          description: Authoritative route relevance result and browser-display geometry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteRelevanceResponse'
+        '400':
+          description: Invalid coordinate, waypoint, or request body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing, malformed, expired, or revoked canonical session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Request origin is not allowed for this browser-facing operation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Route-work rate limit exceeded.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Routing or public incident data dependency unavailable or timed out.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /alerts/{alert_id}:
     get:
       operationId: getAlert
@@ -566,6 +631,69 @@ components:
         started_at: { type: [string, 'null'], format: date-time }
         last_signal_at: { type: [string, 'null'], format: date-time }
         updated_at: { type: string, format: date-time }
+    RouteRelevanceRequest:
+      type: object
+      required: [origin, destination]
+      additionalProperties: false
+      properties:
+        origin:
+          $ref: '#/components/schemas/RouteCoordinate'
+        destination:
+          $ref: '#/components/schemas/RouteCoordinate'
+        waypoints:
+          type: array
+          maxItems: 25
+          items:
+            $ref: '#/components/schemas/RouteCoordinate'
+          description: Optional ordered intermediate points; no continuous tracking is accepted.
+    RouteCoordinate:
+      type: object
+      required: [latitude, longitude]
+      additionalProperties: false
+      properties:
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+    RouteRelevanceResponse:
+      type: object
+      required: [classification, route_geometry, incidents]
+      additionalProperties: false
+      properties:
+        classification:
+          type: string
+          enum: [RELEVANT, NOT_RELEVANT, UNKNOWN]
+          description: Server-authoritative route relevance; NOT_RELEVANT does not mean safe or clear.
+        route_geometry:
+          $ref: '#/components/schemas/RouteLineString'
+        incidents:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PublicIncident'
+          description: Existing browser-safe public incident projections associated with the route evaluation.
+    RouteLineString:
+      type: object
+      required: [type, coordinates]
+      additionalProperties: false
+      description: Request-scoped validated GeoJSON LineString in EPSG:4326 returned only to the authenticated requester for map display.
+      properties:
+        type:
+          type: string
+          const: LineString
+        coordinates:
+          type: array
+          minItems: 2
+          items:
+            type: array
+            minItems: 2
+            maxItems: 3
+            items:
+              type: number
     PublicIncidentGeometry:
       description: GeoJSON-compatible generalized incident area in EPSG:4326.
       oneOf:
