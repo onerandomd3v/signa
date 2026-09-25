@@ -215,30 +215,71 @@ describe("IncidentMap", () => {
     expect(onUnavailable).not.toHaveBeenCalled();
   });
 
-  it("keeps the map for individual resource failures and falls back on unrecoverable map errors", async () => {
+  it("does not disable the map for a tile error propagated to the map before style load", async () => {
     const onUnavailable = vi.fn();
     const { unmount } = render(
       <IncidentMap {...makeProps({ onUnavailable })} />,
     );
-    await waitFor(() => expect(mockMap.handlers.error).toBeTruthy());
 
     act(() =>
       fire("error", {
-        target: { kind: "source" },
+        target: mockMap.instance,
         sourceId: "basemap",
         error: { message: "tile request failed" },
       }),
     );
     expect(onUnavailable).not.toHaveBeenCalled();
 
+    act(() => fire("style.load"));
+    expect(mockMap.instance.addLayer).toHaveBeenCalledTimes(2);
+    expect(onUnavailable).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("does not disable the map for a resource error propagated after style load", async () => {
+    const onUnavailable = vi.fn();
+    const { unmount } = render(
+      <IncidentMap {...makeProps({ onUnavailable })} />,
+    );
+
+    act(() => fire("style.load"));
     act(() =>
       fire("error", {
         target: mockMap.instance,
-        error: { message: "style initialization failed" },
+        sourceId: "basemap",
+        sourceDataType: "tile",
+        error: { message: "tile request failed" },
       }),
     );
+
+    expect(mockMap.instance.addLayer).toHaveBeenCalledTimes(2);
+    expect(onUnavailable).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("falls back once when GeoJSON source or layer setup fails", () => {
+    const onUnavailable = vi.fn();
+    mockMap.instance.addLayer.mockImplementationOnce(() => {
+      throw new Error("layer setup failed");
+    });
+    const { unmount } = render(
+      <IncidentMap {...makeProps({ onUnavailable })} />,
+    );
+
+    act(() => fire("style.load"));
+    act(() => fire("style.load"));
+    act(() =>
+      fire("error", {
+        target: mockMap.instance,
+        sourceId: "public-incidents",
+        error: { message: "source request failed" },
+      }),
+    );
+
+    expect(mockMap.instance.addSource).toHaveBeenCalledOnce();
     expect(onUnavailable).toHaveBeenCalledOnce();
     unmount();
+    expect(mockMap.instance.remove).toHaveBeenCalledOnce();
   });
 
   it("reports a synchronous WebGL initialization failure", async () => {
@@ -264,6 +305,33 @@ describe("IncidentMap", () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(onUnavailable).toHaveBeenCalledOnce();
+    act(() =>
+      fire("error", {
+        target: mockMap.instance,
+        error: { message: "late style failure" },
+      }),
+    );
+    act(() => fire("style.load"));
+    expect(onUnavailable).toHaveBeenCalledOnce();
+    expect(mockMap.instance.addSource).not.toHaveBeenCalled();
     unmount();
+    expect(mockMap.instance.remove).toHaveBeenCalledOnce();
+  });
+
+  it("clears the pending style timeout when unmounted", async () => {
+    vi.useFakeTimers();
+    const onUnavailable = vi.fn();
+    const { unmount } = render(
+      <IncidentMap {...makeProps({ onUnavailable })} />,
+    );
+
+    expect(mockMap.handlers["style.load"]).toBeTruthy();
+    unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(onUnavailable).not.toHaveBeenCalled();
+    expect(mockMap.instance.remove).toHaveBeenCalledOnce();
   });
 });

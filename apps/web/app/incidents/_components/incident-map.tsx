@@ -49,6 +49,23 @@ export function IncidentMap({
     if (!containerRef.current) return;
 
     let createdMap: MapLibreMap | null = null;
+    let disposed = false;
+    let failed = false;
+    let styleLoaded = false;
+    let styleLoadTimeout: number | null = null;
+    const clearStyleLoadTimeout = () => {
+      if (styleLoadTimeout !== null) {
+        window.clearTimeout(styleLoadTimeout);
+        styleLoadTimeout = null;
+      }
+    };
+    const notifyUnavailable = () => {
+      if (disposed || failed) return;
+      failed = true;
+      clearStyleLoadTimeout();
+      onUnavailableRef.current();
+    };
+
     try {
       const map = new MapLibreMap({
         container: containerRef.current,
@@ -60,14 +77,14 @@ export function IncidentMap({
       createdMap = map;
       mapRef.current = map;
       map.addControl(new NavigationControl(), "top-right");
-      let styleLoaded = false;
-      const styleLoadTimeout = window.setTimeout(() => {
-        if (!styleLoaded) onUnavailableRef.current();
+      styleLoadTimeout = window.setTimeout(() => {
+        if (!styleLoaded) notifyUnavailable();
       }, 15_000);
 
       map.on("style.load", () => {
+        if (disposed || failed) return;
         styleLoaded = true;
-        window.clearTimeout(styleLoadTimeout);
+        clearStyleLoadTimeout();
         try {
           map.addSource(SOURCE_ID, {
             type: "geojson",
@@ -108,27 +125,28 @@ export function IncidentMap({
             map.getCanvas().style.cursor = "";
           });
         } catch {
-          onUnavailableRef.current();
+          notifyUnavailable();
         }
       });
-      map.on("error", (event) => {
-        // MapLibre also reports individual source/tile failures here. Only a
-        // direct map error before the base style loads is immediately fatal;
-        // a style that never becomes ready is handled by the timeout above.
-        if (!styleLoaded && event.target === map) {
-          onUnavailableRef.current();
-        }
+      map.on("error", () => {
+        // Source and tile errors can bubble to the map. Keep the text list
+        // available and let the style-load timeout detect a base-style failure.
       });
 
       return () => {
-        window.clearTimeout(styleLoadTimeout);
+        disposed = true;
+        clearStyleLoadTimeout();
         map.remove();
-        mapRef.current = null;
+        if (mapRef.current === map) mapRef.current = null;
       };
     } catch {
-      createdMap?.remove();
-      mapRef.current = null;
-      onUnavailableRef.current();
+      try {
+        createdMap?.remove();
+      } catch {
+        // Continue to the text fallback even if partial map cleanup fails.
+      }
+      if (mapRef.current === createdMap) mapRef.current = null;
+      notifyUnavailable();
     }
   }, [styleUrl]);
 
