@@ -84,7 +84,16 @@ func (p *OSRMProvider) Route(ctx context.Context, request Request) (Route, error
 		return Route{}, ErrUpstream
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil || len(body) > maxResponseBytes {
+	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(requestContext.Err(), context.Canceled) {
+			return Route{}, context.Canceled
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(requestContext.Err(), context.DeadlineExceeded) {
+			return Route{}, context.DeadlineExceeded
+		}
+		return Route{}, ErrInvalidResponse
+	}
+	if len(body) > maxResponseBytes {
 		return Route{}, ErrInvalidResponse
 	}
 	var payload osrmResponse

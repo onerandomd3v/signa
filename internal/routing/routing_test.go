@@ -121,6 +121,20 @@ func TestOSRMProviderErrorsAndCancellation(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("timeout error = %v", err)
 	}
+	bodyStallServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer bodyStallServer.Close()
+	bodyStallProvider, err := NewOSRMProvider(OSRMConfig{BaseURL: bodyStallServer.URL, Timeout: 20 * time.Millisecond, Client: bodyStallServer.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = bodyStallProvider.Route(context.Background(), validRequest())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("body-read timeout error = %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err = provider.Route(ctx, validRequest())
