@@ -50,6 +50,9 @@ func run(parent context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if _, err := config.LoadPriorityPolicy(); err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
