@@ -160,6 +160,7 @@ paths:
   /events:
     get:
       operationId: streamRealtimeEvents
+      security: []
       summary: Stream authorized incident and alert updates
       description: Authenticated SSE stream. The auth layer supplies the request principal; clients reconnect with Last-Event-ID and reconcile authoritative state after disconnect gaps.
       parameters:
