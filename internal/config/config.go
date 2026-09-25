@@ -355,3 +355,33 @@ func durationFromEnv(name string, fallback time.Duration) (time.Duration, error)
 	}
 	return duration, nil
 }
+
+type PriorityPolicy struct {
+	P1RadiusMeters float64
+	P2RadiusMeters float64
+	LocationMaxAge time.Duration
+	IncidentMaxAge time.Duration
+}
+
+func LoadPriorityPolicy() (PriorityPolicy, error) {
+	p1Radius, err := requiredFloat("SIGNA_PRIORITY_P1_RADIUS_METERS", func(v float64) bool { return v > 0 })
+	if err != nil {
+		return PriorityPolicy{}, err
+	}
+	p2Radius, err := requiredFloat("SIGNA_PRIORITY_P2_RADIUS_METERS", func(v float64) bool { return v > 0 })
+	if err != nil {
+		return PriorityPolicy{}, err
+	}
+	locationMaxAge, err := requiredDuration("SIGNA_PRIORITY_LOCATION_MAX_AGE")
+	if err != nil {
+		return PriorityPolicy{}, err
+	}
+	incidentMaxAge, err := requiredDuration("SIGNA_PRIORITY_INCIDENT_MAX_AGE")
+	if err != nil {
+		return PriorityPolicy{}, err
+	}
+	if p1Radius >= p2Radius {
+		return PriorityPolicy{}, fmt.Errorf("priority radii must satisfy P1 < P2")
+	}
+	return PriorityPolicy{P1RadiusMeters: p1Radius, P2RadiusMeters: p2Radius, LocationMaxAge: locationMaxAge, IncidentMaxAge: incidentMaxAge}, nil
+}
