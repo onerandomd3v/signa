@@ -1,6 +1,9 @@
 package alertsummary
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // RenderDeterministic is the provider-free fallback. It only uses the supplied
 // authoritative snapshot and never decides eligibility or delivery.
@@ -18,13 +21,12 @@ func RenderDeterministic(state State) Summary {
 		qualifier = "Confidence unknown"
 	}
 	message := fmt.Sprintf("%s%s. %s.", title, location, qualifier)
-	if state.Freshness.State == Stale {
-		message += " This information may be out of date."
+	if state.Freshness.Status == KnownFreshness && state.Freshness.LastSignalAt != nil {
+		message += " Last signal recorded at " + state.Freshness.LastSignalAt.UTC().Format(time.RFC3339Nano) + "."
+	} else {
+		message += " Freshness is unknown."
 	}
-	if state.Freshness.State == Aging {
-		message += " Check the latest information before acting."
-	}
-	if state.LifecycleStatus == "RESOLVING" || state.LifecycleStatus == "RESOLVED" || state.LifecycleStatus == "EXPIRED" {
+	if state.LifecycleStatus != "OPEN" {
 		message += " The incident is not described as current."
 	}
 	return Summary{ContractVersion: ContractVersion, SnapshotVersion: state.SnapshotVersion, IncidentID: state.IncidentID, EventType: state.EventType, Title: title, Message: message, UncertaintyQualifier: qualifier, ConfidenceState: state.ConfidenceState, Severity: state.Severity, LifecycleStatus: state.LifecycleStatus, PublicLocation: state.PublicLocation, Freshness: state.Freshness, AsOf: state.AsOf, PolicyVersions: state.PolicyVersions}

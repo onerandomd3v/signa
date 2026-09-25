@@ -6,7 +6,7 @@
   "required": ["contract_version", "snapshot_version", "incident_id", "event_type", "title", "message", "uncertainty_qualifier", "confidence_state", "severity", "lifecycle_status", "public_location", "freshness", "as_of", "policy_versions"],
   "properties": {
     "contract_version": {"const": "signa.ai.alert-summarization.v1"},
-    "snapshot_version": {"const": "signa.incident-alert-snapshot.v1"},
+    "snapshot_version": {"const": "signa.alert-summary-snapshot.v1"},
     "incident_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "minLength": 1, "maxLength": 120},
     "title": {"type": "string", "minLength": 1, "maxLength": 120},
@@ -14,15 +14,15 @@
     "uncertainty_qualifier": {"type": "string", "minLength": 1, "maxLength": 160},
     "confidence_state": {"enum": ["UNVERIFIED", "EMERGING", "CORROBORATED", "HIGH_CONFIDENCE", "DISPUTED"]},
     "severity": {"type": ["string", "null"], "enum": ["LOW", "MODERATE", "HIGH", "CRITICAL", null]},
-    "lifecycle_status": {"enum": ["OPEN", "RESOLVING", "RESOLVED", "EXPIRED", "UNKNOWN"]},
+    "lifecycle_status": {"enum": ["OPEN", "RESOLVING", "RESOLVED", "EXPIRED"]},
     "public_location": {"$ref": "#/$defs/public_location"},
     "freshness": {"$ref": "#/$defs/freshness"},
     "as_of": {"type": "string", "format": "date-time"},
     "policy_versions": {"$ref": "#/$defs/policy_versions"}
   },
   "$defs": {
-    "public_location": {"type": "object", "additionalProperties": false, "required": ["status", "label"], "properties": {"status": {"enum": ["KNOWN", "APPROXIMATE", "UNKNOWN"]}, "label": {"type": ["string", "null"], "maxLength": 120}}},
-    "freshness": {"type": "object", "additionalProperties": false, "required": ["state", "last_signal_at", "age_seconds"], "properties": {"state": {"enum": ["CURRENT", "AGING", "STALE", "UNKNOWN"]}, "last_signal_at": {"type": ["string", "null"], "format": "date-time"}, "age_seconds": {"type": ["integer", "null"], "minimum": 0}}},
+    "public_location": {"type": "object", "additionalProperties": false, "required": ["status", "label"], "properties": {"status": {"enum": ["identified", "unknown"]}, "label": {"type": ["string", "null"], "maxLength": 120}}},
+    "freshness": {"type": "object", "additionalProperties": false, "required": ["status", "last_signal_at", "age_seconds"], "properties": {"status": {"enum": ["known", "unknown"]}, "last_signal_at": {"type": ["string", "null"], "format": "date-time"}, "age_seconds": {"type": ["integer", "null"], "minimum": 0}}},
     "policy_versions": {"type": "object", "additionalProperties": false, "required": ["confidence", "lifecycle"], "properties": {"confidence": {"type": "string", "minLength": 1}, "lifecycle": {"type": "string", "minLength": 1}}}
   }
 }

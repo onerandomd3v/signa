@@ -13,7 +13,7 @@ import (
 
 const (
 	ContractVersion  = "signa.ai.alert-summarization.v1"
-	SnapshotVersion  = "signa.incident-alert-snapshot.v1"
+	SnapshotVersion  = "signa.alert-summary-snapshot.v1"
 	EventTypeUnknown = "unknown"
 	EventTypeOther   = "other"
 )
@@ -28,13 +28,11 @@ const (
 	Disputed       ConfidenceState = "DISPUTED"
 )
 
-type FreshnessState string
+type FreshnessStatus string
 
 const (
-	Current          FreshnessState = "CURRENT"
-	Aging            FreshnessState = "AGING"
-	Stale            FreshnessState = "STALE"
-	UnknownFreshness FreshnessState = "UNKNOWN"
+	KnownFreshness   FreshnessStatus = "known"
+	UnknownFreshness FreshnessStatus = "unknown"
 )
 
 type PublicLocation struct {
@@ -43,9 +41,9 @@ type PublicLocation struct {
 }
 
 type Freshness struct {
-	State        FreshnessState `json:"state"`
-	LastSignalAt *time.Time     `json:"last_signal_at"`
-	AgeSeconds   *int64         `json:"age_seconds"`
+	Status       FreshnessStatus `json:"status"`
+	LastSignalAt *time.Time      `json:"last_signal_at"`
+	AgeSeconds   *int64          `json:"age_seconds"`
 }
 
 type PolicyVersions struct {
@@ -157,11 +155,17 @@ func ValidateState(state State) error {
 	if err := validateFreshness(state.AsOf, state.Freshness); err != nil {
 		return err
 	}
-	if state.PublicLocation.Status != "KNOWN" && state.PublicLocation.Status != "APPROXIMATE" && state.PublicLocation.Status != "UNKNOWN" {
+	if state.PublicLocation.Status != "identified" && state.PublicLocation.Status != "unknown" {
 		return fmt.Errorf("unsupported public_location status %q", state.PublicLocation.Status)
 	}
-	if state.PublicLocation.Status == "UNKNOWN" && state.PublicLocation.Label != nil {
+	if state.PublicLocation.Status == "unknown" && state.PublicLocation.Label != nil {
 		return fmt.Errorf("unknown public_location cannot have a label")
+	}
+	if state.PublicLocation.Status == "identified" && (state.PublicLocation.Label == nil || strings.TrimSpace(*state.PublicLocation.Label) == "") {
+		return fmt.Errorf("identified public_location requires a label")
+	}
+	if state.LifecycleStatus != "OPEN" && state.LifecycleStatus != "RESOLVING" && state.LifecycleStatus != "RESOLVED" && state.LifecycleStatus != "EXPIRED" {
+		return fmt.Errorf("unsupported lifecycle_status %q", state.LifecycleStatus)
 	}
 	if state.PublicLocation.Label != nil && coordinatePattern.MatchString(strings.ToLower(*state.PublicLocation.Label)) {
 		return fmt.Errorf("public_location.label cannot contain exact coordinates")
@@ -170,10 +174,10 @@ func ValidateState(state State) error {
 }
 
 func validateFreshness(asOf time.Time, freshness Freshness) error {
-	switch freshness.State {
-	case Current, Aging, Stale, UnknownFreshness:
+	switch freshness.Status {
+	case KnownFreshness, UnknownFreshness:
 	default:
-		return fmt.Errorf("unsupported freshness state %q", freshness.State)
+		return fmt.Errorf("unsupported freshness status %q", freshness.Status)
 	}
 	if freshness.LastSignalAt != nil && freshness.LastSignalAt.After(asOf) {
 		return fmt.Errorf("last_signal_at cannot be after as_of")
@@ -187,12 +191,12 @@ func validateFreshness(asOf time.Time, freshness Freshness) error {
 			return fmt.Errorf("age_seconds does not match as_of and last_signal_at")
 		}
 	}
-	if freshness.State == UnknownFreshness {
+	if freshness.Status == UnknownFreshness {
 		if freshness.LastSignalAt != nil || freshness.AgeSeconds != nil {
 			return fmt.Errorf("unknown freshness cannot include known timestamp or age")
 		}
 	} else if freshness.LastSignalAt == nil || freshness.AgeSeconds == nil {
-		return fmt.Errorf("known freshness state requires last_signal_at and age_seconds")
+		return fmt.Errorf("known freshness status requires last_signal_at and age_seconds")
 	}
 	return nil
 }
@@ -234,7 +238,7 @@ func ValidateBound(state State, summary Summary) error {
 	if state.ConfidenceState == Disputed && !containsWord(text, "disputed") && !strings.Contains(text, "conflict") && !strings.Contains(text, "uncertain") {
 		return fmt.Errorf("disputed summary must mention conflicting or uncertain information")
 	}
-	if state.Freshness.State != Current || (state.LifecycleStatus != "OPEN" && state.LifecycleStatus != "UNKNOWN") {
+	if state.LifecycleStatus != "OPEN" || state.Freshness.Status != KnownFreshness || state.Freshness.AgeSeconds == nil || *state.Freshness.AgeSeconds != 0 {
 		for _, phrase := range []string{"ongoing", "happening now", "currently", "right now"} {
 			if strings.Contains(text, phrase) {
 				return fmt.Errorf("summary cannot imply current activity for stale/resolving/resolved/expired state")
@@ -263,7 +267,7 @@ func sameLocation(a, b PublicLocation) bool {
 	return a.Status == b.Status && sameStringPointer(a.Label, b.Label)
 }
 func sameFreshness(a, b Freshness) bool {
-	return a.State == b.State && sameTimePointer(a.LastSignalAt, b.LastSignalAt) && (a.AgeSeconds == nil) == (b.AgeSeconds == nil) && (a.AgeSeconds == nil || *a.AgeSeconds == *b.AgeSeconds)
+	return a.Status == b.Status && sameTimePointer(a.LastSignalAt, b.LastSignalAt) && (a.AgeSeconds == nil) == (b.AgeSeconds == nil) && (a.AgeSeconds == nil || *a.AgeSeconds == *b.AgeSeconds)
 }
 func sameTimePointer(a, b *time.Time) bool {
 	return (a == nil) == (b == nil) && (a == nil || a.Equal(*b))
