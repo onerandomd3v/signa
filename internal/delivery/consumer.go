@@ -40,6 +40,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 	if err := c.client.EnsureGroup(ctx, c.stream, c.group); err != nil {
 		return fmt.Errorf("ensure delivery consumer group: %w", err)
 	}
+	deferredUntil := make(map[string]time.Time)
 	for ctx.Err() == nil {
 		pending, err := c.readPending(ctx)
 		if err != nil {
@@ -48,7 +49,10 @@ func (c *Consumer) Run(ctx context.Context) error {
 			}
 			return err
 		}
-		if err := c.process(ctx, pending); err != nil {
+		if err := c.process(ctx, pending, deferredUntil); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 		messages, err := c.client.Read(ctx, c.stream, c.group, c.consumer, false, c.poll)
@@ -58,7 +62,10 @@ func (c *Consumer) Run(ctx context.Context) error {
 			}
 			return fmt.Errorf("read delivery messages: %w", err)
 		}
-		if err := c.process(ctx, messages); err != nil {
+		if err := c.process(ctx, messages, deferredUntil); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 	}
@@ -80,22 +87,30 @@ func (c *Consumer) readPending(ctx context.Context) ([]extraction.StreamMessage,
 	return messages, nil
 }
 
-func (c *Consumer) process(ctx context.Context, messages []extraction.StreamMessage) error {
+func (c *Consumer) process(ctx context.Context, messages []extraction.StreamMessage, deferredUntil map[string]time.Time) error {
 	for _, message := range extraction.MergeMessages(messages) {
+		if until, ok := deferredUntil[message.ID]; ok {
+			if time.Now().Before(until) {
+				continue
+			}
+			delete(deferredUntil, message.ID)
+		}
 		result, err := c.processor.Process(ctx, message)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("delivery processing failed; message remains pending", "stream_message_id", message.ID, "error", err)
 			}
+			deferredUntil[message.ID] = time.Now().Add(c.poll)
 			continue
 		}
 		if !result.Ack {
-			if err := wait(ctx, result.RetryAfterOr(c.poll)); err != nil {
-				return err
-			}
+			deferredUntil[message.ID] = time.Now().Add(result.RetryAfterOr(c.poll))
 			continue
 		}
 		if err := c.client.Ack(ctx, c.stream, c.group, message.ID); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return fmt.Errorf("ack delivery message %s: %w", message.ID, err)
 		}
 	}
@@ -107,15 +122,4 @@ func (r ProcessResult) RetryAfterOr(fallback time.Duration) time.Duration {
 		return r.RetryAfter
 	}
 	return fallback
-}
-
-func wait(ctx context.Context, duration time.Duration) error {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }

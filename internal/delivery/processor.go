@@ -33,9 +33,9 @@ func (p *Processor) Process(ctx context.Context, message extraction.StreamMessag
 	request, err := ParseRequest(message.Values)
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Error("malformed delivery request; acknowledging poison message", "stream_message_id", message.ID, "error", err)
+			p.logger.Error("malformed delivery request; message remains pending for inspection", "stream_message_id", message.ID, "error", err)
 		}
-		return ProcessResult{Ack: true}, nil
+		return ProcessResult{RetryAfter: p.backoff}, nil
 	}
 	started, err := p.store.StartAttempt(ctx, request, time.Now().UTC())
 	if err != nil {

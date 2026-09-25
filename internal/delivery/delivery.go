@@ -76,6 +76,7 @@ type StartResult struct {
 type FinishResult struct {
 	State      State
 	Terminal   bool
+	Stale      bool
 	RetryAfter time.Duration
 }
 
@@ -90,12 +91,6 @@ type Adapter interface {
 
 // UnavailableAdapter keeps the generic worker runnable until a channel provider
 // (for example Web Push in COD-217) is configured behind this boundary.
-type UnavailableAdapter struct{}
-
-func (UnavailableAdapter) Deliver(context.Context, Attempt) (ProviderResult, error) {
-	return ProviderResult{}, Permanent(errors.New("no delivery provider is configured"))
-}
-
 func ParseRequest(fields map[string]any) (Request, error) {
 	eventID, err := stringField(fields, "event_id")
 	if err != nil {

@@ -12,7 +12,6 @@ import (
 	"github.com/onerandomd3v/signa/internal/ai/extraction"
 	"github.com/onerandomd3v/signa/internal/ai/similarity"
 	"github.com/onerandomd3v/signa/internal/config"
-	"github.com/onerandomd3v/signa/internal/delivery"
 	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/incidents/confidence"
 	"github.com/onerandomd3v/signa/internal/incidents/lifecycle"
@@ -156,24 +155,12 @@ func run(parent context.Context, logger *slog.Logger) error {
 		return err
 	}
 	lifecycleConsumer := incidents.NewLifecycleConsumer(streamClient, lifecycleProcessor, outbox.IncidentEventsStream, "signa-incident-lifecycle", consumerName, cfg.AIPollInterval).WithLogger(logger)
-	deliveryStore, err := delivery.NewPostgresStore(database, delivery.PostgresConfig{MaxAttempts: cfg.DeliveryRetryMaxAttempts, Backoff: cfg.DeliveryRetryBackoff, Lease: cfg.DeliveryAttemptLease})
-	if err != nil {
-		return err
-	}
-	deliveryConsumerName := cfg.DeliveryConsumerName
-	if deliveryConsumerName == "" {
-		deliveryConsumerName = consumerName
-	}
-	deliveryProcessor := delivery.NewProcessor(deliveryStore, delivery.UnavailableAdapter{}, cfg.DeliveryRetryBackoff).WithLogger(logger)
-	deliveryConsumer := delivery.NewConsumer(streamClient, deliveryProcessor, outbox.DeliveryEventsStream, cfg.DeliveryConsumerGroup, deliveryConsumerName, cfg.DeliveryPollInterval).WithLogger(logger)
-
-	errCh := make(chan error, 7)
+	errCh := make(chan error, 6)
 	go func() { errCh <- worker.Run(ctx, logger, cfg.WorkerInterval, publisher) }()
 	go func() { errCh <- consumer.Run(ctx) }()
 	go func() { errCh <- incidentConsumer.Run(ctx) }()
 	go func() { errCh <- evidencePolicyConsumer.Run(ctx) }()
 	go func() { errCh <- lifecycleConsumer.Run(ctx) }()
-	go func() { errCh <- deliveryConsumer.Run(ctx) }()
 	go func() { errCh <- lifecycleProcessor.RunSweep(ctx, lifecyclePolicyConfig.SweepInterval, logger) }()
 
 	select {

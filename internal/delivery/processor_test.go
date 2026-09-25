@@ -88,14 +88,14 @@ func TestProcessorQuarantinesPermanentAndExhaustedFailures(t *testing.T) {
 	}
 }
 
-func TestProcessorMalformedRequestIsAcknowledgedWithoutDelivery(t *testing.T) {
+func TestProcessorMalformedRequestRemainsPendingForInspection(t *testing.T) {
 	store := newMemoryStore(3)
 	adapter := &recordingAdapter{}
 	p := NewProcessor(store, adapter, 0)
 
 	result, err := p.Process(context.Background(), extraction.StreamMessage{ID: "bad", Values: map[string]any{"event_name": DeliveryRequestedV1}})
-	if err != nil || !result.Ack {
-		t.Fatalf("malformed Process() = %+v, %v", result, err)
+	if err != nil || result.Ack {
+		t.Fatalf("malformed Process() = %+v, %v, want pending", result, err)
 	}
 	if adapter.calls != 0 || store.attempts != 0 {
 		t.Fatalf("malformed request caused delivery work: calls=%d attempts=%d", adapter.calls, store.attempts)

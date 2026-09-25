@@ -41,6 +41,66 @@ func TestConsumerLeavesTransientFailurePendingForRedelivery(t *testing.T) {
 	}
 }
 
+func TestConsumerProviderUnavailableLeavesValidRequestPending(t *testing.T) {
+	client := &deliveryStreamClient{messages: []extraction.StreamMessage{deliveryMessage("delivery-unavailable", "alert-1", "key-unavailable")}}
+	store := newMemoryStore(2)
+	consumer := NewConsumer(client, NewProcessor(store, nil, time.Hour), "stream", "group", "consumer", time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(10 * time.Millisecond); cancel() }()
+	if err := consumer.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(client.acks) != 0 || store.attempts != 0 {
+		t.Fatalf("unavailable provider consumed work: acks=%d attempts=%d", len(client.acks), store.attempts)
+	}
+}
+
+func TestConsumerCancellationDuringRetryReturnsCleanly(t *testing.T) {
+	client := &deliveryStreamClient{messages: []extraction.StreamMessage{deliveryMessage("delivery-cancel", "alert-1", "key-cancel")}}
+	store := newMemoryStore(2)
+	adapter := &recordingAdapter{errors: []error{Transient(errors.New("temporary"))}}
+	consumer := NewConsumer(client, NewProcessor(store, adapter, time.Hour), "stream", "group", "consumer", time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(10 * time.Millisecond); cancel() }()
+	if err := consumer.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v, want clean shutdown", err)
+	}
+}
+
+func TestConsumerDefersNotDueDeliveryWithoutStallingReadyWork(t *testing.T) {
+	client := &deliveryStreamClient{messages: []extraction.StreamMessage{
+		deliveryMessage("delivery-not-due", "alert-1", "key-not-due"),
+		deliveryMessage("delivery-ready", "alert-2", "key-ready"),
+	}}
+	store := &notDueStore{ready: newMemoryStore(2), notDueID: "delivery-not-due"}
+	adapter := &recordingAdapter{}
+	consumer := NewConsumer(client, NewProcessor(store, adapter, 0), "stream", "group", "consumer", time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(10 * time.Millisecond); cancel() }()
+	if err := consumer.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(client.acks) != 1 || client.acks[0] != "stream-delivery-ready" || adapter.calls != 1 {
+		t.Fatalf("ready delivery was stalled: acks=%v calls=%d", client.acks, adapter.calls)
+	}
+}
+
+type notDueStore struct {
+	ready    *memoryStore
+	notDueID string
+}
+
+func (s *notDueStore) StartAttempt(ctx context.Context, request Request, now time.Time) (StartResult, error) {
+	if request.DeliveryID == s.notDueID {
+		return StartResult{NotDue: true, RetryAfter: time.Hour}, nil
+	}
+	return s.ready.StartAttempt(ctx, request, now)
+}
+
+func (s *notDueStore) FinishAttempt(ctx context.Context, attempt Attempt, provider ProviderResult, kind FailureKind, err error, now time.Time) (FinishResult, error) {
+	return s.ready.FinishAttempt(ctx, attempt, provider, kind, err, now)
+}
+
 type deliveryStreamClient struct {
 	messages []extraction.StreamMessage
 	pending  []extraction.StreamMessage
