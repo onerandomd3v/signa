@@ -63,6 +63,30 @@ func TestRealtimeRouteRequiresAuthenticationAndIsMounted(t *testing.T) {
 	}
 }
 
+func TestCurrentSessionJSONDoesNotExposeSessionSecret(t *testing.T) {
+	userID := uuid.New()
+	server := NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(nil, DefaultRateLimitConfig(), nil, nil, nil, nil, config.PublicIncidentGeometryPolicy{}, AuthConfig{
+		Store: sessionStoreForAPITest{secret: "session-secret", principal: auth.Principal{UserID: userID}},
+	})
+	request := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+	request.AddCookie(&http.Cookie{Name: auth.DefaultCookieName, Value: "session-secret"})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 1 || body["user_id"] != userID.String() {
+		t.Fatalf("session body = %#v, want only user_id", body)
+	}
+	if response.Body.String() == "" || containsAny(response.Body.String(), "session-secret", "token", "secret", "expires_at") {
+		t.Fatalf("session response exposed credential material: %s", response.Body.String())
+	}
+}
+
 func TestRealtimeRouteUsesCanonicalSessionFailures(t *testing.T) {
 	h := realtime.NewHandler(emptyRealtimeSource{}, realtime.AllowAllAuthorizer{}, time.Second)
 	server := NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(nil, DefaultRateLimitConfig(), nil, nil, nil, nil, config.PublicIncidentGeometryPolicy{}, AuthConfig{

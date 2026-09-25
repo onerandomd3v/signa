@@ -17,6 +17,7 @@ import (
 	"github.com/onerandomd3v/signa/internal/incidents/lifecycle"
 	"github.com/onerandomd3v/signa/internal/logging"
 	"github.com/onerandomd3v/signa/internal/outbox"
+	"github.com/onerandomd3v/signa/internal/retention"
 	"github.com/onerandomd3v/signa/internal/worker"
 	goRedis "github.com/redis/go-redis/v9"
 )
@@ -52,6 +53,10 @@ func run(parent context.Context, logger *slog.Logger) error {
 	}
 	if _, err := config.LoadPriorityPolicy(); err != nil {
 		return err
+	}
+	retentionPolicy, retentionErr := config.LoadRetentionPolicy()
+	if retentionErr != nil {
+		logger.Warn("retention sweep disabled because policy configuration is incomplete", "error", retentionErr)
 	}
 
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
@@ -155,13 +160,20 @@ func run(parent context.Context, logger *slog.Logger) error {
 		return err
 	}
 	lifecycleConsumer := incidents.NewLifecycleConsumer(streamClient, lifecycleProcessor, outbox.IncidentEventsStream, "signa-incident-lifecycle", consumerName, cfg.AIPollInterval).WithLogger(logger)
-	errCh := make(chan error, 6)
+	retentionStore, err := retention.NewStore(database)
+	if err != nil {
+		return err
+	}
+	errCh := make(chan error, 7)
 	go func() { errCh <- worker.Run(ctx, logger, cfg.WorkerInterval, publisher) }()
 	go func() { errCh <- consumer.Run(ctx) }()
 	go func() { errCh <- incidentConsumer.Run(ctx) }()
 	go func() { errCh <- evidencePolicyConsumer.Run(ctx) }()
 	go func() { errCh <- lifecycleConsumer.Run(ctx) }()
 	go func() { errCh <- lifecycleProcessor.RunSweep(ctx, lifecyclePolicyConfig.SweepInterval, logger) }()
+	if retentionErr == nil {
+		go func() { errCh <- retentionStore.RunSweep(ctx, retentionPolicy, logger) }()
+	}
 
 	select {
 	case <-ctx.Done():
