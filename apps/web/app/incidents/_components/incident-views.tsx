@@ -2,9 +2,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 /**
- * A deliberately small, public presentation projection—not an API contract.
- * When public incident endpoints are approved, adapt their generated response
- * into this shape and omit private reporter data and exact coordinates.
+ * A deliberately small presentation projection—not an API contract. Keep it
+ * limited to generated public API fields and omit private or exact location data.
  */
 export type IncidentUpdateView = {
   id: string;
@@ -22,7 +21,7 @@ export type IncidentView = {
   status: string;
   approximateArea: string | null;
   lastSignalAt: string | null;
-  updates: IncidentUpdateView[];
+  updates: IncidentUpdateView[] | null;
 };
 
 export type IncidentFeedState =
@@ -243,7 +242,7 @@ export function IncidentFeed({ state }: { state: IncidentFeedState }) {
 
 export type IncidentDetailState =
   | { status: "loading" }
-  | { status: "error" }
+  | { status: "error"; onRetry?: () => void }
   | { status: "not-found" }
   | { status: "unavailable" }
   | { status: "ready"; incident: IncidentView };
@@ -266,6 +265,15 @@ export function IncidentDetail({ state }: { state: IncidentDetailState }) {
     return (
       <StatePanel title="Couldn’t load incident details" role="alert">
         <p>Try again in a moment. No incident information is available.</p>
+        {state.onRetry && (
+          <button
+            className="mt-4 inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            onClick={state.onRetry}
+            type="button"
+          >
+            Retry
+          </button>
+        )}
       </StatePanel>
     );
   }
@@ -273,7 +281,9 @@ export function IncidentDetail({ state }: { state: IncidentDetailState }) {
   if (state.status === "not-found") {
     return (
       <StatePanel title="Incident not found">
-        <p>This incident may have been removed or the link may be incorrect.</p>
+        <p>
+          This incident may no longer be active, or the link may be incorrect.
+        </p>
       </StatePanel>
     );
   }
@@ -315,9 +325,11 @@ export function IncidentDetail({ state }: { state: IncidentDetailState }) {
         <h1 className="mt-5 text-2xl leading-tight font-semibold tracking-tight sm:text-3xl">
           {displayValue(incident.eventType)}
         </h1>
-        <p className="mt-2 text-base leading-7 text-muted-foreground">
-          {displayValue(incident.approximateArea)}
-        </p>
+        {incident.approximateArea && (
+          <p className="mt-2 text-base leading-7 text-muted-foreground">
+            {displayValue(incident.approximateArea)}
+          </p>
+        )}
         <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-border pt-5 sm:grid-cols-3">
           <div>
             <dt className="text-xs font-medium text-muted-foreground">
@@ -360,7 +372,11 @@ export function IncidentDetail({ state }: { state: IncidentDetailState }) {
         >
           Incident updates
         </h2>
-        {incident.updates.length === 0 ? (
+        {incident.updates === null ? (
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            Update history isn’t included in the public incident response.
+          </p>
+        ) : incident.updates.length === 0 ? (
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             No updates are available.
           </p>

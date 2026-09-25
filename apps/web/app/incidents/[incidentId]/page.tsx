@@ -1,14 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AppShell } from "../../_components/app-shell";
-import {
-  IncidentDetail,
-  IncidentPageFrame,
-} from "../_components/incident-views";
+import { IncidentPageFrame } from "../_components/incident-views";
+import { IncidentDetailExperience } from "../_components/incident-detail-experience";
 
 export const metadata: Metadata = {
   title: "Incident details | Signa",
-  description: "Review an incident’s status and updates.",
+  description: "Review an incident’s current status and public details.",
 };
 
 export default async function IncidentDetailPage({
@@ -16,7 +14,7 @@ export default async function IncidentDetailPage({
 }: {
   params: Promise<{ incidentId: string }>;
 }) {
-  await params;
+  const { incidentId } = await params;
 
   return (
     <AppShell>
@@ -29,7 +27,7 @@ export default async function IncidentDetailPage({
             ← <span className="ml-2">Incidents</span>
           </Link>
         </nav>
-        <IncidentDetail state={{ status: "unavailable" }} />
+        <IncidentDetailExperience incidentId={incidentId} />
       </IncidentPageFrame>
     </AppShell>
   );

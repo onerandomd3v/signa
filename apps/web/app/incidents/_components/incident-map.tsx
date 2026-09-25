@@ -48,6 +48,7 @@ export function IncidentMap({
   useEffect(() => {
     if (!containerRef.current) return;
 
+    let createdMap: MapLibreMap | null = null;
     try {
       const map = new MapLibreMap({
         container: containerRef.current,
@@ -56,9 +57,17 @@ export function IncidentMap({
         zoom: 1.5,
         cooperativeGestures: true,
       });
+      createdMap = map;
       mapRef.current = map;
       map.addControl(new NavigationControl(), "top-right");
-      map.on("load", () => {
+      let styleLoaded = false;
+      const styleLoadTimeout = window.setTimeout(() => {
+        if (!styleLoaded) onUnavailableRef.current();
+      }, 15_000);
+
+      map.on("style.load", () => {
+        styleLoaded = true;
+        window.clearTimeout(styleLoadTimeout);
         try {
           map.addSource(SOURCE_ID, {
             type: "geojson",
@@ -102,15 +111,25 @@ export function IncidentMap({
           onUnavailableRef.current();
         }
       });
-      map.on("error", () => onUnavailableRef.current());
+      map.on("error", (event) => {
+        // MapLibre also reports individual source/tile failures here. Only a
+        // direct map error before the base style loads is immediately fatal;
+        // a style that never becomes ready is handled by the timeout above.
+        if (!styleLoaded && event.target === map) {
+          onUnavailableRef.current();
+        }
+      });
+
+      return () => {
+        window.clearTimeout(styleLoadTimeout);
+        map.remove();
+        mapRef.current = null;
+      };
     } catch {
+      createdMap?.remove();
+      mapRef.current = null;
       onUnavailableRef.current();
     }
-
-    return () => {
-      mapRef.current?.remove();
-      mapRef.current = null;
-    };
   }, [styleUrl]);
 
   useEffect(() => {

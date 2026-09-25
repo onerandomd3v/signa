@@ -1,4 +1,4 @@
-import { listIncidents } from "./generated";
+import { getIncident, listIncidents } from "./generated";
 import type { PublicIncident } from "./generated";
 import { createClient } from "./generated/client";
 import { getApiBaseUrl } from "./reports";
@@ -14,6 +14,27 @@ export async function fetchPublicIncidents(
   });
   if (result.data) return result.data;
   throw new Error(`Incident request failed (${result.response?.status ?? 0})`);
+}
+
+export type PublicIncidentResult =
+  | { status: "ready"; incident: PublicIncident }
+  | { status: "not-found" }
+  | { status: "error" };
+
+export async function fetchPublicIncident(
+  incidentId: string,
+  fetchImplementation: typeof fetch = globalThis.fetch,
+): Promise<PublicIncidentResult> {
+  const result = await getIncident({
+    path: { incident_id: incidentId },
+    client: createClient({
+      baseUrl: getApiBaseUrl(),
+      fetch: fetchImplementation,
+    }),
+  });
+  if (result.data) return { status: "ready", incident: result.data };
+  if (result.response?.status === 404) return { status: "not-found" };
+  return { status: "error" };
 }
 
 export function getPublicMapStyleUrl(): string | null {
