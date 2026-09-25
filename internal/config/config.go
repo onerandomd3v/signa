@@ -9,25 +9,26 @@ import (
 )
 
 const (
-	defaultAPIAddr                   = ":8080"
-	defaultDatabaseURL               = "postgres://signa:signa_local@localhost:5432/signa?sslmode=disable"
-	defaultRedisAddr                 = "localhost:6379"
-	defaultShutdownTimeout           = 10 * time.Second
-	defaultWorkerInterval            = 500 * time.Millisecond
-	defaultReportRatePerMinute       = 6
-	defaultReportRateBurst           = 3
-	defaultGlobalReportRatePerMinute = 120
-	defaultGlobalReportRateBurst     = 30
-	defaultOpenAIModel               = "gpt-4.1-mini"
-	defaultOpenAIBaseURL             = "https://api.openai.com/v1"
-	defaultAISchemaPath              = "contracts/ai/extraction/v0/schema.json"
-	defaultAIGenerationSchemaPath    = "contracts/ai/extraction/v0/openai.schema.json"
-	defaultAIConsumerGroup           = "signa-ai-text-extraction"
-	defaultAIPollInterval            = time.Second
-	defaultAIProviderTimeout         = 15 * time.Second
-	defaultAIRetryMaxAttempts        = 3
-	defaultAIRetryBackoff            = 250 * time.Millisecond
-	maxAIRetryAttempts               = 5
+	defaultAPIAddr                      = ":8080"
+	defaultDatabaseURL                  = "postgres://signa:signa_local@localhost:5432/signa?sslmode=disable"
+	defaultRedisAddr                    = "localhost:6379"
+	defaultShutdownTimeout              = 10 * time.Second
+	defaultWorkerInterval               = 500 * time.Millisecond
+	defaultReportRatePerMinute          = 6
+	defaultReportRateBurst              = 3
+	defaultGlobalReportRatePerMinute    = 120
+	defaultGlobalReportRateBurst        = 30
+	defaultOpenAIModel                  = "gpt-4.1-mini"
+	defaultOpenAIBaseURL                = "https://api.openai.com/v1"
+	defaultAISchemaPath                 = "contracts/ai/extraction/v0/schema.json"
+	defaultAIGenerationSchemaPath       = "contracts/ai/extraction/v0/openai.schema.json"
+	defaultAIConsumerGroup              = "signa-ai-text-extraction"
+	defaultAIPollInterval               = time.Second
+	defaultAIProviderTimeout            = 15 * time.Second
+	defaultAIRetryMaxAttempts           = 3
+	defaultAIRetryBackoff               = 250 * time.Millisecond
+	maxAIRetryAttempts                  = 5
+	PublicIncidentGeometryPolicyVersion = "signa.public-incident-geometry.v1"
 )
 
 // Config contains the runtime settings needed by the foundation processes.
@@ -79,6 +80,41 @@ type IncidentLifecyclePolicy struct {
 	ResolvedAfter  time.Duration
 	ExpiredAfter   time.Duration
 	SweepInterval  time.Duration
+}
+
+type PublicIncidentGeometryPolicy struct {
+	Version         string
+	GridMeters      float64
+	MinRadiusMeters float64
+	SimplifyMeters  float64
+}
+
+func LoadPublicIncidentGeometryPolicy() (PublicIncidentGeometryPolicy, error) {
+	grid, err := requiredPositiveFloat("SIGNA_PUBLIC_INCIDENT_GRID_METERS")
+	if err != nil {
+		return PublicIncidentGeometryPolicy{}, err
+	}
+	minRadius, err := requiredPositiveFloat("SIGNA_PUBLIC_INCIDENT_MIN_RADIUS_METERS")
+	if err != nil {
+		return PublicIncidentGeometryPolicy{}, err
+	}
+	simplify, err := requiredPositiveFloat("SIGNA_PUBLIC_INCIDENT_SIMPLIFY_METERS")
+	if err != nil {
+		return PublicIncidentGeometryPolicy{}, err
+	}
+	return PublicIncidentGeometryPolicy{Version: PublicIncidentGeometryPolicyVersion, GridMeters: grid, MinRadiusMeters: minRadius, SimplifyMeters: simplify}, nil
+}
+
+func (p PublicIncidentGeometryPolicy) Validate() error {
+	if p.Version != PublicIncidentGeometryPolicyVersion {
+		return fmt.Errorf("public incident geometry policy version must be %q", PublicIncidentGeometryPolicyVersion)
+	}
+	for name, value := range map[string]float64{"grid meters": p.GridMeters, "minimum radius": p.MinRadiusMeters, "simplify meters": p.SimplifyMeters} {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
+			return fmt.Errorf("public incident geometry %s must be finite and greater than zero", name)
+		}
+	}
+	return nil
 }
 
 func LoadIncidentPolicy() (IncidentPolicy, error) {
@@ -170,6 +206,14 @@ func requiredFloat(name string, valid func(float64) bool) (float64, error) {
 		return 0, fmt.Errorf("%s must be finite and satisfy its configured range", name)
 	}
 	return parsed, nil
+}
+
+func requiredPositiveFloat(name string) (float64, error) {
+	value, err := requiredFloat(name, func(value float64) bool { return value > 0 })
+	if err != nil {
+		return 0, fmt.Errorf("%s must be finite and greater than zero", name)
+	}
+	return value, nil
 }
 
 func requiredDuration(name string) (time.Duration, error) {

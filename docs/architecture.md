@@ -851,6 +851,29 @@ The snapshot's `user_id` is an opaque boundary until the future user/auth
 domain owns referential constraints. Exact user and report coordinates remain
 restricted internal data and are omitted from generic public representations.
 
+### 18.1 Public incident geometry
+
+The public incident read API uses the versioned policy
+`signa.public-incident-geometry.v1`. Exact `Incident.center_point` values remain
+internal and are never returned as a separate public field. Report coordinates,
+device coordinates, and reporter identity or location are never included in
+public incident representations.
+
+When an incident has `affected_geometry`, the API generalizes and simplifies it
+before output. A center-only incident uses a snapped/generalized center to build
+a minimum-radius public area. Public geometry is returned only as GeoJSON
+`Polygon` or `MultiPolygon` in EPSG:4326; no exact source point is persisted as
+a duplicate for this projection.
+
+The policy requires explicit positive configuration with no hidden product
+defaults:
+
+- `SIGNA_PUBLIC_INCIDENT_GRID_METERS`
+- `SIGNA_PUBLIC_INCIDENT_MIN_RADIUS_METERS`
+- `SIGNA_PUBLIC_INCIDENT_SIMPLIFY_METERS`
+
+The API fails startup when these settings are missing or invalid.
+
 ---
 
 # 19. Incident Lifecycle

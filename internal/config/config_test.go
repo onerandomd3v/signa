@@ -177,6 +177,46 @@ func TestLoadRejectsInvalidAIPollInterval(t *testing.T) {
 	}
 }
 
+func TestLoadPublicIncidentGeometryPolicyRequiresPositiveValues(t *testing.T) {
+	t.Setenv("SIGNA_PUBLIC_INCIDENT_GRID_METERS", "100")
+	t.Setenv("SIGNA_PUBLIC_INCIDENT_MIN_RADIUS_METERS", "250")
+	t.Setenv("SIGNA_PUBLIC_INCIDENT_SIMPLIFY_METERS", "25")
+
+	got, err := LoadPublicIncidentGeometryPolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != PublicIncidentGeometryPolicyVersion || got.GridMeters != 100 || got.MinRadiusMeters != 250 || got.SimplifyMeters != 25 {
+		t.Fatalf("policy = %+v", got)
+	}
+
+	for _, test := range []struct {
+		name  string
+		value string
+	}{
+		{name: "zero grid", value: "0"},
+		{name: "negative minimum radius", value: "-1"},
+		{name: "invalid simplify", value: "not-a-number"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("SIGNA_PUBLIC_INCIDENT_GRID_METERS", "100")
+			t.Setenv("SIGNA_PUBLIC_INCIDENT_MIN_RADIUS_METERS", "250")
+			t.Setenv("SIGNA_PUBLIC_INCIDENT_SIMPLIFY_METERS", "25")
+			switch test.name {
+			case "zero grid":
+				t.Setenv("SIGNA_PUBLIC_INCIDENT_GRID_METERS", test.value)
+			case "negative minimum radius":
+				t.Setenv("SIGNA_PUBLIC_INCIDENT_MIN_RADIUS_METERS", test.value)
+			case "invalid simplify":
+				t.Setenv("SIGNA_PUBLIC_INCIDENT_SIMPLIFY_METERS", test.value)
+			}
+			if _, err := LoadPublicIncidentGeometryPolicy(); err == nil {
+				t.Fatal("LoadPublicIncidentGeometryPolicy() error = nil")
+			}
+		})
+	}
+}
+
 func TestLoadRejectsUnboundedAIRetryAttempts(t *testing.T) {
 	t.Setenv("SIGNA_AI_RETRY_MAX_ATTEMPTS", "6")
 	if _, err := Load(); err == nil {
