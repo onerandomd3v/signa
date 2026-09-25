@@ -1,11 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/realtime"
 )
 
 func TestHealthz(t *testing.T) {
@@ -27,6 +32,28 @@ func TestHealthz(t *testing.T) {
 	}
 	if body["status"] != "ok" {
 		t.Fatalf("status body = %q, want ok", body["status"])
+	}
+}
+
+type emptyRealtimeSource struct{}
+
+func (emptyRealtimeSource) Read(context.Context, realtime.Cursor) ([]realtime.Event, error) {
+	return nil, io.EOF
+}
+
+func TestRealtimeRouteRequiresAuthenticationAndIsMounted(t *testing.T) {
+	h := realtime.NewHandler(emptyRealtimeSource{}, realtime.AllowAllAuthorizer{}, time.Second)
+	server := NewHandlerWithMediaAndCORSAndPublicIncidentsAndRealtime(nil, DefaultRateLimitConfig(), nil, nil, nil, nil, config.PublicIncidentGeometryPolicy{}, h)
+	unauthenticated := httptest.NewRecorder()
+	server.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/events", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", unauthenticated.Code)
+	}
+	authenticated := httptest.NewRecorder()
+	request := realtime.WithPrincipal(httptest.NewRequest(http.MethodGet, "/events", nil), realtime.Principal{UserID: "user-1"})
+	server.ServeHTTP(authenticated, request)
+	if authenticated.Code != http.StatusOK || authenticated.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("response = %d %v", authenticated.Code, authenticated.Header())
 	}
 }
 
