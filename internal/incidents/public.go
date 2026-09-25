@@ -34,7 +34,7 @@ type PublicIncidentReader interface {
 }
 
 const publicIncidentProjection = `
-WITH generalized AS (
+WITH metric AS (
 	SELECT
 		i.id,
 		i.event_type,
@@ -44,31 +44,38 @@ WITH generalized AS (
 		CASE
 			WHEN i.affected_geometry IS NOT NULL
 				AND NOT ST_IsEmpty(ST_CollectionExtract(i.affected_geometry::geometry, 3))
-			THEN ST_Transform(
-				ST_SimplifyPreserveTopology(
-					ST_SnapToGrid(
-						ST_Transform(ST_Multi(ST_CollectionExtract(i.affected_geometry::geometry, 3)), 3857),
-						$1
-					),
-					$3
+			THEN ST_SimplifyPreserveTopology(
+				ST_SnapToGrid(
+					ST_Transform(ST_Multi(ST_CollectionExtract(i.affected_geometry::geometry, 3)), 3857),
+					$1
 				),
-				4326
+				$3
 			)
-			WHEN i.center_point IS NOT NULL
-			THEN ST_Transform(
-				ST_Buffer(
-					ST_SnapToGrid(ST_Transform(i.center_point::geometry, 3857), $1),
-					$2
-				),
-				4326
-			)
-		END AS public_geometry,
+		END AS affected_metric,
+		ST_SnapToGrid(ST_Transform(i.center_point::geometry, 3857), $1) AS center_metric,
 		i.started_at,
 		i.last_signal_at,
 		i.updated_at
 	FROM incidents AS i
 	WHERE i.status IN ('OPEN', 'RESOLVING')
 	  AND (i.center_point IS NOT NULL OR i.affected_geometry IS NOT NULL)
+), generalized AS (
+	SELECT
+		id,
+		event_type,
+		status,
+		confidence_state,
+		severity,
+		CASE
+			WHEN affected_metric IS NOT NULL AND NOT ST_IsEmpty(affected_metric)
+			THEN ST_Transform(affected_metric, 4326)
+			WHEN center_metric IS NOT NULL
+			THEN ST_Transform(ST_Buffer(center_metric, $2), 4326)
+		END AS public_geometry,
+		started_at,
+		last_signal_at,
+		updated_at
+	FROM metric
 )
 SELECT id, event_type, status, confidence_state, severity,
 	ST_AsGeoJSON(public_geometry)::jsonb,

@@ -49,6 +49,7 @@ func TestPublicIncidentGeometryIntegration(t *testing.T) {
 	base := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	centerID := uuid.New()
 	affectedID := uuid.New()
+	collapsedID := uuid.New()
 	resolvedID := uuid.New()
 	expiredID := uuid.New()
 	emptyID := uuid.New()
@@ -57,6 +58,16 @@ func TestPublicIncidentGeometryIntegration(t *testing.T) {
 		INSERT INTO incidents (id, event_type, status, confidence_state, severity, center_point, started_at, last_signal_at, created_at, updated_at)
 		VALUES ($1, 'center_only', 'OPEN', 'UNVERIFIED', NULL, ST_SetSRID(ST_MakePoint(3.3792, 6.5244), 4326)::geography, $2, $2, $2, $2)
 	`, centerID, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = pool.Exec(ctx, `
+		INSERT INTO incidents (id, event_type, status, confidence_state, severity, center_point, affected_geometry, started_at, last_signal_at, created_at, updated_at)
+		VALUES ($1, 'collapsed_area', 'OPEN', 'UNVERIFIED', NULL,
+			ST_SetSRID(ST_MakePoint(3.3792, 6.5244), 4326)::geography,
+			ST_GeomFromText('POLYGON((3.37919 6.52439, 3.37921 6.52439, 3.37921 6.52441, 3.37919 6.52441, 3.37919 6.52439))', 4326)::geography,
+			$2, $2, $2, $2)
+	`, collapsedID, base.Add(2*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,6 +153,14 @@ func TestPublicIncidentGeometryIntegration(t *testing.T) {
 	if strings.Contains(string(affected.PublicGeometry), "3.378") || strings.Contains(string(affected.PublicGeometry), "6.5235") {
 		t.Fatalf("affected geometry appears to expose unsnapped source coordinates: %s", affected.PublicGeometry)
 	}
+	collapsed, err := store.GetPublicIncident(ctx, collapsedID, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPublicGeometry(t, collapsed.PublicGeometry)
+	if strings.Contains(string(collapsed.PublicGeometry), "3.3792") || strings.Contains(string(collapsed.PublicGeometry), "6.5244") {
+		t.Fatalf("collapsed affected geometry exposed exact center coordinates: %s", collapsed.PublicGeometry)
+	}
 	if _, err := store.GetPublicIncident(ctx, resolvedID, policy); !errors.Is(err, ErrPublicIncidentNotFound) {
 		t.Fatalf("resolved detail error = %v, want ErrPublicIncidentNotFound", err)
 	}
@@ -151,8 +170,8 @@ func TestPublicIncidentGeometryIntegration(t *testing.T) {
 func assertPublicGeometry(t *testing.T, encoded []byte) {
 	t.Helper()
 	var geometry struct {
-		Type        string `json:"type"`
-		Coordinates any    `json:"coordinates"`
+		Type        string            `json:"type"`
+		Coordinates []json.RawMessage `json:"coordinates"`
 	}
 	if err := json.Unmarshal(encoded, &geometry); err != nil {
 		t.Fatalf("decode public geometry: %v", err)
@@ -160,7 +179,7 @@ func assertPublicGeometry(t *testing.T, encoded []byte) {
 	if geometry.Type != "Polygon" && geometry.Type != "MultiPolygon" {
 		t.Fatalf("public geometry type = %q, want Polygon or MultiPolygon", geometry.Type)
 	}
-	if geometry.Coordinates == nil {
-		t.Fatal("public geometry coordinates are nil")
+	if len(geometry.Coordinates) == 0 {
+		t.Fatal("public geometry coordinates are empty")
 	}
 }
