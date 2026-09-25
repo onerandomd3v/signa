@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestValidateBoundRejectsEachUnsafeViolationIndividually(t *testing.T) {
 		{"confidence mismatch", func(s *alertsummary.Summary) { s.ConfidenceState = alertsummary.HighConfidence }},
 		{"severity mismatch", func(s *alertsummary.Summary) { s.Severity = stringPointer("CRITICAL") }},
 		{"location mismatch", func(s *alertsummary.Summary) { s.PublicLocation.Label = stringPointer("exact private address") }},
-		{"freshness mismatch", func(s *alertsummary.Summary) { s.Freshness.State = alertsummary.Stale }},
+		{"freshness mismatch", func(s *alertsummary.Summary) { s.Freshness.Status = alertsummary.UnknownFreshness }},
 		{"policy version mismatch", func(s *alertsummary.Summary) { s.PolicyVersions.Confidence = "other-policy" }},
 		{"confirmed claim", func(s *alertsummary.Summary) { s.Message = "This incident is confirmed." }},
 		{"verified claim", func(s *alertsummary.Summary) { s.Message = "This incident is verified." }},
@@ -112,7 +113,8 @@ func TestValidateBoundRejectsUnsupportedOngoingClaims(t *testing.T) {
 		})
 	}
 	state := validState()
-	state.Freshness.State = alertsummary.Stale
+	state.Freshness.LastSignalAt = timePointer(state.AsOf.Add(-48 * time.Hour))
+	state.Freshness.AgeSeconds = intPointer(48 * 60 * 60)
 	candidate := alertsummary.RenderDeterministic(state)
 	candidate.Message = "The incident is happening now."
 	if err := alertsummary.ValidateBound(state, candidate); err == nil {
@@ -129,7 +131,7 @@ func TestValidateBoundRejectsInventedProseWithMatchingMetadata(t *testing.T) {
 		{"another event type", validState(), "A fire is reported near a junction."},
 		{"another location", validState(), "Possible road blockage near Ikeja."},
 		{"stronger confidence", validState(), "High confidence incident near a junction."},
-		{"current activity for stale incident", staleState(), "The incident is happening now near a junction."},
+		{"current activity for old signal", oldTimestampState(), "The incident is happening now near a junction."},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -165,25 +167,79 @@ func TestValidateStateRequiresConsistentKnownFreshness(t *testing.T) {
 	state := validState()
 	state.Freshness.LastSignalAt = nil
 	if err := alertsummary.ValidateState(state); err == nil {
-		t.Fatal("accepted CURRENT freshness without last_signal_at")
+		t.Fatal("accepted known freshness without last_signal_at")
 	}
 	state = validState()
 	state.Freshness.AgeSeconds = nil
 	if err := alertsummary.ValidateState(state); err == nil {
-		t.Fatal("accepted CURRENT freshness without age_seconds")
+		t.Fatal("accepted known freshness without age_seconds")
 	}
 	state = validState()
-	state.Freshness.State = alertsummary.UnknownFreshness
+	state.Freshness.Status = alertsummary.UnknownFreshness
 	if err := alertsummary.ValidateState(state); err == nil {
-		t.Fatal("accepted UNKNOWN freshness with known timestamps")
+		t.Fatal("accepted unknown freshness with known timestamps")
 	}
 }
 
 func TestValidateStateAcceptsUnknownFreshnessWithoutTimestamps(t *testing.T) {
 	state := validState()
-	state.Freshness = alertsummary.Freshness{State: alertsummary.UnknownFreshness}
+	state.Freshness = alertsummary.Freshness{Status: alertsummary.UnknownFreshness}
 	if err := alertsummary.ValidateState(state); err != nil {
 		t.Fatalf("rejected unknown freshness: %v", err)
+	}
+}
+
+func TestApprovedSnapshotContractStatusesAndVersion(t *testing.T) {
+	if alertsummary.SnapshotVersion != "signa.alert-summary-snapshot.v1" {
+		t.Fatalf("snapshot version = %q", alertsummary.SnapshotVersion)
+	}
+	state := validState()
+	state.PublicLocation = alertsummary.PublicLocation{Status: "unknown"}
+	if err := alertsummary.ValidateState(state); err != nil {
+		t.Fatalf("rejected unknown location: %v", err)
+	}
+	state = validState()
+	state.PublicLocation.Status = "APPROXIMATE"
+	if err := alertsummary.ValidateState(state); err == nil {
+		t.Fatal("accepted unapproved public location status")
+	}
+	state = validState()
+	state.Freshness.Status = "STALE"
+	if err := alertsummary.ValidateState(state); err == nil {
+		t.Fatal("accepted derived freshness state")
+	}
+	state = validState()
+	state.LifecycleStatus = "UNKNOWN"
+	if err := alertsummary.ValidateState(state); err == nil {
+		t.Fatal("accepted unapproved lifecycle status")
+	}
+}
+
+func TestOutputSchemaRejectsPreviousSnapshotVersion(t *testing.T) {
+	summary := alertsummary.RenderDeterministic(validState())
+	summary.SnapshotVersion = "signa.incident-alert-snapshot.v1"
+	data, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testValidator(t).Validate(data); err == nil {
+		t.Fatal("accepted previous snapshot version")
+	}
+}
+
+func TestRendererUsesSuppliedFreshnessWithoutDerivingThresholds(t *testing.T) {
+	state := oldTimestampState()
+	summary := alertsummary.RenderDeterministic(state)
+	if !strings.Contains(summary.Message, "Last signal recorded at 2026-09-23T12:00:00Z") {
+		t.Fatalf("summary omitted supplied old timestamp: %q", summary.Message)
+	}
+	if strings.Contains(summary.Message, "ongoing") || strings.Contains(summary.Message, "happening now") {
+		t.Fatalf("summary implied current activity: %q", summary.Message)
+	}
+	state.Freshness = alertsummary.Freshness{Status: alertsummary.UnknownFreshness}
+	summary = alertsummary.RenderDeterministic(state)
+	if !strings.Contains(summary.Message, "Freshness is unknown") {
+		t.Fatalf("summary did not preserve unknown freshness: %q", summary.Message)
 	}
 }
 
@@ -231,12 +287,11 @@ func validState() alertsummary.State {
 	asOf := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	last := asOf.Add(-5 * time.Minute)
 	age := int64(300)
-	return alertsummary.State{SnapshotVersion: alertsummary.SnapshotVersion, IncidentID: "inc-valid", EventType: "possible_road_blockage", ConfidenceState: alertsummary.Unverified, Severity: stringPointer("HIGH"), LifecycleStatus: "OPEN", PublicLocation: alertsummary.PublicLocation{Status: "APPROXIMATE", Label: stringPointer("near a junction")}, Freshness: alertsummary.Freshness{State: alertsummary.Current, LastSignalAt: &last, AgeSeconds: &age}, AsOf: asOf, PolicyVersions: alertsummary.PolicyVersions{Confidence: "signa.incident-confidence-severity.v1", Lifecycle: "signa.incident-lifecycle.v1"}}
+	return alertsummary.State{SnapshotVersion: alertsummary.SnapshotVersion, IncidentID: "inc-valid", EventType: "possible_road_blockage", ConfidenceState: alertsummary.Unverified, Severity: stringPointer("HIGH"), LifecycleStatus: "OPEN", PublicLocation: alertsummary.PublicLocation{Status: "identified", Label: stringPointer("near a junction")}, Freshness: alertsummary.Freshness{Status: alertsummary.KnownFreshness, LastSignalAt: &last, AgeSeconds: &age}, AsOf: asOf, PolicyVersions: alertsummary.PolicyVersions{Confidence: "signa.incident-confidence-severity.v1", Lifecycle: "signa.incident-lifecycle.v1"}}
 }
 
-func staleState() alertsummary.State {
+func oldTimestampState() alertsummary.State {
 	state := validState()
-	state.Freshness.State = alertsummary.Stale
 	state.Freshness.LastSignalAt = timePointer(state.AsOf.Add(-48 * time.Hour))
 	age := int64(48 * 60 * 60)
 	state.Freshness.AgeSeconds = &age
@@ -245,3 +300,4 @@ func staleState() alertsummary.State {
 
 func stringPointer(value string) *string     { return &value }
 func timePointer(value time.Time) *time.Time { return &value }
+func intPointer(value int64) *int64          { return &value }
