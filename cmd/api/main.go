@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/api"
+	"github.com/onerandomd3v/signa/internal/auth"
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/logging"
@@ -64,12 +65,15 @@ func run(parent context.Context, logger *slog.Logger) error {
 		}
 	}
 
-	server := api.NewServerWithMediaAndCORSAndPublicIncidents(cfg.APIAddr, logger, api.RateLimitConfig{
+	sessionStore := auth.NewPostgresStore(pool)
+	server := api.NewServerWithMediaAndCORSAndPublicIncidentsAndAuth(cfg.APIAddr, logger, api.RateLimitConfig{
 		PerClientRatePerMinute: cfg.ReportRatePerMinute,
 		PerClientBurst:         cfg.ReportRateBurst,
 		GlobalRatePerMinute:    cfg.GlobalReportRatePerMinute,
 		GlobalBurst:            cfg.GlobalReportRateBurst,
-	}, cfg.WebAllowedOrigins, pool, storage, incidents.NewStore(pool), publicGeometryPolicy, reports.NewStore(pool))
+	}, cfg.WebAllowedOrigins, pool, storage, incidents.NewStore(pool), publicGeometryPolicy, api.AuthConfig{
+		Store: sessionStore,
+	}, reports.NewStore(pool))
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("api starting", "addr", cfg.APIAddr)

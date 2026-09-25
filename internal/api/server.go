@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/auth"
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/media"
@@ -36,6 +37,14 @@ func NewHandlerWithMediaAndCORS(logger *slog.Logger, rateConfig RateLimitConfig,
 }
 
 func NewHandlerWithMediaAndCORSAndPublicIncidents(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, ingestors ...reports.Ingestor) http.Handler {
+	return NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, AuthConfig{}, ingestors...)
+}
+
+type AuthConfig struct {
+	Store auth.SessionStore
+}
+
+func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, ingestors ...reports.Ingestor) http.Handler {
 	var ingestor reports.Ingestor
 	if len(ingestors) > 0 {
 		ingestor = ingestors[0]
@@ -51,6 +60,9 @@ func NewHandlerWithMediaAndCORSAndPublicIncidents(logger *slog.Logger, rateConfi
 	if publicReader != nil {
 		router.Get("/incidents", publicIncidentListHandler(logger, publicReader, publicPolicy))
 		router.Get("/incidents/{incident_id}", publicIncidentDetailHandler(logger, publicReader, publicPolicy))
+	}
+	if authConfig.Store != nil {
+		router.With(auth.RequirePrincipal(authConfig.Store)).Get("/auth/session", currentSessionHandler)
 	}
 	return router
 }
@@ -73,9 +85,13 @@ func NewServerWithMediaAndCORS(addr string, logger *slog.Logger, rateConfig Rate
 }
 
 func NewServerWithMediaAndCORSAndPublicIncidents(addr string, logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, ingestors ...reports.Ingestor) *http.Server {
+	return NewServerWithMediaAndCORSAndPublicIncidentsAndAuth(addr, logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, AuthConfig{}, ingestors...)
+}
+
+func NewServerWithMediaAndCORSAndPublicIncidentsAndAuth(addr string, logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, ingestors ...reports.Ingestor) *http.Server {
 	return &http.Server{
 		Addr:              addr,
-		Handler:           NewHandlerWithMediaAndCORSAndPublicIncidents(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, ingestors...),
+		Handler:           NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, authConfig, ingestors...),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -90,4 +106,14 @@ func healthHandler(logger *slog.Logger) http.HandlerFunc {
 			logger.Error("write health response", "error", err)
 		}
 	}
+}
+
+func currentSessionHandler(writer http.ResponseWriter, request *http.Request) {
+	principal, ok := auth.PrincipalFromContext(request.Context())
+	if !ok {
+		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(writer).Encode(map[string]string{"user_id": principal.UserID.String()})
 }

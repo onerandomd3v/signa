@@ -21,6 +21,26 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
               example:
                 status: ok
+  /auth/session:
+    get:
+      operationId: getCurrentSession
+      summary: Resolve the authenticated browser session
+      description: Returns the canonical principal resolved from the HttpOnly session cookie.
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: Authenticated session principal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentSession'
+        '401':
+          description: Missing, malformed, expired, or revoked session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports:
     post:
       operationId: createReport
@@ -181,6 +201,12 @@ paths:
         '429': { description: Rate limit exceeded, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '503': { description: Media storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: signa_session
+      description: HttpOnly opaque session cookie. The browser supplies it with credentialed API and SSE requests; credentials never appear in URLs.
   parameters:
     ReportID:
       name: report_id
@@ -197,6 +223,15 @@ components:
         type: string
         format: uuid
   schemas:
+    CurrentSession:
+      type: object
+      required: [user_id]
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Canonical user identity resolved by the API session store.
     HealthResponse:
       type: object
       required:

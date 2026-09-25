@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_AI_PROVIDER_TIMEOUT", "SIGNA_AI_RETRY_MAX_ATTEMPTS", "SIGNA_AI_RETRY_BACKOFF", "SIGNA_DELIVERY_CONSUMER_GROUP", "SIGNA_DELIVERY_CONSUMER_NAME", "SIGNA_DELIVERY_POLL_INTERVAL", "SIGNA_DELIVERY_RETRY_MAX_ATTEMPTS", "SIGNA_DELIVERY_RETRY_BACKOFF", "SIGNA_DELIVERY_ATTEMPT_LEASE", "SIGNA_WEB_ALLOWED_ORIGINS"} {
+	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_AI_PROVIDER_TIMEOUT", "SIGNA_AI_RETRY_MAX_ATTEMPTS", "SIGNA_AI_RETRY_BACKOFF", "SIGNA_DELIVERY_CONSUMER_GROUP", "SIGNA_DELIVERY_CONSUMER_NAME", "SIGNA_DELIVERY_POLL_INTERVAL", "SIGNA_DELIVERY_RETRY_MAX_ATTEMPTS", "SIGNA_DELIVERY_RETRY_BACKOFF", "SIGNA_DELIVERY_ATTEMPT_LEASE", "SIGNA_WEB_ALLOWED_ORIGINS", "SIGNA_SESSION_COOKIE_SECURE", "SIGNA_SESSION_COOKIE_SAME_SITE"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("SIGNA_DATABASE_URL", "")
@@ -45,6 +45,9 @@ func TestLoadDefaults(t *testing.T) {
 	if !reflect.DeepEqual(got.WebAllowedOrigins, []string{defaultWebAllowedOrigin}) {
 		t.Fatalf("WebAllowedOrigins = %#v, want %#v", got.WebAllowedOrigins, []string{defaultWebAllowedOrigin})
 	}
+	if got.SessionCookieSecure != defaultSessionCookieSecure || got.SessionCookieSameSite != defaultSessionCookieSameSite {
+		t.Fatalf("session cookie defaults = %#v", got)
+	}
 }
 
 func TestLoadEnvironment(t *testing.T) {
@@ -75,6 +78,8 @@ func TestLoadEnvironment(t *testing.T) {
 	t.Setenv("SIGNA_DELIVERY_RETRY_BACKOFF", "300ms")
 	t.Setenv("SIGNA_DELIVERY_ATTEMPT_LEASE", "7m")
 	t.Setenv("SIGNA_WEB_ALLOWED_ORIGINS", " http://localhost:3000, https://staging.signa.test, http://localhost:3000 ")
+	t.Setenv("SIGNA_SESSION_COOKIE_SECURE", "true")
+	t.Setenv("SIGNA_SESSION_COOKIE_SAME_SITE", "none")
 
 	got, err := Load()
 	if err != nil {
@@ -109,6 +114,8 @@ func TestLoadEnvironment(t *testing.T) {
 		DeliveryRetryBackoff:      300 * time.Millisecond,
 		DeliveryAttemptLease:      7 * time.Minute,
 		WebAllowedOrigins:         []string{"http://localhost:3000", "https://staging.signa.test"},
+		SessionCookieSecure:       true,
+		SessionCookieSameSite:     "none",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Load() = %+v, want %+v", got, want)
@@ -119,6 +126,14 @@ func TestLoadRejectsInvalidDuration(t *testing.T) {
 	t.Setenv("SIGNA_SHUTDOWN_TIMEOUT", "not-a-duration")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() error = nil, want an invalid-duration error")
+	}
+}
+
+func TestLoadRejectsInsecureNoneSessionCookie(t *testing.T) {
+	t.Setenv("SIGNA_SESSION_COOKIE_SECURE", "false")
+	t.Setenv("SIGNA_SESSION_COOKIE_SAME_SITE", "none")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want insecure SameSite=None error")
 	}
 }
 

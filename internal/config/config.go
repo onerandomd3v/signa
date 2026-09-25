@@ -32,6 +32,8 @@ const (
 	defaultDeliveryRetryMaxAttempts     = 3
 	defaultDeliveryRetryBackoff         = 500 * time.Millisecond
 	defaultDeliveryAttemptLease         = 5 * time.Minute
+	defaultSessionCookieSecure          = false
+	defaultSessionCookieSameSite        = "lax"
 	maxAIRetryAttempts                  = 5
 	PublicIncidentGeometryPolicyVersion = "signa.public-incident-geometry.v1"
 )
@@ -65,6 +67,8 @@ type Config struct {
 	DeliveryRetryBackoff      time.Duration
 	DeliveryAttemptLease      time.Duration
 	WebAllowedOrigins         []string
+	SessionCookieSecure       bool
+	SessionCookieSameSite     string
 	ObjectStorageEndpoint     string
 	ObjectStorageRegion       string
 	ObjectStorageBucket       string
@@ -313,6 +317,20 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	sessionCookieSecure, err := boolFromEnv("SIGNA_SESSION_COOKIE_SECURE", defaultSessionCookieSecure)
+	if err != nil {
+		return Config{}, err
+	}
+	sessionCookieSameSite := os.Getenv("SIGNA_SESSION_COOKIE_SAME_SITE")
+	if sessionCookieSameSite == "" {
+		sessionCookieSameSite = defaultSessionCookieSameSite
+	}
+	if sessionCookieSameSite != "lax" && sessionCookieSameSite != "strict" && sessionCookieSameSite != "none" {
+		return Config{}, fmt.Errorf("SIGNA_SESSION_COOKIE_SAME_SITE must be lax, strict, or none")
+	}
+	if sessionCookieSameSite == "none" && !sessionCookieSecure {
+		return Config{}, fmt.Errorf("SIGNA_SESSION_COOKIE_SECURE must be true when SIGNA_SESSION_COOKIE_SAME_SITE is none")
+	}
 
 	apiAddr := os.Getenv("SIGNA_API_ADDR")
 	if apiAddr == "" {
@@ -379,12 +397,26 @@ func Load() (Config, error) {
 		DeliveryRetryBackoff:      deliveryRetryBackoff,
 		DeliveryAttemptLease:      deliveryAttemptLease,
 		WebAllowedOrigins:         webAllowedOrigins,
+		SessionCookieSecure:       sessionCookieSecure,
+		SessionCookieSameSite:     sessionCookieSameSite,
 		ObjectStorageEndpoint:     os.Getenv("SIGNA_OBJECT_STORAGE_ENDPOINT"),
 		ObjectStorageRegion:       os.Getenv("SIGNA_OBJECT_STORAGE_REGION"),
 		ObjectStorageBucket:       os.Getenv("SIGNA_OBJECT_STORAGE_BUCKET"),
 		ObjectStorageAccessKeyID:  os.Getenv("SIGNA_OBJECT_STORAGE_ACCESS_KEY_ID"),
 		ObjectStorageSecret:       os.Getenv("SIGNA_OBJECT_STORAGE_SECRET_ACCESS_KEY"),
 	}, nil
+}
+
+func boolFromEnv(name string, fallback bool) (bool, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false", name)
+	}
+	return parsed, nil
 }
 
 func boundedIntFromEnv(name string, fallback, max int) (int, error) {

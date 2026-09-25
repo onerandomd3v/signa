@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, GetHealthData, GetHealthResponses, GetIncidentData, GetIncidentErrors, GetIncidentResponses, ListIncidentsData, ListIncidentsErrors, ListIncidentsResponses } from './types.gen';
+import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, GetCurrentSessionData, GetCurrentSessionErrors, GetCurrentSessionResponses, GetHealthData, GetHealthResponses, GetIncidentData, GetIncidentErrors, GetIncidentResponses, ListIncidentsData, ListIncidentsErrors, ListIncidentsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -22,6 +22,21 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
  * Check API health
  */
 export const getHealth = <ThrowOnError extends boolean = false>(options?: Options<GetHealthData, ThrowOnError>): RequestResult<GetHealthResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetHealthResponses, unknown, ThrowOnError>({ url: '/healthz', ...options });
+
+/**
+ * Resolve the authenticated browser session
+ *
+ * Returns the canonical principal resolved from the HttpOnly session cookie.
+ */
+export const getCurrentSession = <ThrowOnError extends boolean = false>(options?: Options<GetCurrentSessionData, ThrowOnError>): RequestResult<GetCurrentSessionResponses, GetCurrentSessionErrors, ThrowOnError> => (options?.client ?? client).get<GetCurrentSessionResponses, GetCurrentSessionErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'signa_session',
+            type: 'apiKey'
+        }],
+    url: '/auth/session',
+    ...options
+});
 
 /**
  * Accept a text-first report

@@ -37,13 +37,14 @@ func (c corsMiddleware) Middleware(next http.Handler) http.Handler {
 		}
 
 		writer.Header().Set("Access-Control-Allow-Origin", origin)
+		writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		writer.Header().Set("Access-Control-Expose-Headers", "Retry-After")
 		if request.Method == http.MethodOptions {
 			if !validPreflight(request) {
 				writer.WriteHeader(http.StatusForbidden)
 				return
 			}
-			writer.Header().Set("Access-Control-Allow-Methods", http.MethodPost)
+			writer.Header().Set("Access-Control-Allow-Methods", requestedMethod(request))
 			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key")
 			writer.Header().Set("Access-Control-Max-Age", "600")
 			writer.WriteHeader(http.StatusNoContent)
@@ -55,7 +56,7 @@ func (c corsMiddleware) Middleware(next http.Handler) http.Handler {
 
 func validPreflight(request *http.Request) bool {
 	requestedMethod := strings.TrimSpace(request.Header.Get("Access-Control-Request-Method"))
-	if requestedMethod != http.MethodPost {
+	if requestedMethod != http.MethodGet && requestedMethod != http.MethodPost {
 		return false
 	}
 	for _, requestedHeader := range strings.Split(request.Header.Get("Access-Control-Request-Headers"), ",") {
@@ -68,4 +69,12 @@ func validPreflight(request *http.Request) bool {
 		}
 	}
 	return true
+}
+
+func requestedMethod(request *http.Request) string {
+	method := strings.TrimSpace(request.Header.Get("Access-Control-Request-Method"))
+	if method == "" {
+		return request.Method
+	}
+	return method
 }

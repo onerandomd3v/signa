@@ -1032,6 +1032,8 @@ This removes the need to share implementation-language types directly between Go
 
 # 25. Authentication and Roles
 
+Authentication uses the accepted ADR-0012 opaque PostgreSQL-backed browser session architecture. The API resolves a stable authenticated principal from the `HttpOnly` `signa_session` cookie and injects it into request context. Protected endpoints and SSE consume that server-resolved principal; browsers must not assert identity, roles, or authorization scope through headers or query parameters. Local and production cookie/CORS settings are documented in ADR-0012 and the service environment examples.
+
 Initial roles may include:
 
 ```text
@@ -1297,6 +1299,7 @@ ADR-0007: OpenAPI contract between Go and TypeScript
 ADR-0008: AI interpretation separated from deterministic decisions
 ADR-0009: Location minimization and approximate public geography
 ADR-0011: OSRM-compatible routing adapter for request-scoped route geometry
+ADR-0012: Opaque database-backed browser sessions
 ```
 
 ---
@@ -1336,17 +1339,16 @@ The architecture direction and foundation decisions above are established. Sever
 
 1. PostgreSQL hosting provider.
 2. Redis hosting provider.
-3. Authentication provider vs in-house session implementation.
-4. R2 vs another S3-compatible storage provider.
-5. Exact MVP incident state machine.
-6. Initial confidence transition rules.
-7. Exact P1/P2/P3 thresholds.
-8. Exact location-retention precision and duration.
-9. Media size/type limits.
-10. Initial alert delivery SLO.
-11. Pilot scale assumptions.
-12. Error monitoring provider.
-13. CI/CD provider and environment strategy.
+3. R2 vs another S3-compatible storage provider.
+4. Exact MVP incident state machine.
+5. Initial confidence transition rules.
+6. Exact P1/P2/P3 thresholds.
+7. Exact location-retention precision and duration.
+8. Media size/type limits.
+9. Initial alert delivery SLO.
+10. Pilot scale assumptions.
+11. Error monitoring provider.
+12. CI/CD provider and environment strategy.
 
 These choices must not be silently embedded in implementation code. The initial routing-provider choice is resolved by ADR-0011.
 

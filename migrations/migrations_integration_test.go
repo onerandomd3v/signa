@@ -66,6 +66,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	assertTableExists(t, ctx, connection, testSchema, "report_ai_extractions")
 	assertTableExists(t, ctx, connection, testSchema, "user_locations")
 	assertTableExists(t, ctx, connection, testSchema, "user_location_deletions")
+	assertTableExists(t, ctx, connection, testSchema, "auth_sessions")
 
 	t.Run("report columns", func(t *testing.T) {
 		rows, err := connection.Query(ctx, `
