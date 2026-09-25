@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://signa.local/contracts/ai/alert-summarization/v1/snapshot-schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["snapshot_version", "incident_id", "event_type", "confidence_state", "severity", "lifecycle_status", "public_location", "freshness", "as_of", "policy_versions"],
+  "properties": {
+    "snapshot_version": {"const": "signa.incident-alert-snapshot.v1"},
+    "incident_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "minLength": 1, "maxLength": 120},
+    "confidence_state": {"enum": ["UNVERIFIED", "EMERGING", "CORROBORATED", "HIGH_CONFIDENCE", "DISPUTED"]},
+    "severity": {"type": ["string", "null"], "enum": ["LOW", "MODERATE", "HIGH", "CRITICAL", null]},
+    "lifecycle_status": {"enum": ["OPEN", "RESOLVING", "RESOLVED", "EXPIRED", "UNKNOWN"]},
+    "public_location": {"$ref": "#/$defs/public_location"},
+    "freshness": {"$ref": "#/$defs/freshness"},
+    "as_of": {"type": "string", "format": "date-time"},
+    "policy_versions": {"$ref": "#/$defs/policy_versions"}
+  },
+  "$defs": {
+    "public_location": {"type": "object", "additionalProperties": false, "required": ["status", "label"], "properties": {"status": {"enum": ["KNOWN", "APPROXIMATE", "UNKNOWN"]}, "label": {"type": ["string", "null"], "maxLength": 120}}},
+    "freshness": {"type": "object", "additionalProperties": false, "required": ["state", "last_signal_at", "age_seconds"], "properties": {"state": {"enum": ["CURRENT", "AGING", "STALE", "UNKNOWN"]}, "last_signal_at": {"type": ["string", "null"], "format": "date-time"}, "age_seconds": {"type": ["integer", "null"], "minimum": 0}}},
+    "policy_versions": {"type": "object", "additionalProperties": false, "required": ["confidence", "lifecycle"], "properties": {"confidence": {"type": "string", "minLength": 1}, "lifecycle": {"type": "string", "minLength": 1}}}
+  }
+}
