@@ -44,16 +44,18 @@ func EvaluateRoute(policy Policy, input Input, relevance RouteRelevance) (Decisi
 		return base, nil
 	}
 
+	promotable := input.Incident.Confidence != ConfidenceDisputed && nearbySeverity(input.Incident.Severity) && nearbyConfidence(input.Incident.Confidence)
+	if promotable {
+		base.Level = P2
+		base.Reasons = append(base.Reasons, "route_promoted_to_p2")
+		return base, nil
+	}
 	if base.Level == None {
 		base.Level = P3
 		base.Reasons = append(base.Reasons, "route_relevance_p3")
 		if input.Incident.Confidence == ConfidenceDisputed {
 			base.Reasons = append(base.Reasons, "confidence_disputed")
 		}
-	}
-	if input.Incident.Confidence != ConfidenceDisputed && nearbySeverity(input.Incident.Severity) && nearbyConfidence(input.Incident.Confidence) {
-		base.Level = P2
-		base.Reasons = append(base.Reasons, "route_promoted_to_p2")
 	}
 	return base, nil
 }

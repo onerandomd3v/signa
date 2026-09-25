@@ -92,8 +92,8 @@ func TestOSRMProviderRejectsInvalidGeometryAndMetrics(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = provider.Route(context.Background(), validRequest())
-			if !errors.Is(err, ErrInvalidResponse) {
-				t.Fatalf("error = %v", err)
+			if !errors.Is(err, ErrInvalidResponse) || errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("error = %v, want ErrInvalidResponse only", err)
 			}
 		})
 	}

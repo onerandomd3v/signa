@@ -86,7 +86,7 @@ func finite(value float64) bool {
 
 func validateRoute(route Route) error {
 	if err := route.Geometry.Validate(); err != nil {
-		return errors.Join(ErrInvalidResponse, err)
+		return errors.Join(ErrInvalidResponse, errors.New("route geometry is invalid"))
 	}
 	if !finite(route.DistanceMeters) || route.DistanceMeters < 0 || route.Duration < 0 {
 		return ErrInvalidResponse

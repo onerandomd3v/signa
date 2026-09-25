@@ -36,7 +36,7 @@ func TestEvaluateRoutePromotesFartherActionableIncidentToP2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Level != P2 || !contains(decision.Reasons, "route_relevant") || !contains(decision.Reasons, "route_promoted_to_p2") {
+	if decision.Level != P2 || !contains(decision.Reasons, "route_relevant") || !contains(decision.Reasons, "route_promoted_to_p2") || contains(decision.Reasons, "route_relevance_p3") {
 		t.Fatalf("decision = %+v, want route-promoted P2", decision)
 	}
 }
@@ -65,8 +65,23 @@ func TestEvaluateRouteRelevantDisputedIsAtMostP3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Level != P3 || contains(decision.Reasons, "route_promoted_to_p2") || !contains(decision.Reasons, "confidence_disputed") {
+	if decision.Level != P3 || contains(decision.Reasons, "route_promoted_to_p2") || !contains(decision.Reasons, "route_relevance_p3") || !contains(decision.Reasons, "confidence_disputed") {
 		t.Fatalf("decision = %+v, want route-relevant disputed P3 at most", decision)
+	}
+}
+
+func TestEvaluateRouteRelevantWeakerEvidenceGetsP3Only(t *testing.T) {
+	input := testInput()
+	input.Incident.Severity = SeverityLow
+	input.Proximity.DistanceMeters = 1000
+	input.Proximity.AccuracyMeters = floatPtr(0)
+
+	decision, err := EvaluateRoute(testPolicy(), input, RouteRelevant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Level != P3 || !contains(decision.Reasons, "route_relevance_p3") || contains(decision.Reasons, "route_promoted_to_p2") {
+		t.Fatalf("decision = %+v, want weaker route-relevant P3 only", decision)
 	}
 }
 
