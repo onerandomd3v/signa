@@ -6,6 +6,7 @@ CREATE TABLE web_push_delivery_results (
     provider_response TEXT,
     error_message TEXT,
     claimed_until TIMESTAMPTZ,
+    claim_token UUID,
     completed_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (delivery_id, subscription_id),

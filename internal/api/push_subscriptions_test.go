@@ -93,14 +93,14 @@ func (s *fakePushSubscriptionStore) LoadDeliveryResults(context.Context, uuid.UU
 	return nil, nil
 }
 
-func (s *fakePushSubscriptionStore) ClaimDeliveryResult(context.Context, uuid.UUID, uuid.UUID, time.Duration) (bool, error) {
-	return false, nil
+func (s *fakePushSubscriptionStore) ClaimDeliveryResult(context.Context, uuid.UUID, uuid.UUID, time.Duration) (uuid.UUID, bool, error) {
+	return uuid.Nil, false, nil
 }
 
-func (s *fakePushSubscriptionStore) CompleteDeliveryResult(context.Context, uuid.UUID, uuid.UUID, push.DeliveryResultState, string, string) error {
+func (s *fakePushSubscriptionStore) CompleteDeliveryResult(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, push.DeliveryResultState, string, string) error {
 	return nil
 }
 
-func (s *fakePushSubscriptionStore) CompleteExpiredDeliveryResult(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, string) error {
+func (s *fakePushSubscriptionStore) CompleteExpiredDeliveryResult(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, string, string) error {
 	return nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -200,7 +199,7 @@ func newWebPushDeliveryConsumer(subscriptionStore push.DeliveryStore, deliverySt
 		VAPIDPrivateKey: providerConfig.VAPIDPrivateKey,
 		TTL:             int(providerConfig.TTL / time.Second),
 		Timeout:         providerConfig.Timeout,
-	}, &http.Client{Timeout: providerConfig.Timeout})
+	}, nil)
 	if err != nil {
 		return nil, err
 	}

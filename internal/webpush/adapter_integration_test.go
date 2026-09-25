@@ -4,6 +4,7 @@ package webpush
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -117,19 +118,23 @@ func (s *integrationSender) Send(_ context.Context, subscription push.Subscripti
 
 func runWebPushGoose(t *testing.T, ctx context.Context, databaseURL, command string) {
 	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
 	goBinary := filepath.Join(runtime.GOROOT(), "bin", "go")
 	if runtime.GOOS == "windows" {
 		goBinary += ".exe"
 	}
 	goose := exec.CommandContext(ctx, goBinary, "run", "github.com/pressly/goose/v3/cmd/goose@v3.27.0", "-dir", "migrations", "postgres", databaseURL, command)
-	goose.Dir = filepath.Clean(filepath.Join("internal", "webpush", "..", ".."))
+	goose.Dir = filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	if output, err := goose.CombinedOutput(); err != nil {
 		t.Fatalf("goose %s: %v\n%s", command, err, output)
 	}
 }
 
 func integrationP256DH() string {
-	return "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	return base64.RawURLEncoding.EncodeToString(append([]byte{4}, make([]byte, 64)...))
 }
 
 func integrationAuth() string {

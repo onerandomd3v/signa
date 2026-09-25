@@ -34,6 +34,29 @@ func TestValidateSubscriptionRejectsMalformedProtocolFields(t *testing.T) {
 	}
 }
 
+func TestValidateSubscriptionRejectsProhibitedLiteralIPDestinations(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://127.0.0.1/send",
+		"https://10.0.0.1/send",
+		"https://169.254.1.1/send",
+		"https://[::1]/send",
+		"https://[fc00::1]/send",
+		"https://[fe80::1]/send",
+	} {
+		t.Run(endpoint, func(t *testing.T) {
+			if err := ValidateSubscription(SubscriptionInput{Endpoint: endpoint, P256DH: validP256DH(), Auth: "AAAAAAAAAAAAAAAAAAAAAA"}); err == nil {
+				t.Fatal("ValidateSubscription() error = nil, want prohibited destination rejection")
+			}
+		})
+	}
+}
+
+func TestValidateSubscriptionAcceptsPublicLiteralIPDestination(t *testing.T) {
+	if err := ValidateSubscription(SubscriptionInput{Endpoint: "https://1.1.1.1/send", P256DH: validP256DH(), Auth: "AAAAAAAAAAAAAAAAAAAAAA"}); err != nil {
+		t.Fatalf("ValidateSubscription() error = %v, want public destination accepted", err)
+	}
+}
+
 func validP256DH() string {
 	return base64.RawURLEncoding.EncodeToString(append([]byte{4}, make([]byte, 64)...))
 }

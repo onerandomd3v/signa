@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -67,6 +68,110 @@ func TestNewConfiguredAdapterRejectsMalformedVAPIDConfiguration(t *testing.T) {
 	_, err := NewConfiguredAdapter(nil, Config{Subscriber: "mailto:alerts@example.test", VAPIDPublicKey: "public-key", VAPIDPrivateKey: "private-key", TTL: 60, Timeout: time.Second}, nil)
 	if err == nil || !errors.Is(err, ErrInvalidProviderConfig) {
 		t.Fatalf("NewConfiguredAdapter() error = %v, want invalid provider config", err)
+	}
+}
+
+func TestRecipientClaimLeaseExceedsProviderTimeout(t *testing.T) {
+	if got := recipientClaimLeaseFor(10 * time.Second); got <= 10*time.Second {
+		t.Fatalf("recipient claim lease = %s, want provider timeout plus safety margin", got)
+	}
+	if got := recipientClaimLeaseFor(0); got != defaultRecipientClaimLease {
+		t.Fatalf("default recipient claim lease = %s, want %s", got, defaultRecipientClaimLease)
+	}
+}
+
+func TestSafeDialerRejectsNonPublicResolvedDestinations(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ip   string
+	}{
+		{name: "loopback IPv4", ip: "127.0.0.1"},
+		{name: "private IPv4", ip: "10.0.0.1"},
+		{name: "link local IPv4", ip: "169.254.1.1"},
+		{name: "loopback IPv6", ip: "::1"},
+		{name: "private IPv6", ip: "fc00::1"},
+		{name: "link local IPv6", ip: "fe80::1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := &fakeResolver{addresses: []net.IPAddr{{IP: net.ParseIP(tc.ip)}}}
+			dialer := &recordingDialer{}
+			_, err := (&safeDialer{resolver: resolver, dialer: dialer}).DialContext(context.Background(), "tcp", "push.example.test:443")
+			if err == nil {
+				t.Fatal("DialContext() error = nil, want prohibited destination rejection")
+			}
+			if len(dialer.addresses) != 0 {
+				t.Fatalf("dial attempts = %v, want none", dialer.addresses)
+			}
+		})
+	}
+}
+
+func TestSafeDialerAllowsPublicResolvedDestination(t *testing.T) {
+	resolver := &fakeResolver{addresses: []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}}
+	dialer := &recordingDialer{}
+	conn, err := (&safeDialer{resolver: resolver, dialer: dialer}).DialContext(context.Background(), "tcp", "push.example.test:443")
+	if err != nil {
+		t.Fatalf("DialContext() error = %v, want public destination allowed", err)
+	}
+	_ = conn.Close()
+	if len(dialer.addresses) != 1 || dialer.addresses[0] != "1.1.1.1:443" {
+		t.Fatalf("dial attempts = %v, want public IP", dialer.addresses)
+	}
+}
+
+func TestSafeHTTPClientDoesNotFollowRedirects(t *testing.T) {
+	resolver := &fakeResolver{addresses: []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}}
+	client := newSafeHTTPClient(time.Second, resolver, &recordingDialer{}, staticRedirectRoundTripper{})
+	response, err := client.Get("https://push.example.test/send")
+	if err != nil {
+		t.Fatalf("Get() error = %v, want redirect response", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusFound)
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("resolver calls = %d, want one initial resolution", resolver.calls)
+	}
+}
+
+func TestSafeHTTPClientRejectsHostnameResolvingToProhibitedIPBeforeDial(t *testing.T) {
+	resolver := &fakeResolver{addresses: []net.IPAddr{{IP: net.ParseIP("192.168.1.10")}}}
+	dialer := &recordingDialer{}
+	client := newSafeHTTPClient(time.Second, resolver, dialer, nil)
+	request, err := http.NewRequest(http.MethodGet, "https://push.example.test/send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Do(request)
+	if err == nil {
+		t.Fatal("Do() error = nil, want prohibited destination rejection")
+	}
+	if len(dialer.addresses) != 0 {
+		t.Fatalf("dial attempts = %v, want none", dialer.addresses)
+	}
+}
+
+func TestSafeHTTPClientRejectsDNSRebindingAtDialTime(t *testing.T) {
+	resolver := &sequenceResolver{responses: [][]net.IPAddr{
+		{{IP: net.ParseIP("1.1.1.1")}},
+		{{IP: net.ParseIP("192.168.1.10")}},
+	}}
+	dialer := &recordingDialer{}
+	client := newSafeHTTPClient(time.Second, resolver, dialer, nil)
+	request, err := http.NewRequest(http.MethodGet, "https://push.example.test/send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Do(request)
+	if err == nil {
+		t.Fatal("Do() error = nil, want DNS rebinding rejection")
+	}
+	if resolver.calls != 2 {
+		t.Fatalf("resolver calls = %d, want initial and dial-time resolution", resolver.calls)
+	}
+	if len(dialer.addresses) != 0 {
+		t.Fatalf("dial attempts = %v, want none", dialer.addresses)
 	}
 }
 
@@ -208,7 +313,7 @@ type fakeSubscriptionStore struct {
 	listedUser    uuid.UUID
 	deleted       int
 	results       map[uuid.UUID]push.DeliveryResult
-	claimed       map[uuid.UUID]bool
+	claimed       map[uuid.UUID]uuid.UUID
 }
 
 func (s *fakeSubscriptionStore) ListForDelivery(_ context.Context, userID uuid.UUID) ([]push.Subscription, error) {
@@ -255,22 +360,26 @@ func (s *fakeSubscriptionStore) LoadDeliveryResults(_ context.Context, deliveryI
 	return result, nil
 }
 
-func (s *fakeSubscriptionStore) ClaimDeliveryResult(_ context.Context, deliveryID, subscriptionID uuid.UUID, _ time.Duration) (bool, error) {
+func (s *fakeSubscriptionStore) ClaimDeliveryResult(_ context.Context, deliveryID, subscriptionID uuid.UUID, _ time.Duration) (uuid.UUID, bool, error) {
 	if s.claimed == nil {
-		s.claimed = make(map[uuid.UUID]bool)
+		s.claimed = make(map[uuid.UUID]uuid.UUID)
 	}
-	if s.claimed[subscriptionID] {
-		return false, nil
+	if s.claimed[subscriptionID] != uuid.Nil {
+		return uuid.Nil, false, nil
 	}
 	item := s.results[subscriptionID]
 	if item.DeliveryID != deliveryID || (item.State != push.DeliveryResultPending && item.State != push.DeliveryResultRetryable) {
-		return false, nil
+		return uuid.Nil, false, nil
 	}
-	s.claimed[subscriptionID] = true
-	return true, nil
+	token := uuid.New()
+	s.claimed[subscriptionID] = token
+	return token, true, nil
 }
 
-func (s *fakeSubscriptionStore) CompleteDeliveryResult(_ context.Context, deliveryID, subscriptionID uuid.UUID, state push.DeliveryResultState, response, message string) error {
+func (s *fakeSubscriptionStore) CompleteDeliveryResult(_ context.Context, deliveryID, subscriptionID, claimToken uuid.UUID, state push.DeliveryResultState, response, message string) error {
+	if s.claimed[subscriptionID] != claimToken {
+		return push.ErrDeliveryResultClaimLost
+	}
 	item := s.results[subscriptionID]
 	item.DeliveryID = deliveryID
 	item.SubscriptionID = subscriptionID
@@ -284,8 +393,8 @@ func (s *fakeSubscriptionStore) CompleteDeliveryResult(_ context.Context, delive
 	return nil
 }
 
-func (s *fakeSubscriptionStore) CompleteExpiredDeliveryResult(ctx context.Context, deliveryID, userID, subscriptionID uuid.UUID, response, message string) error {
-	if err := s.CompleteDeliveryResult(ctx, deliveryID, subscriptionID, push.DeliveryResultExpired, response, message); err != nil {
+func (s *fakeSubscriptionStore) CompleteExpiredDeliveryResult(ctx context.Context, deliveryID, userID, subscriptionID, claimToken uuid.UUID, response, message string) error {
+	if err := s.CompleteDeliveryResult(ctx, deliveryID, subscriptionID, claimToken, push.DeliveryResultExpired, response, message); err != nil {
 		return err
 	}
 	return s.RemoveExpired(ctx, userID, subscriptionID)
@@ -299,6 +408,52 @@ type fakeSender struct {
 	operationKey        string
 	results             map[uuid.UUID][]SendResult
 	callsBySubscription map[uuid.UUID]int
+}
+
+type fakeResolver struct {
+	addresses []net.IPAddr
+	calls     int
+}
+
+func (r *fakeResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
+	r.calls++
+	return r.addresses, nil
+}
+
+type sequenceResolver struct {
+	responses [][]net.IPAddr
+	calls     int
+}
+
+func (r *sequenceResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
+	response := r.responses[len(r.responses)-1]
+	if r.calls < len(r.responses) {
+		response = r.responses[r.calls]
+	}
+	r.calls++
+	return response, nil
+}
+
+type recordingDialer struct {
+	addresses []string
+}
+
+func (d *recordingDialer) DialContext(_ context.Context, _ string, address string) (net.Conn, error) {
+	d.addresses = append(d.addresses, address)
+	client, server := net.Pipe()
+	go func() { _ = server.Close() }()
+	return client, nil
+}
+
+type staticRedirectRoundTripper struct{}
+
+func (staticRedirectRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusFound,
+		Header:     http.Header{"Location": []string{"https://127.0.0.1/private"}},
+		Body:       io.NopCloser(strings.NewReader("redirect")),
+		Request:    request,
+	}, nil
 }
 
 func (s *fakeSender) Send(_ context.Context, subscription push.Subscription, _ []byte, operationKey string) (SendResult, error) {

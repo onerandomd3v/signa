@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -15,10 +16,11 @@ import (
 )
 
 var (
-	ErrInvalidSubscription    = errors.New("push subscription is invalid")
-	ErrSubscriptionConflict   = errors.New("push subscription belongs to another user")
-	ErrSubscriptionNotFound   = errors.New("push subscription was not found")
-	ErrDeliveryResultNotFound = errors.New("push delivery result was not found")
+	ErrInvalidSubscription     = errors.New("push subscription is invalid")
+	ErrSubscriptionConflict    = errors.New("push subscription belongs to another user")
+	ErrSubscriptionNotFound    = errors.New("push subscription was not found")
+	ErrDeliveryResultNotFound  = errors.New("push delivery result was not found")
+	ErrDeliveryResultClaimLost = errors.New("push delivery result claim is no longer active")
 )
 
 type SubscriptionInput struct {
@@ -65,9 +67,9 @@ type DeliveryStore interface {
 	RemoveExpired(context.Context, uuid.UUID, uuid.UUID) error
 	EnsureDeliveryResults(context.Context, uuid.UUID, uuid.UUID, []Subscription) error
 	LoadDeliveryResults(context.Context, uuid.UUID) (map[uuid.UUID]DeliveryResult, error)
-	ClaimDeliveryResult(context.Context, uuid.UUID, uuid.UUID, time.Duration) (bool, error)
-	CompleteDeliveryResult(context.Context, uuid.UUID, uuid.UUID, DeliveryResultState, string, string) error
-	CompleteExpiredDeliveryResult(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, string) error
+	ClaimDeliveryResult(context.Context, uuid.UUID, uuid.UUID, time.Duration) (uuid.UUID, bool, error)
+	CompleteDeliveryResult(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, DeliveryResultState, string, string) error
+	CompleteExpiredDeliveryResult(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, string, string) error
 }
 
 type SubscriptionStore interface {
@@ -83,6 +85,9 @@ func ValidateSubscription(input SubscriptionInput) error {
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return fmt.Errorf("%w: endpoint must be an HTTPS URL", ErrInvalidSubscription)
 	}
+	if isProhibitedLiteralIP(parsed.Hostname()) {
+		return fmt.Errorf("%w: endpoint must target a public HTTPS destination", ErrInvalidSubscription)
+	}
 	publicKey, err := decodeKey(input.P256DH)
 	if err != nil || len(publicKey) != 65 || publicKey[0] != 4 {
 		return fmt.Errorf("%w: p256dh must be an uncompressed P-256 public key", ErrInvalidSubscription)
@@ -96,6 +101,43 @@ func ValidateSubscription(input SubscriptionInput) error {
 
 func decodeKey(value string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(value)
+}
+
+func isProhibitedLiteralIP(host string) bool {
+	if strings.Contains(host, "%") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && !isPublicIP(ip)
+}
+
+func isPublicIP(ip net.IP) bool {
+	if ip == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return false
+	}
+	for _, network := range nonPublicEndpointCIDRs {
+		if network.Contains(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+var nonPublicEndpointCIDRs = mustParseEndpointCIDRs([]string{
+	"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4",
+	"2001:2::/48", "2001:10::/28", "2001:db8::/32",
+})
+
+func mustParseEndpointCIDRs(values []string) []*net.IPNet {
+	result := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		_, network, err := net.ParseCIDR(value)
+		if err != nil {
+			panic(err)
+		}
+		result = append(result, network)
+	}
+	return result
 }
 
 type Store struct{ pool *pgxpool.Pool }
@@ -279,59 +321,70 @@ func (s *Store) LoadDeliveryResults(ctx context.Context, deliveryID uuid.UUID) (
 	return results, nil
 }
 
-func (s *Store) ClaimDeliveryResult(ctx context.Context, deliveryID, subscriptionID uuid.UUID, lease time.Duration) (bool, error) {
+func (s *Store) ClaimDeliveryResult(ctx context.Context, deliveryID, subscriptionID uuid.UUID, lease time.Duration) (uuid.UUID, bool, error) {
 	if s == nil || s.pool == nil {
-		return false, errors.New("push subscription database is required")
+		return uuid.Nil, false, errors.New("push subscription database is required")
 	}
 	if deliveryID == uuid.Nil || subscriptionID == uuid.Nil {
-		return false, errors.New("push delivery result identity is required")
+		return uuid.Nil, false, errors.New("push delivery result identity is required")
 	}
 	if lease <= 0 {
 		lease = 5 * time.Minute
 	}
+	claimToken := uuid.New()
 	result, err := s.pool.Exec(ctx, `
 		UPDATE web_push_delivery_results
-		SET claimed_until = $3
+		SET claimed_until = now() + ($3::bigint * interval '1 microsecond'), claim_token = $4
 		WHERE delivery_id = $1
 		  AND subscription_id = $2
 		  AND state IN ('PENDING', 'RETRYABLE')
 		  AND (claimed_until IS NULL OR claimed_until < now())
-	`, deliveryID, subscriptionID, time.Now().UTC().Add(lease))
+	`, deliveryID, subscriptionID, lease.Microseconds(), claimToken)
 	if err != nil {
-		return false, fmt.Errorf("claim push delivery result: %w", err)
+		return uuid.Nil, false, fmt.Errorf("claim push delivery result: %w", err)
 	}
-	return result.RowsAffected() == 1, nil
+	if result.RowsAffected() != 1 {
+		return uuid.Nil, false, nil
+	}
+	return claimToken, true, nil
 }
 
-func (s *Store) CompleteDeliveryResult(ctx context.Context, deliveryID, subscriptionID uuid.UUID, state DeliveryResultState, providerResponse, errorMessage string) error {
+func (s *Store) CompleteDeliveryResult(ctx context.Context, deliveryID, subscriptionID, claimToken uuid.UUID, state DeliveryResultState, providerResponse, errorMessage string) error {
 	if s == nil || s.pool == nil {
 		return errors.New("push subscription database is required")
+	}
+	if claimToken == uuid.Nil {
+		return ErrDeliveryResultClaimLost
 	}
 	if !validDeliveryResultState(state) || state == DeliveryResultPending {
 		return fmt.Errorf("invalid push delivery result state %q", state)
 	}
 	result, err := s.pool.Exec(ctx, `
 		UPDATE web_push_delivery_results
-		SET state = $3,
-		    provider_response = NULLIF($4, ''),
-		    error_message = NULLIF($5, ''),
+		SET state = $4,
+		    provider_response = NULLIF($5, ''),
+		    error_message = NULLIF($6, ''),
 		    claimed_until = NULL,
-		    completed_at = CASE WHEN $3 IN ('SUCCEEDED', 'EXPIRED', 'PERMANENT') THEN now() ELSE NULL END,
+		    claim_token = NULL,
+		    completed_at = CASE WHEN $4 IN ('SUCCEEDED', 'EXPIRED', 'PERMANENT') THEN now() ELSE NULL END,
 		    updated_at = now()
-		WHERE delivery_id = $1 AND subscription_id = $2
-	`, deliveryID, subscriptionID, state, providerResponse, errorMessage)
+		WHERE delivery_id = $1 AND subscription_id = $2 AND claim_token = $3 AND claimed_until > now()
+	`, deliveryID, subscriptionID, claimToken, state, providerResponse, errorMessage)
 	if err != nil {
 		return fmt.Errorf("complete push delivery result: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return ErrDeliveryResultNotFound
+		return ErrDeliveryResultClaimLost
 	}
 	return nil
 }
 
-func (s *Store) CompleteExpiredDeliveryResult(ctx context.Context, deliveryID, userID, subscriptionID uuid.UUID, providerResponse, errorMessage string) error {
+func (s *Store) CompleteExpiredDeliveryResult(ctx context.Context, deliveryID, userID, subscriptionID, claimToken uuid.UUID, providerResponse, errorMessage string) error {
 	if s == nil || s.pool == nil {
 		return errors.New("push subscription database is required")
+	}
+	if claimToken == uuid.Nil {
+		return ErrDeliveryResultClaimLost
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -340,14 +393,14 @@ func (s *Store) CompleteExpiredDeliveryResult(ctx context.Context, deliveryID, u
 	defer func() { _ = tx.Rollback(ctx) }()
 	result, err := tx.Exec(ctx, `
 		UPDATE web_push_delivery_results
-		SET state = 'EXPIRED', provider_response = NULLIF($3, ''), error_message = NULLIF($4, ''), claimed_until = NULL, completed_at = now(), updated_at = now()
-		WHERE delivery_id = $1 AND subscription_id = $2
-	`, deliveryID, subscriptionID, providerResponse, errorMessage)
+		SET state = 'EXPIRED', provider_response = NULLIF($4, ''), error_message = NULLIF($5, ''), claimed_until = NULL, claim_token = NULL, completed_at = now(), updated_at = now()
+		WHERE delivery_id = $1 AND subscription_id = $2 AND claim_token = $3 AND claimed_until > now()
+	`, deliveryID, subscriptionID, claimToken, providerResponse, errorMessage)
 	if err != nil {
 		return fmt.Errorf("complete expired push delivery result: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return ErrDeliveryResultNotFound
+		return ErrDeliveryResultClaimLost
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM push_subscriptions WHERE id = $1 AND user_id = $2`, subscriptionID, userID); err != nil {
 		return fmt.Errorf("remove expired push subscription: %w", err)
