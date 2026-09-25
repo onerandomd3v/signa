@@ -95,6 +95,10 @@ describe("IncidentMapExperience", () => {
     await waitFor(() =>
       expect(screen.getByText(/map unavailable right now/i)).toBeTruthy(),
     );
+    expect(screen.getByRole("link", { name: /view details/i })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: /route checks aren’t available/i }),
+    ).toBeTruthy();
   });
 
   it("offers retry after an API error", async () => {

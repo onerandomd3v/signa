@@ -1,4 +1,4 @@
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PublicIncident } from "@/lib/api/generated";
 import { IncidentMap } from "./incident-map";
@@ -6,6 +6,7 @@ import {
   toIncidentFeatureCollection,
   type IncidentFeatureCollection,
 } from "./incident-geojson";
+import type { RouteLineGeometry } from "./route-geometry";
 
 const mockMap = vi.hoisted(() => {
   const source = { setData: vi.fn() };
@@ -82,6 +83,14 @@ const publicFeatureCollection: IncidentFeatureCollection = {
   ],
 };
 
+const approvedRouteGeometry: RouteLineGeometry = {
+  type: "LineString",
+  coordinates: [
+    [2, 5],
+    [5, 8],
+  ],
+};
+
 function fire(event: string, ...args: unknown[]) {
   const handler = mockMap.handlers[event];
   if (handler) handler(...(args as never[]));
@@ -90,6 +99,7 @@ function fire(event: string, ...args: unknown[]) {
 function makeProps(
   overrides: Partial<{
     featureCollection: IncidentFeatureCollection;
+    routeGeometry: RouteLineGeometry | null;
     selectedId: string | null;
     onSelect: (id: string) => void;
     onUnavailable: () => void;
@@ -97,6 +107,7 @@ function makeProps(
 ) {
   return {
     featureCollection: publicFeatureCollection,
+    routeGeometry: null,
     onSelect: vi.fn(),
     onUnavailable: vi.fn(),
     selectedId: null,
@@ -119,7 +130,7 @@ afterEach(() => {
 describe("IncidentMap", () => {
   it("loads the style, adds public GeoJSON layers, fits bounds, selects features, highlights selection, and cleans up", async () => {
     const onSelect = vi.fn();
-    const props = makeProps({ onSelect });
+    const props = makeProps({ onSelect, routeGeometry: approvedRouteGeometry });
     const { rerender, unmount } = render(<IncidentMap {...props} />);
     await waitFor(() => expect(mockMap.handlers["style.load"]).toBeTruthy());
 
@@ -138,13 +149,42 @@ describe("IncidentMap", () => {
     expect(mockMap.instance.addLayer).toHaveBeenCalledWith(
       expect.objectContaining({ id: "public-incident-outlines", type: "line" }),
     );
+    expect(mockMap.instance.addSource).toHaveBeenCalledWith(
+      "selected-route",
+      expect.objectContaining({
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              id: "selected-route",
+              geometry: approvedRouteGeometry,
+              properties: {},
+            },
+          ],
+        },
+      }),
+    );
+    expect(mockMap.instance.addLayer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "selected-route-line",
+        type: "line",
+        source: "selected-route",
+      }),
+    );
     expect(mockMap.instance.fitBounds).toHaveBeenCalledWith(
       [
-        [3, 6],
-        [4, 7],
+        [2, 5],
+        [5, 8],
       ],
       expect.objectContaining({ padding: 48, maxZoom: 11 }),
     );
+    expect(
+      screen.getByRole("region", {
+        name: "Map of public generalized incident areas and selected route",
+      }),
+    ).toBeTruthy();
 
     act(() =>
       fire("click:public-incident-areas", {
@@ -198,10 +238,21 @@ describe("IncidentMap", () => {
       invalidIncident,
       missingIncident,
     ]);
+    const malformedRoute = {
+      type: "LineString",
+      coordinates: [
+        [181, 6],
+        [4, 7],
+      ],
+    } as unknown as RouteLineGeometry;
     expect(collection.features).toEqual([]);
     render(
       <IncidentMap
-        {...makeProps({ featureCollection: collection, onUnavailable })}
+        {...makeProps({
+          featureCollection: collection,
+          onUnavailable,
+          routeGeometry: malformedRoute,
+        })}
       />,
     );
     await waitFor(() => expect(mockMap.handlers["style.load"]).toBeTruthy());
@@ -210,6 +261,12 @@ describe("IncidentMap", () => {
     expect(mockMap.instance.addSource).toHaveBeenCalledWith(
       "public-incidents",
       expect.objectContaining({ data: collection }),
+    );
+    expect(mockMap.instance.addSource).toHaveBeenCalledWith(
+      "selected-route",
+      expect.objectContaining({
+        data: { type: "FeatureCollection", features: [] },
+      }),
     );
     expect(mockMap.instance.fitBounds).not.toHaveBeenCalled();
     expect(onUnavailable).not.toHaveBeenCalled();
@@ -231,7 +288,7 @@ describe("IncidentMap", () => {
     expect(onUnavailable).not.toHaveBeenCalled();
 
     act(() => fire("style.load"));
-    expect(mockMap.instance.addLayer).toHaveBeenCalledTimes(2);
+    expect(mockMap.instance.addLayer).toHaveBeenCalledTimes(3);
     expect(onUnavailable).not.toHaveBeenCalled();
     unmount();
   });
@@ -252,7 +309,7 @@ describe("IncidentMap", () => {
       }),
     );
 
-    expect(mockMap.instance.addLayer).toHaveBeenCalledTimes(2);
+    expect(mockMap.instance.addLayer).toHaveBeenCalledTimes(3);
     expect(onUnavailable).not.toHaveBeenCalled();
     unmount();
   });

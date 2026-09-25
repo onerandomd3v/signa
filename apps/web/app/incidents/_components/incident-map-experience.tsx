@@ -12,6 +12,11 @@ import {
   type IncidentFeatureCollection,
 } from "./incident-geojson";
 import { IncidentMapStage } from "./incident-map-stage";
+import type { RouteLineGeometry } from "./route-geometry";
+import {
+  RouteRelevancePanel,
+  type RouteRelevanceState,
+} from "./route-relevance";
 
 type LoadState = "loading" | "error" | "ready";
 
@@ -44,12 +49,21 @@ function freshness(value: string | null): string {
   );
 }
 
-export function IncidentMapExperience({
+export type IncidentMapExperienceProps = {
+  mapStyleUrl: string | null;
+  loadIncidents?: () => Promise<PublicIncident[]>;
+  routeGeometry?: RouteLineGeometry | null;
+  routeRelevanceState?: RouteRelevanceState;
+};
+
+function IncidentMapContent({
   mapStyleUrl,
   loadIncidents = fetchPublicIncidents,
+  routeGeometry = null,
 }: {
   mapStyleUrl: string | null;
   loadIncidents?: () => Promise<PublicIncident[]>;
+  routeGeometry?: RouteLineGeometry | null;
 }) {
   const [state, setState] = useState<LoadState>("loading");
   const [incidents, setIncidents] = useState<PublicIncident[]>([]);
@@ -146,6 +160,7 @@ export function IncidentMapExperience({
             featureCollection={featureCollection}
             onSelect={setSelectedId}
             onUnavailable={() => setMapUnavailable(true)}
+            routeGeometry={routeGeometry}
             selectedId={selectedId}
             styleUrl={mapStyleUrl}
           />
@@ -254,6 +269,24 @@ export function IncidentMapExperience({
   );
 }
 
-export function IncidentMapRoute() {
-  return <IncidentMapExperience mapStyleUrl={getPublicMapStyleUrl()} />;
+const routeRelevanceUnavailable = { status: "unavailable" } as const;
+
+export function IncidentMapExperience({
+  routeRelevanceState = routeRelevanceUnavailable,
+  ...props
+}: IncidentMapExperienceProps) {
+  return (
+    <>
+      <RouteRelevancePanel state={routeRelevanceState} />
+      <IncidentMapContent {...props} />
+    </>
+  );
+}
+
+export function IncidentMapRoute(
+  props: Omit<IncidentMapExperienceProps, "mapStyleUrl"> = {},
+) {
+  return (
+    <IncidentMapExperience mapStyleUrl={getPublicMapStyleUrl()} {...props} />
+  );
 }
