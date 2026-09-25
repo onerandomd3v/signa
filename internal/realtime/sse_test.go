@@ -59,6 +59,16 @@ func TestHandlerStreamsAuthorizedEventsAndFiltersUnauthorizedEvents(t *testing.T
 	}
 }
 
+func TestScopeAuthorizerAllowsNewAlertForAuthorizedIncident(t *testing.T) {
+	source := &scriptedSource{results: []readResult{{events: []Event{{Stream: StreamAlert, RedisID: "1-0", Name: "alert.created.v1", AggregateID: "future-alert", IncidentID: "incident-allowed", Payload: `{}`}}}, {}}}
+	recorder := httptest.NewRecorder()
+	request := WithPrincipal(httptest.NewRequest(http.MethodGet, "/events", nil), Principal{UserID: "user-1", IncidentIDs: map[string]struct{}{"incident-allowed": {}}})
+	NewHandler(source, ScopeAuthorizer{}, time.Second).ServeHTTP(recorder, request)
+	if !strings.Contains(recorder.Body.String(), "event: alert.created.v1\n") {
+		t.Fatalf("authorized alert missing: %q", recorder.Body.String())
+	}
+}
+
 func TestHandlerSendsHeartbeatAndCancelsSourceRead(t *testing.T) {
 	source := &blockingSource{}
 	base := httptest.NewRequest(http.MethodGet, "/events", nil)
@@ -113,6 +123,44 @@ func TestHandlerRejectsMalformedReconnectCursor(t *testing.T) {
 	NewHandler(&scriptedSource{}, AllowAllAuthorizer{}, time.Second).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", recorder.Code)
+	}
+}
+
+func TestHandlerRejectsInvalidReconnectStreamID(t *testing.T) {
+	cursor, err := EncodeCursor(Cursor{Incident: "invalid", Alert: "$"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/events", nil)
+	request.Header.Set("Last-Event-ID", cursor)
+	request = WithPrincipal(request, Principal{UserID: "user-1"})
+	recorder := httptest.NewRecorder()
+	NewHandler(&scriptedSource{}, AllowAllAuthorizer{}, time.Second).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", recorder.Code)
+	}
+}
+
+func TestHandlerStopsWhenApplicationShutsDown(t *testing.T) {
+	shutdown, cancel := context.WithCancel(context.Background())
+	source := &blockingSource{}
+	handler := NewHandlerWithContext(shutdown, source, AllowAllAuthorizer{}, time.Second)
+	request := WithPrincipal(httptest.NewRequest(http.MethodGet, "/events", nil), Principal{UserID: "user-1"})
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(recorder, request)
+		close(done)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for source.active.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not stop during shutdown")
 	}
 }
 

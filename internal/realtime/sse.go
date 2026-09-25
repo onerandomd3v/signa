@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ type Event struct {
 	EventID     string
 	Name        string
 	AggregateID string
+	IncidentID  string
 	OccurredAt  string
 	Payload     string
 }
@@ -71,8 +73,11 @@ func (ScopeAuthorizer) Authorize(_ context.Context, principal Principal, event E
 		return ok
 	}
 	if event.Stream == StreamAlert {
-		_, ok := principal.AlertIDs[event.AggregateID]
-		return ok
+		if _, ok := principal.AlertIDs[event.AggregateID]; ok {
+			return true
+		}
+		_, ok := principal.IncidentIDs[event.IncidentID]
+		return event.IncidentID != "" && ok
 	}
 	return false
 }
@@ -81,16 +86,30 @@ type Handler struct {
 	source     Source
 	authorizer Authorizer
 	heartbeat  time.Duration
+	shutdown   context.Context
 }
 
 func NewHandler(source Source, authorizer Authorizer, heartbeat time.Duration) *Handler {
+	return NewHandlerWithContext(context.Background(), source, authorizer, heartbeat)
+}
+
+// NewHandlerWithContext cancels active streams when shutdown is requested.
+func NewHandlerWithContext(shutdown context.Context, source Source, authorizer Authorizer, heartbeat time.Duration) *Handler {
 	if authorizer == nil {
 		authorizer = ScopeAuthorizer{}
 	}
-	return &Handler{source: source, authorizer: authorizer, heartbeat: heartbeat}
+	if shutdown == nil {
+		shutdown = context.Background()
+	}
+	return &Handler{source: source, authorizer: authorizer, heartbeat: heartbeat, shutdown: shutdown}
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	requestContext, cancel := context.WithCancel(request.Context())
+	stopShutdown := context.AfterFunc(h.shutdown, cancel)
+	defer stopShutdown()
+	request = request.WithContext(requestContext)
+
 	principal, ok := PrincipalFromContext(request.Context())
 	if !ok {
 		writeJSONError(writer, http.StatusUnauthorized, "authentication_required")
@@ -182,10 +201,26 @@ func DecodeCursor(value string) (Cursor, error) {
 		return Cursor{}, fmt.Errorf("decode cursor: %w", err)
 	}
 	var cursor Cursor
-	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.Incident == "" || cursor.Alert == "" {
+	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.Incident == "" || cursor.Alert == "" || !validStreamID(cursor.Incident) || !validStreamID(cursor.Alert) {
 		return Cursor{}, errors.New("cursor must contain incident and alert IDs")
 	}
 	return cursor, nil
+}
+
+func validStreamID(value string) bool {
+	if value == "$" {
+		return true
+	}
+	parts := strings.Split(value, "-")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	for _, part := range parts {
+		if _, err := strconv.ParseUint(part, 10, 64); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func advanceCursor(cursor *Cursor, event Event) error {
@@ -258,15 +293,31 @@ func (s *RedisSource) Read(ctx context.Context, cursor Cursor) ([]Event, error) 
 			streamName = StreamAlert
 		}
 		for _, message := range stream.Messages {
-			result = append(result, Event{Stream: streamName, RedisID: message.ID, EventID: stringField(message.Values, "event_id"), Name: stringField(message.Values, "event_name"), AggregateID: stringField(message.Values, "aggregate_id"), OccurredAt: stringField(message.Values, "occurred_at"), Payload: stringField(message.Values, "payload")})
+			event := Event{Stream: streamName, RedisID: message.ID, EventID: stringField(message.Values, "event_id"), Name: stringField(message.Values, "event_name"), AggregateID: stringField(message.Values, "aggregate_id"), OccurredAt: stringField(message.Values, "occurred_at"), Payload: stringField(message.Values, "payload")}
+			if streamName == StreamAlert {
+				var payload struct {
+					IncidentID string `json:"incident_id"`
+				}
+				if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+					return nil, fmt.Errorf("decode alert event payload: %w", err)
+				}
+				event.IncidentID = payload.IncidentID
+			}
+			result = append(result, event)
 		}
 	}
 	return result, nil
 }
 
 func stringField(values map[string]any, key string) string {
-	value, _ := values[key].(string)
-	return value
+	switch value := values[key].(type) {
+	case string:
+		return value
+	case []byte:
+		return string(value)
+	default:
+		return ""
+	}
 }
 
 func writeJSONError(writer http.ResponseWriter, status int, code string) {
