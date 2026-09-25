@@ -5,6 +5,10 @@
 # internally with persistent volumes. This is deployment glue for the SAME
 # architecture the target already defines — it does not introduce a new one.
 #
+# build.context is `..` because this compose file lives in deploy/, and the
+# Dockerfiles COPY from the repository root (cmd/, internal/, contracts/,
+# go.mod). The dockerfile paths stay relative to that root context.
+#
 # Secrets are NEVER committed. OpenShip injects:
 #   - SIGNA_DB_PASSWORD        (strong Postgres password; also used in the URLs)
 #   - SIGNA_OPENAI_API_KEY     (worker only)
@@ -47,7 +51,7 @@ services:
   # One-shot Goose migration job. Runs to completion before api/worker start.
   migrate:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/migrate/Dockerfile
     environment:
       SIGNA_DATABASE_URL: postgres://signa:${SIGNA_DB_PASSWORD}@postgres:5432/signa?sslmode=disable
@@ -58,7 +62,7 @@ services:
 
   api:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/api/Dockerfile
     environment:
       SIGNA_API_ADDR: ":8080"
@@ -94,7 +98,7 @@ services:
 
   worker:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/worker/Dockerfile
     environment:
       SIGNA_DATABASE_URL: postgres://signa:${SIGNA_DB_PASSWORD}@postgres:5432/signa?sslmode=disable
