@@ -47,6 +47,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /alerts/{alert_id}:
+    get:
+      operationId: getAlert
+      summary: Read an authorized alert snapshot
+      description: Returns the immutable, privacy-safe alert snapshot for the authenticated user's non-terminal delivery relationship. A stale, superseded, resolving, resolved, or expired snapshot is returned as stored; SSE remains a change notification and this response is authoritative.
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AlertID'
+      responses:
+        '200':
+          description: Authorized alert snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertRead'
+        '400':
+          description: Invalid alert identifier
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing, malformed, expired, or revoked session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Alert is not visible to the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Alert or authentication store unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports:
     post:
       operationId: createReport
@@ -300,6 +340,13 @@ components:
       schema:
         type: string
         format: uuid
+    AlertID:
+      name: alert_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   schemas:
     CurrentSession:
       type: object
@@ -310,6 +357,34 @@ components:
           type: string
           format: uuid
           description: Canonical user identity resolved by the API session store.
+    AlertRead:
+      type: object
+      description: Immutable, privacy-safe alert snapshot authorized by the authenticated user's durable delivery relationship. Delivery/provider internals, reporter identity, raw evidence, and exact private coordinates are omitted.
+      additionalProperties: false
+      required: [alert_id, incident_id, alert_type, confidence_snapshot, severity_snapshot, status_snapshot, priority_snapshot, freshness_snapshot, message, as_of, created_at, supersedes_alert_id]
+      properties:
+        alert_id: { type: string, format: uuid }
+        incident_id: { type: string, format: uuid }
+        alert_type: { type: string, enum: [IMMEDIATE, NEARBY] }
+        confidence_snapshot:
+          type: string
+          enum: [UNVERIFIED, EMERGING, CORROBORATED, HIGH_CONFIDENCE, DISPUTED]
+        severity_snapshot:
+          type: string
+          enum: [LOW, MODERATE, HIGH, CRITICAL]
+        status_snapshot:
+          type: string
+          enum: [OPEN, RESOLVING, RESOLVED, EXPIRED]
+        priority_snapshot:
+          type: string
+          enum: [P1, P2, P3, NONE]
+        freshness_snapshot:
+          type: string
+          enum: [FRESH, STALE, UNKNOWN]
+        message: { type: string }
+        as_of: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        supersedes_alert_id: { type: [string, 'null'], format: uuid }
     HealthResponse:
       type: object
       required:

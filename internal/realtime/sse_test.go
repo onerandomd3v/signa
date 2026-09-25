@@ -64,12 +64,16 @@ func TestHandlerStreamsAuthorizedEventsAndFiltersUnauthorizedEvents(t *testing.T
 }
 
 func TestScopeAuthorizerAllowsNewAlertForAuthorizedIncident(t *testing.T) {
-	source := &scriptedSource{results: []readResult{{events: []Event{{Stream: StreamAlert, RedisID: "1-0", Name: "alert.created.v1", AggregateID: "future-alert", IncidentID: "incident-allowed", Payload: `{}`}}}, {}}}
+	source := &scriptedSource{results: []readResult{{events: []Event{{Stream: StreamAlert, RedisID: "1-0", Name: "alert.created.v1", AggregateID: "future-alert", IncidentID: "incident-allowed", Payload: `{"alert_id":"future-alert","incident_id":"incident-allowed"}`}}}, {}}}
 	recorder := httptest.NewRecorder()
 	request := withPrincipal(httptest.NewRequest(http.MethodGet, "/events", nil), auth.Principal{UserID: uuid.New()})
 	NewHandler(source, ScopeAuthorizer{Resolver: testScopeResolver{incidents: map[string]bool{"incident-allowed": true}}}, time.Second).ServeHTTP(recorder, request)
-	if !strings.Contains(recorder.Body.String(), "event: alert.created.v1\n") {
+	body := recorder.Body.String()
+	if !strings.Contains(body, "event: alert.created.v1\n") || !strings.Contains(body, `data: {"alert_id":"future-alert","incident_id":"incident-allowed"}`) {
 		t.Fatalf("authorized alert missing: %q", recorder.Body.String())
+	}
+	if strings.Contains(body, "status_snapshot") || strings.Contains(body, "provider_response") {
+		t.Fatalf("alert event expanded into authoritative/private fields: %q", body)
 	}
 }
 
