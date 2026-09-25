@@ -214,3 +214,46 @@ func TestLoadRejectsOutOfRangeWebOriginPort(t *testing.T) {
 		t.Fatal("webAllowedOriginsFromEnv() error = nil, want invalid port error")
 	}
 }
+func TestLoadPriorityPolicyRequiresExplicitValidConfiguration(t *testing.T) {
+	setPriorityEnv(t, "100", "500", "10m", "30m")
+
+	got, err := LoadPriorityPolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.P1RadiusMeters != 100 || got.P2RadiusMeters != 500 || got.LocationMaxAge != 10*time.Minute || got.IncidentMaxAge != 30*time.Minute {
+		t.Fatalf("priority policy = %+v", got)
+	}
+
+	for _, tc := range []struct {
+		name string
+		p1   string
+		p2   string
+		loc  string
+		inc  string
+	}{
+		{"missing p1", "", "500", "10m", "30m"},
+		{"missing p2", "100", "", "10m", "30m"},
+		{"missing location age", "100", "500", "", "30m"},
+		{"missing incident age", "100", "500", "10m", ""},
+		{"non increasing radii", "500", "100", "10m", "30m"},
+		{"equal radii", "100", "100", "10m", "30m"},
+		{"non positive location age", "100", "500", "0s", "30m"},
+		{"non positive incident age", "100", "500", "10m", "0s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setPriorityEnv(t, tc.p1, tc.p2, tc.loc, tc.inc)
+			if _, err := LoadPriorityPolicy(); err == nil {
+				t.Fatal("LoadPriorityPolicy() error = nil")
+			}
+		})
+	}
+}
+
+func setPriorityEnv(t *testing.T, p1, p2, locationAge, incidentAge string) {
+	t.Helper()
+	t.Setenv("SIGNA_PRIORITY_P1_RADIUS_METERS", p1)
+	t.Setenv("SIGNA_PRIORITY_P2_RADIUS_METERS", p2)
+	t.Setenv("SIGNA_PRIORITY_LOCATION_MAX_AGE", locationAge)
+	t.Setenv("SIGNA_PRIORITY_INCIDENT_MAX_AGE", incidentAge)
+}
