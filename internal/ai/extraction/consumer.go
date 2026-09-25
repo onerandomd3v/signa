@@ -72,6 +72,10 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return fmt.Errorf("ensure extraction consumer group: %w", err)
 	}
 
+	// Deferred messages remain pending in Redis and are intentionally not ACKed.
+	// This process-local degraded state prevents terminal provider/schema errors
+	// from causing an endless provider loop without inventing an unapproved
+	// durable quarantine or dead-letter policy.
 	blockedMessageIDs := make(map[string]struct{})
 	for {
 		if ctx.Err() != nil {
@@ -92,8 +96,11 @@ func (c *Consumer) Run(ctx context.Context) error {
 					continue
 				}
 				if err := c.processor.Process(ctx, message); err != nil {
-					if errors.Is(err, ErrDurableExtractionDestinationUnresolved) {
+					if shouldDeferExtractionFailure(ctx, err) {
 						blockedMessageIDs[message.ID] = struct{}{}
+						if c.logger != nil {
+							c.logger.Error("terminal report extraction failure; message remains pending and is deferred", "stream_message_id", message.ID, "failure_kind", failureKind(err), "error", err)
+						}
 						continue
 					}
 					if c.logger != nil {
@@ -121,6 +128,17 @@ func (c *Consumer) Run(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+func shouldDeferExtractionFailure(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	if errors.Is(err, ErrDurableExtractionDestinationUnresolved) || errors.Is(err, ErrInvalidStructuredOutput) {
+		return true
+	}
+	var providerErr *ProviderError
+	return errors.As(err, &providerErr) && providerErr.Kind == FailurePermanent
 }
 
 func readPending(ctx context.Context, client StreamClient, stream, group, consumer string) ([]StreamMessage, error) {

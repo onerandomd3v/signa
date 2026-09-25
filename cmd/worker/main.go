@@ -94,18 +94,26 @@ func run(parent context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	retryingProvider, err := extraction.NewRetryingProvider(provider, extraction.RetryConfig{
+		Timeout:     cfg.AIProviderTimeout,
+		MaxAttempts: cfg.AIRetryMaxAttempts,
+		Backoff:     cfg.AIRetryBackoff,
+	})
+	if err != nil {
+		return err
+	}
 
 	streamClient := extraction.NewRedisStreamClient(redisClient)
-	observer := extraction.NewDurableStore(database)
+	observer := extraction.NewDurableStore(database, validator)
 	processor := extraction.NewProcessor(
 		extraction.NewPostgresReportReader(database),
-		provider,
+		retryingProvider,
 		validator,
 		observer,
 		streamClient,
 		outbox.ReportEventsStream,
 		cfg.AIConsumerGroup,
-	)
+	).WithMetrics(extraction.NewSlogMetrics(logger))
 	consumerName := cfg.AIConsumerName
 	if consumerName == "" {
 		hostname, hostnameErr := os.Hostname()

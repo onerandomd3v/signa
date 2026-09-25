@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_WEB_ALLOWED_ORIGINS"} {
+	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_AI_PROVIDER_TIMEOUT", "SIGNA_AI_RETRY_MAX_ATTEMPTS", "SIGNA_AI_RETRY_BACKOFF", "SIGNA_WEB_ALLOWED_ORIGINS"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("SIGNA_DATABASE_URL", "")
@@ -36,6 +36,9 @@ func TestLoadDefaults(t *testing.T) {
 	if got.OpenAIModel != defaultOpenAIModel || got.OpenAIBaseURL != defaultOpenAIBaseURL || got.AISchemaPath != defaultAISchemaPath || got.AIGenerationSchemaPath != defaultAIGenerationSchemaPath || got.AIConsumerGroup != defaultAIConsumerGroup || got.AIPollInterval != defaultAIPollInterval {
 		t.Errorf("AI defaults = %+v", got)
 	}
+	if got.AIProviderTimeout != defaultAIProviderTimeout || got.AIRetryMaxAttempts != defaultAIRetryMaxAttempts || got.AIRetryBackoff != defaultAIRetryBackoff {
+		t.Errorf("AI retry defaults = timeout %s, attempts %d, backoff %s", got.AIProviderTimeout, got.AIRetryMaxAttempts, got.AIRetryBackoff)
+	}
 	if !reflect.DeepEqual(got.WebAllowedOrigins, []string{defaultWebAllowedOrigin}) {
 		t.Fatalf("WebAllowedOrigins = %#v, want %#v", got.WebAllowedOrigins, []string{defaultWebAllowedOrigin})
 	}
@@ -59,6 +62,9 @@ func TestLoadEnvironment(t *testing.T) {
 	t.Setenv("SIGNA_AI_CONSUMER_GROUP", "test-group")
 	t.Setenv("SIGNA_AI_CONSUMER_NAME", "test-consumer")
 	t.Setenv("SIGNA_AI_POLL_INTERVAL", "750ms")
+	t.Setenv("SIGNA_AI_PROVIDER_TIMEOUT", "4s")
+	t.Setenv("SIGNA_AI_RETRY_MAX_ATTEMPTS", "5")
+	t.Setenv("SIGNA_AI_RETRY_BACKOFF", "125ms")
 	t.Setenv("SIGNA_WEB_ALLOWED_ORIGINS", " http://localhost:3000, https://staging.signa.test, http://localhost:3000 ")
 
 	got, err := Load()
@@ -84,6 +90,9 @@ func TestLoadEnvironment(t *testing.T) {
 		AIConsumerGroup:           "test-group",
 		AIConsumerName:            "test-consumer",
 		AIPollInterval:            750 * time.Millisecond,
+		AIProviderTimeout:         4 * time.Second,
+		AIRetryMaxAttempts:        5,
+		AIRetryBackoff:            125 * time.Millisecond,
 		WebAllowedOrigins:         []string{"http://localhost:3000", "https://staging.signa.test"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -165,6 +174,13 @@ func TestLoadRejectsInvalidAIPollInterval(t *testing.T) {
 	t.Setenv("SIGNA_AI_POLL_INTERVAL", "not-a-duration")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() error = nil, want an invalid-AI-poll-interval error")
+	}
+}
+
+func TestLoadRejectsUnboundedAIRetryAttempts(t *testing.T) {
+	t.Setenv("SIGNA_AI_RETRY_MAX_ATTEMPTS", "6")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want bounded retry-attempt error")
 	}
 }
 

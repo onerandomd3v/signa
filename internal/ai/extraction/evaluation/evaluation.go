@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -73,6 +74,7 @@ type Report struct {
 	Total             int
 	Passed            int
 	Failures          []Failure
+	Acceptance        *AcceptanceResult
 }
 
 // Failed reports whether any case failed validation, provider execution, or
@@ -81,9 +83,23 @@ func (r Report) Failed() bool {
 	return len(r.Failures) > 0
 }
 
+// Accepted reports whether the evaluation passed its explicitly supplied
+// acceptance configuration. Evaluate remains a comparison-only API for
+// backwards compatibility; callers that need a gate must use
+// EvaluateWithThresholds with owner-approved values.
+func (r Report) Accepted() bool {
+	if r.Acceptance != nil {
+		return r.Acceptance.Passed
+	}
+	return !r.Failed()
+}
+
 // String renders a concise regression-test-friendly report.
 func (r Report) String() string {
 	lines := []string{fmt.Sprintf("%s: %d cases, %d passed", r.EvaluationVersion, r.Total, r.Passed)}
+	if r.Acceptance != nil {
+		lines = append(lines, fmt.Sprintf("acceptance: passed=%t pass_rate=%.4f", r.Acceptance.Passed, r.Acceptance.PassRate))
+	}
 	for _, failure := range r.Failures {
 		category := failure.Category
 		if category == "" {
@@ -92,6 +108,75 @@ func (r Report) String() string {
 		lines = append(lines, fmt.Sprintf("case %s [%s]: %s", failure.CaseID, category, failure.Message))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// AcceptanceThresholds are deliberately injected rather than defaulted. The
+// repository has no approved product acceptance values yet; CI or an owner
+// approved evaluation job must provide at least one threshold explicitly.
+type AcceptanceThresholds struct {
+	MinimumPassed   *int     `json:"minimum_passed,omitempty"`
+	MinimumPassRate *float64 `json:"minimum_pass_rate,omitempty"`
+}
+
+type AcceptanceResult struct {
+	Passed          bool     `json:"passed"`
+	PassRate        float64  `json:"pass_rate"`
+	MinimumPassed   *int     `json:"minimum_passed,omitempty"`
+	MinimumPassRate *float64 `json:"minimum_pass_rate,omitempty"`
+}
+
+func (t AcceptanceThresholds) Validate(total int) error {
+	if total <= 0 {
+		return errors.New("acceptance thresholds require a non-empty evaluation")
+	}
+	if t.MinimumPassed == nil && t.MinimumPassRate == nil {
+		return errors.New("acceptance thresholds require an explicit minimum_passed or minimum_pass_rate")
+	}
+	if t.MinimumPassed != nil && (*t.MinimumPassed < 0 || *t.MinimumPassed > total) {
+		return fmt.Errorf("minimum_passed must be between 0 and %d", total)
+	}
+	if t.MinimumPassRate != nil && (math.IsNaN(*t.MinimumPassRate) || math.IsInf(*t.MinimumPassRate, 0) || *t.MinimumPassRate < 0 || *t.MinimumPassRate > 1) {
+		return errors.New("minimum_pass_rate must be between 0 and 1")
+	}
+	return nil
+}
+
+func (r Report) CheckAcceptance(thresholds AcceptanceThresholds) (AcceptanceResult, error) {
+	if err := thresholds.Validate(r.Total); err != nil {
+		return AcceptanceResult{}, err
+	}
+	result := AcceptanceResult{
+		Passed:          true,
+		PassRate:        float64(r.Passed) / float64(r.Total),
+		MinimumPassed:   thresholds.MinimumPassed,
+		MinimumPassRate: thresholds.MinimumPassRate,
+	}
+	if thresholds.MinimumPassed != nil && r.Passed < *thresholds.MinimumPassed {
+		result.Passed = false
+	}
+	if thresholds.MinimumPassRate != nil && result.PassRate < *thresholds.MinimumPassRate {
+		result.Passed = false
+	}
+	return result, nil
+}
+
+// EvaluateWithThresholds applies an explicitly supplied acceptance gate after
+// the existing versioned fixture comparison. A nil configuration is an error;
+// this prevents an unapproved default from silently becoming a CI policy.
+func EvaluateWithThresholds(ctx context.Context, suite Suite, provider extraction.Provider, validator *extraction.Validator, thresholds *AcceptanceThresholds) (Report, error) {
+	if thresholds == nil {
+		return Report{}, errors.New("evaluation acceptance thresholds are not configured; owner approval is required")
+	}
+	report, err := Evaluate(ctx, suite, provider, validator)
+	if err != nil {
+		return Report{}, err
+	}
+	acceptance, err := report.CheckAcceptance(*thresholds)
+	if err != nil {
+		return Report{}, err
+	}
+	report.Acceptance = &acceptance
+	return report, nil
 }
 
 type manifest struct {
