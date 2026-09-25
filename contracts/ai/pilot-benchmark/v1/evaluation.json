@@ -1,0 +1,48 @@
+{
+  "benchmark_version": "signa.ai.pilot-benchmark.v1",
+  "report_version": "signa.ai.pilot-benchmark-report.v1",
+  "report_schema": "contracts/ai/pilot-benchmark/v1/report.schema.json",
+  "acceptance_threshold_status": "not_configured",
+  "components": [
+    {"name": "extraction", "evaluation_manifest": "contracts/ai/extraction/v0/evaluation.json", "schema": "contracts/ai/extraction/v0/schema.json", "default_provider_mode": "fixture_replay"},
+    {"name": "location", "evaluation_manifest": "contracts/ai/location-normalization/v0/evaluation.json", "schema": "contracts/ai/location-normalization/v0/schema.json", "default_provider_mode": "rule_based"},
+    {"name": "similarity", "evaluation_manifest": "contracts/ai/similarity/v1/evaluation.json", "schema": "contracts/ai/similarity/v1/schema.json", "default_provider_mode": "rule_based"},
+    {"name": "contradiction", "evaluation_manifest": "contracts/ai/contradiction/v1/evaluation.json", "schema": "contracts/ai/contradiction/v1/schema.json", "default_provider_mode": "rule_based"},
+    {"name": "independence", "evaluation_manifest": "contracts/ai/independence/v1/evaluation.json", "schema": "contracts/ai/independence/v1/schema.json", "default_provider_mode": "rule_based"},
+    {"name": "alert_summarization", "evaluation_manifest": "contracts/ai/alert-summarization/v1/evaluation.json", "schema": "contracts/ai/alert-summarization/v1/schema.json", "default_provider_mode": "deterministic"}
+  ],
+  "guardrails": [
+    {"name": "coordination", "evaluation_manifest": "contracts/ai/coordination/v1/evaluation.json", "schema": "contracts/ai/coordination/v1/schema.json", "default_provider_mode": "rule_based"}
+  ],
+  "scenario_coverage": [
+    {"scenario": "standard_english", "fixtures": [{"component": "extraction", "case_id": "v0-gunfire-first-hand-english"}]},
+    {"scenario": "nigerian_pidgin", "fixtures": [{"component": "extraction", "case_id": "v0-road-closure-pidgin-hearsay"}, {"component": "location", "case_id": "location-v0-pidgin-near-market"}]},
+    {"scenario": "mixed_english_pidgin", "fixtures": [{"component": "extraction", "case_id": "v0-mixed-english-pidgin"}]},
+    {"scenario": "slang", "fixtures": [{"component": "extraction", "case_id": "v0-noisy-slang-misspelled"}]},
+    {"scenario": "incomplete_reports", "fixtures": [{"component": "extraction", "case_id": "v0-incomplete-vague-market"}, {"component": "similarity", "case_id": "sparse-evidence"}]},
+    {"scenario": "hearsay_forwarded", "fixtures": [{"component": "extraction", "case_id": "v0-road-closure-pidgin-hearsay"}, {"component": "extraction", "case_id": "v0-forwarded-unknown-origin"}]},
+    {"scenario": "vague_ambiguous_locations", "fixtures": [{"component": "location", "case_id": "location-v0-vague-near-market"}, {"component": "similarity", "case_id": "ambiguous-location"}]},
+    {"scenario": "relative_time", "fixtures": [{"component": "extraction", "case_id": "v0-flooding-relative-time"}]},
+    {"scenario": "duplicate_near_duplicate_evidence", "fixtures": [{"component": "similarity", "case_id": "near-duplicate"}, {"component": "independence", "case_id": "near-duplicate-text"}, {"component": "coordination", "case_id": "near-text-unsynchronized"}]},
+    {"scenario": "conflicting_reports", "fixtures": [{"component": "contradiction", "case_id": "road-blocked-vs-open"}, {"component": "contradiction", "case_id": "activity-ongoing-vs-stopped"}, {"component": "similarity", "case_id": "conflicting-time"}]},
+    {"scenario": "sparse_provenance", "fixtures": [{"component": "independence", "case_id": "incomplete-evidence"}, {"component": "coordination", "case_id": "sparse-provenance"}]},
+    {"scenario": "high_severity_low_confidence", "fixtures": [{"component": "alert_summarization", "case_id": "critical-unverified"}]},
+    {"scenario": "disputed_evidence", "fixtures": [{"component": "alert_summarization", "case_id": "disputed"}, {"component": "independence", "case_id": "mixed-signals"}]},
+    {"scenario": "unknown_location", "fixtures": [{"component": "location", "case_id": "location-v0-missing-location"}, {"component": "alert_summarization", "case_id": "vague-location"}]},
+    {"scenario": "unknown_freshness", "fixtures": [{"component": "alert_summarization", "case_id": "missing-freshness"}]},
+    {"scenario": "unknown_severity", "fixtures": [{"component": "alert_summarization", "case_id": "unknown-severity"}]}
+  ],
+  "known_limitations": [
+    "Extraction uses checked-in expected-output replay in the offline benchmark; this measures fixture/evaluator integration, not model extraction accuracy.",
+    "Extraction is bounded by the current v0 event taxonomy and its checked-in fixtures.",
+    "Location interpretation is rule-based and text-only; it does not geocode or resolve unsupported place precision.",
+    "Same-event similarity scores are uncalibrated interpretation signals, not probabilities, incident confidence, truth, or attachment decisions.",
+    "Evidence independence only emits its limited positive support signal from approved distinct opaque source-origin evidence; unknown provenance remains unknown.",
+    "Media duplication evaluation requires supplied fingerprints; object keys, storage identity, media type, and file size do not prove duplicate content.",
+    "Contradiction assessment covers only the supported claim-state pairs and comparable event/location context.",
+    "Coordination signals are not proof of manipulation, truth, or independent corroboration.",
+    "Alert summarization formats authoritative incident state and does not decide eligibility, confidence, severity, lifecycle, or delivery.",
+    "Unknown evidence remains unknown; the benchmark does not infer missing location, time, provenance, or severity.",
+    "The benchmark is fixture-based and is not a claim of real-world accuracy or production model performance."
+  ]
+}
