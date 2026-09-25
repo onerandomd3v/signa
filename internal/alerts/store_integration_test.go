@@ -88,12 +88,12 @@ func TestStoreCreateIdempotencyEligibilityAndSupersession(t *testing.T) {
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"alert_id", "incident_id", "alert_type", "confidence_snapshot", "severity_snapshot", "priority_snapshot", "created_at"} {
+	for _, field := range []string{"alert_id", "incident_id"} {
 		if _, ok := payload[field]; !ok {
 			t.Errorf("event payload missing %q", field)
 		}
 	}
-	for _, privateField := range []string{"message", "report_text", "reporter_id", "device_location", "route_geometry"} {
+	for _, privateField := range []string{"alert_type", "confidence_snapshot", "severity_snapshot", "priority_snapshot", "created_at", "message", "report_text", "reporter_id", "device_location", "route_geometry"} {
 		if _, ok := payload[privateField]; ok {
 			t.Errorf("event payload contains private field %q", privateField)
 		}
