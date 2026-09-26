@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/onerandomd3v/signa/internal/ai/extraction"
+	"github.com/onerandomd3v/signa/internal/observability"
 )
 
 type ProcessResult struct {
@@ -26,7 +27,9 @@ func NewProcessor(store Store, adapter Adapter, backoff time.Duration) *Processo
 
 func (p *Processor) WithLogger(logger *slog.Logger) *Processor { p.logger = logger; return p }
 
-func (p *Processor) Process(ctx context.Context, message extraction.StreamMessage) (ProcessResult, error) {
+func (p *Processor) Process(ctx context.Context, message extraction.StreamMessage) (result ProcessResult, err error) {
+	ctx, finish := observability.StartStage(ctx, observability.StageDeliveryAttempt)
+	defer func() { finish(err) }()
 	if p == nil || p.store == nil || p.adapter == nil {
 		return ProcessResult{}, &configurationError{}
 	}

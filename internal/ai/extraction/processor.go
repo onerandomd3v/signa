@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/onerandomd3v/signa/internal/observability"
 )
 
 // ErrDurableExtractionDestinationUnresolved is retained for callers compiled
@@ -70,7 +71,9 @@ func (p *Processor) WithMetrics(metrics Metrics) *Processor {
 	return p
 }
 
-func (p *Processor) Process(ctx context.Context, message StreamMessage) error {
+func (p *Processor) Process(ctx context.Context, message StreamMessage) (err error) {
+	ctx, finish := observability.StartStage(ctx, observability.StageAIProcessing)
+	defer func() { finish(err) }()
 	if p == nil || p.reader == nil || p.provider == nil || p.validator == nil || p.observer == nil || p.acker == nil {
 		return fmt.Errorf("extraction processor dependencies are required")
 	}

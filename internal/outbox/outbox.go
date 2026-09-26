@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/observability"
 	goRedis "github.com/redis/go-redis/v9"
 )
 
@@ -67,7 +68,9 @@ func NewPublisher(pool *pgxpool.Pool, redis RedisStream, logger *slog.Logger) *P
 	return &Publisher{pool: pool, redis: redis, logger: logger, stream: ReportEventsStream, batchSize: DefaultBatchSize}
 }
 
-func (p *Publisher) PublishCycle(ctx context.Context) error {
+func (p *Publisher) PublishCycle(ctx context.Context) (err error) {
+	ctx, finish := observability.StartStage(ctx, observability.StageOutboxPublish)
+	defer func() { finish(err) }()
 	if p.pool == nil || p.redis == nil {
 		return fmt.Errorf("outbox publisher dependencies are required")
 	}

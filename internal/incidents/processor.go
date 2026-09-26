@@ -14,6 +14,7 @@ import (
 	"github.com/onerandomd3v/signa/internal/ai/location"
 	"github.com/onerandomd3v/signa/internal/ai/similarity"
 	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/observability"
 )
 
 const ReportAIProcessedV1 = "report.ai_processed.v1"
@@ -38,7 +39,9 @@ func NewProcessor(pool *pgxpool.Pool, lookup *Store, assessor SimilarityAssessor
 	return &Processor{pool: pool, lookup: lookup, similarity: assessor, validator: validator, policy: policy, now: time.Now}
 }
 
-func (p *Processor) Process(ctx context.Context, message StreamMessage) error {
+func (p *Processor) Process(ctx context.Context, message StreamMessage) (err error) {
+	ctx, finish := observability.StartStage(ctx, observability.StageIncidentProcessing)
+	defer func() { finish(err) }()
 	if p == nil || p.pool == nil || p.lookup == nil || p.similarity == nil {
 		return fmt.Errorf("incident processor dependencies are required")
 	}

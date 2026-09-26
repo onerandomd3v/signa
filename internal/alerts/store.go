@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/observability"
 	"github.com/onerandomd3v/signa/internal/priority"
 )
 
@@ -62,7 +63,9 @@ type Store struct {
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-func (s *Store) Create(ctx context.Context, request CreateRequest) (CreateResult, error) {
+func (s *Store) Create(ctx context.Context, request CreateRequest) (result CreateResult, err error) {
+	ctx, finish := observability.StartStage(ctx, observability.StageAlertCreation)
+	defer func() { finish(err) }()
 	if s == nil || s.pool == nil {
 		return CreateResult{}, errors.New("alerts database is required")
 	}

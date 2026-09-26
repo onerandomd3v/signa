@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/observability"
 )
 
 var ErrIdempotencyConflict = errors.New("idempotency key was reused with a different request")
@@ -43,7 +44,9 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-func (s *Store) Ingest(ctx context.Context, idempotencyKey string, input IngestRequest) (Acknowledgement, error) {
+func (s *Store) Ingest(ctx context.Context, idempotencyKey string, input IngestRequest) (ack Acknowledgement, err error) {
+	ctx, finish := observability.StartStage(ctx, observability.StageReportPersist)
+	defer func() { finish(err) }()
 	fingerprint, err := requestFingerprint(input)
 	if err != nil {
 		return Acknowledgement{}, fmt.Errorf("fingerprint report request: %w", err)

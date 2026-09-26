@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/geospatial"
+	"github.com/onerandomd3v/signa/internal/observability"
 	"github.com/onerandomd3v/signa/internal/routing"
 )
 
@@ -38,7 +39,9 @@ func NewService(pool *pgxpool.Pool, proximity *geospatial.Store, policy Policy) 
 // user returned by the privacy-safe COD-203 proximity query. Exact incident
 // coordinates are used only inside this method and never cross the policy
 // boundary or appear in its output.
-func (s *Service) EvaluateIncident(ctx context.Context, incidentID uuid.UUID, asOf time.Time) ([]Evaluation, error) {
+func (s *Service) EvaluateIncident(ctx context.Context, incidentID uuid.UUID, asOf time.Time) (evaluations []Evaluation, err error) {
+	ctx, finish := observability.StartStage(ctx, observability.StagePriorityEvaluation)
+	defer func() { finish(err) }()
 	if s == nil || s.pool == nil || s.proximity == nil {
 		return nil, errors.New("priority service dependencies are required")
 	}
@@ -60,7 +63,7 @@ func (s *Service) EvaluateIncident(ctx context.Context, incidentID uuid.UUID, as
 		return nil, fmt.Errorf("query priority proximity: %w", err)
 	}
 
-	evaluations := make([]Evaluation, 0, len(proximity))
+	evaluations = make([]Evaluation, 0, len(proximity))
 	for _, result := range proximity {
 		decision, err := Evaluate(s.policy, Input{
 			Now:      asOf,
@@ -82,7 +85,9 @@ func (s *Service) EvaluateIncident(ctx context.Context, incidentID uuid.UUID, as
 // EvaluateIncidentForRoute evaluates one user's request-scoped route without
 // persisting or returning its geometry. Geospatial storage performs the
 // intersection and only its categorical result crosses into the v2 policy.
-func (s *Service) EvaluateIncidentForRoute(ctx context.Context, incidentID uuid.UUID, proximity geospatial.ProximityResult, route routing.Route, asOf time.Time) (Evaluation, error) {
+func (s *Service) EvaluateIncidentForRoute(ctx context.Context, incidentID uuid.UUID, proximity geospatial.ProximityResult, route routing.Route, asOf time.Time) (evaluation Evaluation, err error) {
+	ctx, finish := observability.StartStage(ctx, observability.StagePriorityEvaluation)
+	defer func() { finish(err) }()
 	if s == nil || s.pool == nil || s.proximity == nil {
 		return Evaluation{}, errors.New("priority service dependencies are required")
 	}
