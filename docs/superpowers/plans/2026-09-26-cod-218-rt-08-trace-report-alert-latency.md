@@ -38,16 +38,16 @@
 **Interfaces:**
 - Produces `Timeline`, `Stage`, `StageState`, `StageTiming`, `BuildTimeline(Input) Timeline` for the store and CLI.
 
-- [ ] Write failing tests for completed paths, pending/backlog, retryable and terminal failures, unavailable stages, deterministic selection, and non-negative durations.
-- [ ] Run the focused tests and confirm failure because the model is absent.
-- [ ] Implement the pure model with nullable duration fields and stable JSON field names.
-- [ ] Run focused tests and the package suite.
-- [ ] Commit the pure model.
+- [x] Write failing tests for completed paths, pending/backlog, retryable and terminal failures, unavailable stages, deterministic selection, and non-negative durations.
+- [x] Run the focused tests and confirm failure because the model is absent.
+- [x] Implement the pure model with nullable duration fields and stable JSON field names.
+- [x] Run focused tests and the package suite.
+- [x] Commit the pure model.
 
 ### Task 2: Durable AI stage state
 
 **Files:**
-- Create: `migrations/202609260015_create_report_ai_processing.sql`
+- Create: `migrations/202609260016_create_report_ai_processing.sql`
 - Modify: `internal/ai/extraction/durable.go`
 - Modify: `internal/ai/extraction/processor.go`
 - Test: `internal/ai/extraction/durable_test.go`, `internal/ai/extraction/processor_test.go`
@@ -55,12 +55,12 @@
 **Interfaces:**
 - Produces `AIProcessingState` records with `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED_RETRYABLE`, and `FAILED_TERMINAL` states; no raw error payloads.
 
-- [ ] Add failing tests for start/success, retryable provider failure, terminal/schema failure, and no-op behavior when the optional recorder is absent.
-- [ ] Run focused tests and confirm failure.
-- [ ] Add the smallest migration and best-effort recorder methods; keep failure recording observational and non-blocking.
-- [ ] Hook processor start/failure/success without changing ACK or retry behavior.
-- [ ] Run focused tests and migration/unit checks.
-- [ ] Commit the AI state implementation.
+- [x] Add failing tests for start/success, retryable provider failure, terminal/schema failure, and no-op behavior when the optional recorder is absent.
+- [x] Run focused tests and confirm failure.
+- [x] Add the smallest migration and best-effort recorder methods; keep failure recording observational and non-blocking.
+- [x] Hook processor start/failure/success without changing ACK or retry behavior.
+- [x] Run focused tests and migration/unit checks.
+- [x] Commit the AI state implementation.
 
 ### Task 3: PostgreSQL timeline reconstruction and bounded queries
 
@@ -73,11 +73,11 @@
 **Interfaces:**
 - `NewStore(*pgxpool.Pool) *Store`, `TraceReport(context.Context, uuid.UUID) (Timeline, error)`, and `Recent(context.Context, int) ([]Timeline, error)`.
 
-- [ ] Add failing fixture tests for completed report→alert→delivery, unpublished outbox, AI failure/pending, incident/priority gaps, pending delivery, retryable/terminal delivery, privacy-safe output, and recent limit enforcement.
-- [ ] Run focused tests and confirm failure.
-- [ ] Implement bounded SQL using existing indexes and a deterministic first report outbox/alert/delivery path; do not select sensitive columns.
-- [ ] Map durable rows into the pure timeline and derive report-to-alert/report-to-delivery only from real timestamps.
-- [ ] Run unit tests and PostgreSQL integration tests when the local database is available.
+- [x] Add fixture tests for completed report→alert→delivery, unpublished outbox, AI failure/pending, incident/priority gaps, pending delivery, retryable/terminal delivery, privacy-safe output, and recent limit enforcement.
+- [x] Run focused tests and confirm model/store test failures before implementation.
+- [x] Implement bounded SQL using existing indexes and a deterministic first report outbox/alert/delivery path; add narrowly scoped correlation-order indexes only where current indexes cannot bound lateral lookups; do not select sensitive columns.
+- [x] Map durable rows into the pure timeline and derive report-to-alert/report-to-delivery only from real timestamps.
+- [x] Run unit tests and compile the PostgreSQL integration tests. Runtime integration execution is unavailable because local PostgreSQL/Docker are not running.
 - [ ] Commit the store and migration coverage.
 
 ### Task 4: OpenTelemetry boundary and stage instrumentation
@@ -94,11 +94,11 @@
 - Modify: `internal/alerts/store.go`
 - Modify: `internal/delivery/processor.go`
 
-- [ ] Add failing no-op tests proving spans/metrics can be used with no configured collector and do not alter returned behavior.
-- [ ] Run focused tests and confirm failure.
-- [ ] Add narrowly scoped OpenTelemetry API instrumentation with stable low-cardinality stage/status attributes and no identifiers.
-- [ ] Wrap existing stage boundaries without moving transaction or ACK boundaries.
-- [ ] Run affected package tests.
+- [x] Add failing no-op tests proving spans/metrics can be used with no configured collector and do not alter returned behavior.
+- [x] Run focused tests and confirm failure.
+- [x] Add narrowly scoped OpenTelemetry API instrumentation with stable low-cardinality stage/status attributes and no identifiers.
+- [x] Wrap existing stage boundaries without moving transaction or ACK boundaries.
+- [x] Run affected package tests (the test binary passes when executed from the workspace; Go's temp-path launch is blocked by Windows Application Control).
 - [ ] Commit telemetry changes.
 
 ### Task 5: Operator diagnostic command and documentation
@@ -109,11 +109,11 @@
 - Create: `docs/observability/report-to-alert-latency.md`
 - Modify: `README.md`
 
-- [ ] Add failing CLI tests for report ID mode, bounded recent mode, stable JSON, privacy exclusions, and clear database/config errors.
-- [ ] Run focused tests and confirm failure.
-- [ ] Implement `go run ./cmd/report-trace -report-id <uuid>` and `-limit <1..100>` using `SIGNA_DATABASE_URL`/repository config; emit no health score.
-- [ ] Document stage definitions, correlation, privacy rules, status classifications, diagnostic examples, OpenTelemetry configuration boundary, and the absence of numeric MVP thresholds.
-- [ ] Run CLI and documentation checks.
+- [x] Add failing CLI tests for report ID mode, bounded recent mode, stable JSON, privacy exclusions, and clear database/config errors.
+- [x] Run focused tests and confirm failure.
+- [x] Implement `go run ./cmd/report-trace -report-id <uuid>` and `-limit <1..100>` using `SIGNA_DATABASE_URL`/repository config; emit no health score.
+- [x] Document stage definitions, correlation, privacy rules, status classifications, diagnostic examples, OpenTelemetry configuration boundary, and the absence of numeric MVP thresholds.
+- [x] Run CLI and documentation checks.
 - [ ] Commit command and docs.
 
 ### Task 6: Whole-branch verification and PR preparation
