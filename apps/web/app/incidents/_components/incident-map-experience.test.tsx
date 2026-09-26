@@ -147,14 +147,20 @@ describe("IncidentMapExperience", () => {
         name: "No evaluated incident was route-relevant",
       }),
     ).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "No active incidents" })).toBeTruthy();
-    expect(screen.getByTestId("map-stage").getAttribute("data-route-coordinates")).toBe(
+    expect(
+      screen.getByRole("heading", { name: "No active incidents" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("map-stage").getAttribute("data-route-coordinates"),
+    ).toBe(
       JSON.stringify([
         [3.3792, 6.5244],
         [3.3947, 6.4541],
       ]),
     );
-    expect(screen.getByTestId("map-stage").getAttribute("data-incident-count")).toBe("0");
+    expect(
+      screen.getByTestId("map-stage").getAttribute("data-incident-count"),
+    ).toBe("0");
   });
 
   it("keeps an accessible route text alternative when the map is unavailable", async () => {
@@ -167,10 +173,14 @@ describe("IncidentMapExperience", () => {
     );
     submitRoute();
     expect(
-      await screen.findByText(/route line from approximately 6\.5244, 3\.3792/i),
+      await screen.findByText(
+        /route line from approximately 6\.5244, 3\.3792/i,
+      ),
     ).toBeTruthy();
     expect(screen.getByText(/no map style is configured/i)).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "No active incidents" })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "No active incidents" }),
+    ).toBeTruthy();
   });
 
   it("keeps a keyboard-accessible details list and selection control alongside the map", async () => {

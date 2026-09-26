@@ -29,6 +29,23 @@ describe("route geometry presentation", () => {
     });
   });
 
+  it("accepts contract-supported three-dimensional GeoJSON positions", () => {
+    const geometry = {
+      type: "LineString",
+      coordinates: [
+        [3, 6, 12],
+        [4, 7, 18],
+      ],
+    };
+    expect(toRouteFeatureCollection(geometry).features[0]?.geometry).toEqual(
+      geometry,
+    );
+    expect(getRouteBounds(geometry)).toEqual([
+      [3, 6],
+      [4, 7],
+    ]);
+  });
+
   it.each([
     null,
     { type: "Point", coordinates: [3, 6] },

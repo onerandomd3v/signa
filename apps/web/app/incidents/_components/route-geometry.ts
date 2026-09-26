@@ -1,4 +1,6 @@
-export type RoutePosition = [longitude: number, latitude: number];
+export type RoutePosition =
+  | [longitude: number, latitude: number]
+  | [longitude: number, latitude: number, altitude: number];
 
 /** Display-only GeoJSON shape; it is not an API request/response type. */
 export type RouteLineGeometry = {
@@ -21,7 +23,7 @@ export type Bounds = [[number, number], [number, number]];
 function isPosition(value: unknown): value is RoutePosition {
   return (
     Array.isArray(value) &&
-    value.length === 2 &&
+    (value.length === 2 || value.length === 3) &&
     typeof value[0] === "number" &&
     Number.isFinite(value[0]) &&
     value[0] >= -180 &&
@@ -29,7 +31,9 @@ function isPosition(value: unknown): value is RoutePosition {
     typeof value[1] === "number" &&
     Number.isFinite(value[1]) &&
     value[1] >= -90 &&
-    value[1] <= 90
+    value[1] <= 90 &&
+    (value.length === 2 ||
+      (typeof value[2] === "number" && Number.isFinite(value[2])))
   );
 }
 

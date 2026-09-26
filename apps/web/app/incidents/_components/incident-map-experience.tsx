@@ -79,7 +79,8 @@ function routeMapFallback(
     >
       Map unavailable
       {mapStyleUrl ? " right now" : ": no map style is configured"}. Incident
-      details remain available below. {routeResult && routeDescription(routeResult.geometry)}
+      details remain available below.{" "}
+      {routeResult && routeDescription(routeResult.geometry)}
     </p>
   );
 }
@@ -125,7 +126,10 @@ function IncidentMapContent({
   const revalidateAlerts = alertReconciliation.revalidateKnown;
   const clearProtectedAlerts = alertReconciliation.clearProtectedAlerts;
   const onInvalidation = useCallback(
-    ({ incidents: incidentsChanged, alerts }: {
+    ({
+      incidents: incidentsChanged,
+      alerts,
+    }: {
       incidents: boolean;
       alerts: { alertId: string; incidentId: string }[];
     }) => {
@@ -143,10 +147,7 @@ function IncidentMapContent({
 
   const displayIncidents = useMemo(() => {
     const byId = new Map(
-      (routeResult?.incidents ?? []).map((incident) => [
-        incident.id,
-        incident,
-      ]),
+      (routeResult?.incidents ?? []).map((incident) => [incident.id, incident]),
     );
     for (const incident of incidents) byId.set(incident.id, incident);
     return [...byId.values()];
@@ -223,8 +224,8 @@ function IncidentMapContent({
         >
           <h2 className="text-lg font-semibold">No active incidents</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            No public incidents are listed right now. This does not mean an
-            area is safe.
+            No public incidents are listed right now. This does not mean an area
+            is safe.
           </p>
         </section>
       </div>
@@ -384,9 +385,6 @@ export function IncidentMapRoute(
   props: Omit<IncidentMapExperienceProps, "mapStyleUrl"> = {},
 ) {
   return (
-    <IncidentMapExperience
-      mapStyleUrl={getPublicMapStyleUrl()}
-      {...props}
-    />
+    <IncidentMapExperience mapStyleUrl={getPublicMapStyleUrl()} {...props} />
   );
 }
