@@ -17,18 +17,30 @@ type repository interface {
 	ActiveGrant(context.Context, uuid.UUID) (bool, error)
 	ListEligible(context.Context, uuid.UUID) ([]requestRecord, error)
 	GetEligible(context.Context, uuid.UUID, uuid.UUID) (requestRecord, error)
-	Submit(context.Context, uuid.UUID, uuid.UUID, string, ResponseInput, int16, [32]byte) (Response, bool, error)
+	Submit(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, ResponseInput, int16, [32]byte, publicEligibilityCheck) (Response, bool, error)
 }
+
+type publicEligibilityCheck func(context.Context, uuid.UUID) error
 
 type service struct {
 	repo   repository
 	public incidents.PublicIncidentReader
 	policy config.PublicIncidentGeometryPolicy
+	// Reserve one connection for the public reader while submissions hold row locks.
+	submitSlots chan struct{}
 }
 
 // NewService constructs the verifier service using the existing public incident projection.
 func NewService(pool *pgxpool.Pool, public incidents.PublicIncidentReader, policy config.PublicIncidentGeometryPolicy) Service {
-	return newService(&postgresRepository{pool: pool}, public, policy)
+	s := &service{repo: &postgresRepository{pool: pool}, public: public, policy: policy}
+	if pool != nil {
+		capacity := int(pool.Config().MaxConns) - 1
+		if capacity < 0 {
+			capacity = 0
+		}
+		s.submitSlots = make(chan struct{}, capacity)
+	}
+	return s
 }
 func newService(repo repository, public incidents.PublicIncidentReader, policy config.PublicIncidentGeometryPolicy) Service {
 	return &service{repo: repo, public: public, policy: policy}
@@ -57,6 +69,9 @@ func (s *service) view(ctx context.Context, request requestRecord) (RequestView,
 	}
 	if err != nil {
 		return RequestView{}, ErrUnavailable
+	}
+	if incident.ID != request.IncidentID {
+		return RequestView{}, ErrRequestNotFound
 	}
 	return RequestView{ID: request.ID, CreatedAt: request.CreatedAt, ExpiresAt: request.ExpiresAt, Incident: incident, SafetyPrompt: SafetyPrompt}, nil
 }
@@ -115,7 +130,24 @@ func (s *service) SubmitResponse(ctx context.Context, verifierID, requestID uuid
 	if _, err = s.view(ctx, request); err != nil {
 		return Response{}, false, err
 	}
-	response, created, err := s.repo.Submit(ctx, verifierID, requestID, key, input, version, digest)
+	// The repository invokes this again while holding both grant and request locks.
+	// Its locked incident must match the one validated above.
+	checkPublic := func(ctx context.Context, incidentID uuid.UUID) error {
+		_, err := s.view(ctx, requestRecord{IncidentID: incidentID})
+		return err
+	}
+	if s.submitSlots != nil {
+		if cap(s.submitSlots) == 0 {
+			return Response{}, false, ErrUnavailable
+		}
+		select {
+		case s.submitSlots <- struct{}{}:
+			defer func() { <-s.submitSlots }()
+		case <-ctx.Done():
+			return Response{}, false, ErrUnavailable
+		}
+	}
+	response, created, err := s.repo.Submit(ctx, verifierID, requestID, request.IncidentID, key, input, version, digest, checkPublic)
 	if errors.Is(err, ErrNotTrustedVerifier) || errors.Is(err, ErrRequestNotFound) || errors.Is(err, ErrIdempotencyConflict) {
 		return Response{}, false, err
 	}

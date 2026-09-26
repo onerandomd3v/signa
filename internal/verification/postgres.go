@@ -55,7 +55,7 @@ func (r *postgresRepository) GetEligible(ctx context.Context, userID, requestID 
 	return request, err
 }
 
-func (r *postgresRepository) Submit(ctx context.Context, userID, requestID uuid.UUID, key string, input ResponseInput, version int16, digest [32]byte) (Response, bool, error) {
+func (r *postgresRepository) Submit(ctx context.Context, userID, requestID, expectedIncidentID uuid.UUID, key string, input ResponseInput, version int16, digest [32]byte, checkPublic publicEligibilityCheck) (Response, bool, error) {
 	if r.pool == nil {
 		return Response{}, false, ErrUnavailable
 	}
@@ -92,6 +92,15 @@ func (r *postgresRepository) Submit(ctx context.Context, userID, requestID uuid.
 	}
 	if cancelledAt != nil || !request.ExpiresAt.After(now) || (assigned != nil && *assigned != userID) {
 		return Response{}, false, ErrRequestNotFound
+	}
+	if request.IncidentID != expectedIncidentID {
+		return Response{}, false, ErrRequestNotFound
+	}
+	if checkPublic == nil {
+		return Response{}, false, ErrUnavailable
+	}
+	if err := checkPublic(ctx, request.IncidentID); err != nil {
+		return Response{}, false, err
 	}
 
 	conclusion := nullableConclusion(input.Conclusion)

@@ -63,7 +63,13 @@ func integrationStore(t *testing.T) (context.Context, *pgxpool.Pool, Service, uu
 	if err != nil {
 		t.Fatalf("goose up: %v\n%s", err, output)
 	}
-	pool, err := pgxpool.New(ctx, testURL.String())
+	poolConfig, err := pgxpool.ParseConfig(testURL.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Submission holds grant/request locks while PublicIncidentReader uses another connection.
+	poolConfig.MaxConns = 6
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,30 +253,130 @@ func TestPostgresConcurrentConflictingIdempotencySubmissions(t *testing.T) {
 	request := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))
 	a, b := ConclusionConfirm, ConclusionDispute
 	var wg sync.WaitGroup
-	results := make(chan error, 2)
+	type result struct {
+		input    ResponseInput
+		response Response
+		created  bool
+		err      error
+	}
+	results := make(chan result, 2)
 	for _, c := range []Conclusion{a, b} {
 		c := c
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, err := service.SubmitResponse(ctx, user, request, "conflict", ResponseInput{Conclusion: &c})
-			results <- err
+			input := ResponseInput{Conclusion: &c}
+			response, created, err := service.SubmitResponse(ctx, user, request, "conflict", input)
+			results <- result{input, response, created, err}
 		}()
 	}
 	wg.Wait()
 	close(results)
 	success, conflict := 0, 0
-	for err := range results {
-		if err == nil {
+	var winner result
+	for item := range results {
+		if item.err == nil {
 			success++
-		} else if errors.Is(err, ErrIdempotencyConflict) {
+			winner = item
+			if !item.created {
+				t.Fatal("successful caller did not create response")
+			}
+		} else if errors.Is(item.err, ErrIdempotencyConflict) {
 			conflict++
 		} else {
-			t.Fatal(err)
+			t.Fatal(item.err)
 		}
 	}
 	if success != 1 || conflict != 1 || countResponses(t, ctx, pool, request) != 1 {
 		t.Fatalf("success=%d conflict=%d", success, conflict)
+	}
+	version, digest, err := fingerprintResponse(winner.input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var storedID uuid.UUID
+	var conclusion *string
+	var observation *string
+	var storedVersion int16
+	var storedDigest []byte
+	if err := pool.QueryRow(ctx, `SELECT id,conclusion,observation,payload_fingerprint_version,payload_fingerprint FROM verification_responses WHERE request_id=$1`, request).Scan(&storedID, &conclusion, &observation, &storedVersion, &storedDigest); err != nil {
+		t.Fatal(err)
+	}
+	if storedID != winner.response.ID || conclusion == nil || *conclusion != string(*winner.input.Conclusion) || observation != nil || storedVersion != version || string(storedDigest) != string(digest[:]) {
+		t.Fatalf("stored response does not match winner: id=%s conclusion=%v observation=%v version=%d digest=%x", storedID, conclusion, observation, storedVersion, storedDigest)
+	}
+}
+
+func TestPostgresSubmitRejectsIncidentChangedWhileWaitingForRequestLock(t *testing.T) {
+	ctx, pool, service, user, originalIncident := integrationStore(t)
+	request := addRequest(t, ctx, pool, originalIncident, nil, time.Now().Add(time.Hour))
+	otherIncident := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO incidents(id,event_type,status,confidence_state,center_point) VALUES ($1,'other','OPEN','UNVERIFIED',ST_SetSRID(ST_MakePoint(3.3792,6.5244),4326)::geography)`, otherIncident); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var blockerPID int
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE verification_requests SET incident_id=$2 WHERE id=$1`, request, otherIncident); err != nil {
+		t.Fatal(err)
+	}
+	conclusion := ConclusionConfirm
+	result := make(chan error, 1)
+	go func() {
+		_, _, err := service.SubmitResponse(ctx, user, request, "changed", ResponseInput{Conclusion: &conclusion})
+		result <- err
+	}()
+	waitForBlockedSubmit(t, ctx, pool, blockerPID, "verification_requests")
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; !errors.Is(err, ErrRequestNotFound) {
+		t.Fatalf("changed incident submit error=%v", err)
+	}
+	if countResponses(t, ctx, pool, request) != 0 {
+		t.Fatal("response persisted against unchecked incident")
+	}
+}
+
+func TestPostgresSubmitRejectsIncidentLeavingPublicProjectionWhileWaiting(t *testing.T) {
+	ctx, pool, service, user, incident := integrationStore(t)
+	request := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var blockerPID int
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE verification_requests SET created_at=created_at WHERE id=$1`, request); err != nil {
+		t.Fatal(err)
+	}
+	conclusion := ConclusionConfirm
+	result := make(chan error, 1)
+	go func() {
+		_, _, err := service.SubmitResponse(ctx, user, request, "no-longer-public", ResponseInput{Conclusion: &conclusion})
+		result <- err
+	}()
+	waitForBlockedSubmit(t, ctx, pool, blockerPID, "verification_requests")
+	if _, err := pool.Exec(ctx, `UPDATE incidents SET status='RESOLVED' WHERE id=$1`, incident); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; !errors.Is(err, ErrRequestNotFound) {
+		t.Fatalf("now-private incident submit error=%v", err)
+	}
+	if countResponses(t, ctx, pool, request) != 0 {
+		t.Fatal("response persisted for incident absent from public projection")
 	}
 }
 func TestPostgresIdempotencyConflictDoesNotOverwrite(t *testing.T) {
@@ -340,6 +446,11 @@ func TestPostgresRevocationSerializesWithResponseSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var blockerPID int
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tx.Exec(ctx, `UPDATE user_capability_grants SET revoked_at=clock_timestamp(),revocation_provenance='operational_system' WHERE user_id=$1 AND revoked_at IS NULL`, user); err != nil {
 		t.Fatal(err)
 	}
@@ -348,6 +459,7 @@ func TestPostgresRevocationSerializesWithResponseSubmission(t *testing.T) {
 		_, _, err := service.SubmitResponse(ctx, user, request, "key", ResponseInput{Conclusion: &c})
 		result <- err
 	}()
+	waitForBlockedSubmit(t, ctx, pool, blockerPID, "user_capability_grants")
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -357,4 +469,21 @@ func TestPostgresRevocationSerializesWithResponseSubmission(t *testing.T) {
 	if countResponses(t, ctx, pool, request) != 0 {
 		t.Fatal("response accepted after revocation")
 	}
+}
+
+func waitForBlockedSubmit(t *testing.T, ctx context.Context, pool *pgxpool.Pool, blockerPID int, table string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var blocked bool
+		err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock' AND $1=ANY(pg_blocking_pids(pid)) AND position($2 in query)>0 AND position('FOR UPDATE' in query)>0)`, blockerPID, table).Scan(&blocked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("submit did not wait on %s row lock held by pid %d", table, blockerPID)
 }
