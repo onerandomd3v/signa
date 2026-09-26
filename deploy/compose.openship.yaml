@@ -9,16 +9,27 @@
 # Dockerfiles COPY from the repository root (cmd/, internal/, contracts/,
 # go.mod). The dockerfile paths stay relative to that root context.
 #
-# Secrets are NEVER committed. OpenShip injects:
-#   - SIGNA_DB_PASSWORD        (strong Postgres password)
-#   - SIGNA_OPENAI_API_KEY     (worker only)
+# DATABASE AUTH: Postgres runs with POSTGRES_HOST_AUTH_METHOD=trust. It is
+# internal-only — no published ports, on an isolated per-project Docker network
+# reachable only by this stack's own services — so no password is required or
+# used. This is deliberate: OpenShip's compose env substitution only populates a
+# standalone POSTGRES_PASSWORD and leaves every other ${SIGNA_DB_PASSWORD}
+# reference (the URL, a PGPASSWORD fallback) empty, so password auth could not
+# be made consistent between Postgres and the apps.
 #
-# IMPORTANT: the database password is passed via the standalone `PGPASSWORD`
-# variable, never embedded inside SIGNA_DATABASE_URL. OpenShip substitutes
-# standalone ${VAR} env values but leaves ${VAR} that is embedded inside a
-# string unsubstituted (it resolves to empty), which would otherwise make the
-# apps connect with an empty password. pgx (api/worker) and goose (migrate)
-# apply PGPASSWORD as the libpq fallback when the URL omits the password.
+# Restoring password auth WITHOUT data loss — do NOT re-initialize the pgdata
+# volume (that would destroy all reports/incidents/sessions/audit state):
+#   1. Set the role password on the running database (trust lets you connect):
+#        psql -U signa -d signa -c "ALTER USER signa PASSWORD '<password>';"
+#   2. Switch the LIVE database off trust without re-init: in the pgdata
+#      volume's pg_hba.conf replace the `trust` method(s) with `scram-sha-256`,
+#      then reload:  psql -c "SELECT pg_reload_conf();"
+#   3. REMOVE `POSTGRES_HOST_AUTH_METHOD: trust` below (leaving it would keep
+#      trusting clients even on a future re-init), and give api/worker/migrate
+#      the same password via a LITERAL `PGPASSWORD` (never a ${VAR} — OpenShip
+#      leaves those empty). Redeploy the app services; no volume wipe needed.
+#
+# Secrets are NEVER committed. OpenShip injects SIGNA_OPENAI_API_KEY (worker).
 #
 # Product-policy values below are the approved DEMO/PILOT set (representative
 # values drawn from the repo's own tests); override per environment in OpenShip.
@@ -30,7 +41,10 @@ services:
     environment:
       POSTGRES_DB: signa
       POSTGRES_USER: signa
-      POSTGRES_PASSWORD: ${SIGNA_DB_PASSWORD}
+      # Internal-only DB (no published ports); trust auth on the isolated
+      # per-project network. See the DATABASE AUTH note at the top of the file,
+      # including how to restore password auth without re-initializing the volume.
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - signa_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -62,7 +76,6 @@ services:
       dockerfile: deploy/migrate/Dockerfile
     environment:
       SIGNA_DATABASE_URL: postgres://signa@postgres:5432/signa?sslmode=disable
-      PGPASSWORD: ${SIGNA_DB_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,7 +88,6 @@ services:
     environment:
       SIGNA_API_ADDR: ":8080"
       SIGNA_DATABASE_URL: postgres://signa@postgres:5432/signa?sslmode=disable
-      PGPASSWORD: ${SIGNA_DB_PASSWORD}
       SIGNA_REDIS_ADDR: redis:6379
       SIGNA_SHUTDOWN_TIMEOUT: 10s
       SIGNA_REPORT_RATE_PER_MINUTE: "6"
@@ -111,7 +123,6 @@ services:
       dockerfile: deploy/worker/Dockerfile
     environment:
       SIGNA_DATABASE_URL: postgres://signa@postgres:5432/signa?sslmode=disable
-      PGPASSWORD: ${SIGNA_DB_PASSWORD}
       SIGNA_REDIS_ADDR: redis:6379
       # Requires a valid key to stay up (api/golden-path is unaffected if unset).
       SIGNA_OPENAI_API_KEY: ${SIGNA_OPENAI_API_KEY}
