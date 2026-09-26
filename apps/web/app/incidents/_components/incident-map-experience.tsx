@@ -99,7 +99,13 @@ function IncidentMapContent({
   connectRealtime,
   readAlert,
   routeResult,
-}: IncidentMapExperienceProps & { routeResult: RouteMapResult | null }) {
+  incidentRevision,
+  onIncidentInvalidation,
+}: IncidentMapExperienceProps & {
+  routeResult: { result: RouteMapResult; revision: number } | null;
+  incidentRevision: number;
+  onIncidentInvalidation: () => void;
+}) {
   const [state, setState] = useState<LoadState>("loading");
   const [incidents, setIncidents] = useState<PublicIncident[]>([]);
   const [reconciliationFailed, setReconciliationFailed] = useState(false);
@@ -133,10 +139,13 @@ function IncidentMapContent({
       incidents: boolean;
       alerts: { alertId: string; incidentId: string }[];
     }) => {
-      if (incidentsChanged) refresh();
+      if (incidentsChanged) {
+        onIncidentInvalidation();
+        refresh();
+      }
       acceptAlertEvents(alerts);
     },
-    [acceptAlertEvents, refresh],
+    [acceptAlertEvents, onIncidentInvalidation, refresh],
   );
   const realtime = useRealtimeUpdates({
     onInvalidation,
@@ -145,79 +154,85 @@ function IncidentMapContent({
     connect: connectRealtime,
   });
 
+  const routeIsStale =
+    routeResult !== null &&
+    (routeResult.result.isStale === true ||
+      routeResult.revision !== incidentRevision);
   const displayIncidents = useMemo(() => {
     const byId = new Map(
-      (routeResult?.incidents ?? []).map((incident) => [incident.id, incident]),
+      (routeIsStale ? [] : (routeResult?.result.incidents ?? [])).map(
+        (incident) => [incident.id, incident],
+      ),
     );
     for (const incident of incidents) byId.set(incident.id, incident);
     return [...byId.values()];
-  }, [incidents, routeResult]);
+  }, [incidents, routeIsStale, routeResult]);
   const featureCollection: IncidentFeatureCollection = useMemo(
     () => toIncidentFeatureCollection(displayIncidents),
     [displayIncidents],
   );
 
-  let incidentContent: ReactNode;
-  if (state === "loading") {
-    incidentContent = (
-      <div
-        aria-label="Loading incidents"
-        className="h-36 animate-pulse rounded-xl border border-border bg-card motion-reduce:animate-none"
-        role="status"
-      />
-    );
-  } else if (state === "error") {
-    incidentContent = (
-      <section
-        aria-live="assertive"
-        className="rounded-xl border border-border bg-card p-5"
-        role="alert"
-      >
-        <h2 className="text-lg font-semibold">Couldn’t load incidents</h2>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Try again. Incident data isn’t available.
-        </p>
-        <button
-          className="mt-4 inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-          onClick={() => {
-            setState("loading");
-            refresh();
-          }}
-          type="button"
+  const routeMapResult = routeResult?.result ?? null;
+  const hasMapContent = routeMapResult !== null || displayIncidents.length > 0;
+  const incidentContent: ReactNode = (
+    <div className="space-y-4">
+      {state === "loading" && !hasMapContent && (
+        <div
+          aria-label="Loading incidents"
+          className="h-36 animate-pulse rounded-xl border border-border bg-card motion-reduce:animate-none"
+          role="status"
+        />
+      )}
+      {state === "error" && (
+        <section
+          aria-live="assertive"
+          className="rounded-xl border border-border bg-card p-5"
+          role="alert"
         >
-          Retry
-        </button>
-      </section>
-    );
-  } else if (displayIncidents.length === 0) {
-    incidentContent = (
-      <div className="space-y-4">
-        {routeResult && (
-          <>
-            {mapStyleUrl && !mapUnavailable ? (
-              <section
-                aria-label="Route map"
-                className="overflow-hidden rounded-xl border border-border bg-card p-2 sm:p-3"
-              >
-                <IncidentMapStage
-                  featureCollection={featureCollection}
-                  onSelect={setSelectedId}
-                  onUnavailable={() => setMapUnavailable(true)}
-                  routeGeometry={routeResult.geometry}
-                  selectedId={selectedId}
-                  styleUrl={mapStyleUrl}
-                />
-              </section>
-            ) : (
-              routeMapFallback(mapStyleUrl, routeResult)
-            )}
-            {mapStyleUrl && !mapUnavailable && (
-              <p className="text-sm leading-6 text-muted-foreground">
-                {routeDescription(routeResult.geometry)}
-              </p>
-            )}
-          </>
-        )}
+          <h2 className="text-lg font-semibold">Couldn’t load incidents</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Try again. Incident data isn’t available.
+          </p>
+          <button
+            className="mt-4 inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            onClick={() => {
+              setState("loading");
+              refresh();
+            }}
+            type="button"
+          >
+            Retry
+          </button>
+        </section>
+      )}
+      {hasMapContent && (
+        <>
+          {mapStyleUrl && !mapUnavailable ? (
+            <section
+              aria-label={routeMapResult ? "Route map" : "Incident map"}
+              className="overflow-hidden rounded-xl border border-border bg-card p-2 sm:p-3"
+            >
+              <IncidentMapStage
+                featureCollection={featureCollection}
+                onSelect={setSelectedId}
+                onUnavailable={() => setMapUnavailable(true)}
+                routeGeometry={routeMapResult?.geometry ?? null}
+                selectedId={selectedId}
+                styleUrl={mapStyleUrl}
+              />
+            </section>
+          ) : (
+            routeMapFallback(mapStyleUrl, routeMapResult)
+          )}
+          {routeMapResult && mapStyleUrl && !mapUnavailable && (
+            <p className="text-sm leading-6 text-muted-foreground">
+              {routeIsStale ? "Previously checked route. " : ""}
+              {routeDescription(routeMapResult.geometry)}
+            </p>
+          )}
+        </>
+      )}
+      {state === "ready" && displayIncidents.length === 0 && (
         <section
           className="rounded-xl border border-border bg-card p-5"
           role="status"
@@ -228,33 +243,8 @@ function IncidentMapContent({
             is safe.
           </p>
         </section>
-      </div>
-    );
-  } else {
-    incidentContent = (
-      <div className="space-y-4">
-        {mapStyleUrl && !mapUnavailable ? (
-          <section
-            aria-label="Incident map"
-            className="overflow-hidden rounded-xl border border-border bg-card p-2 sm:p-3"
-          >
-            <IncidentMapStage
-              featureCollection={featureCollection}
-              onSelect={setSelectedId}
-              onUnavailable={() => setMapUnavailable(true)}
-              routeGeometry={routeResult?.geometry ?? null}
-              selectedId={selectedId}
-              styleUrl={mapStyleUrl}
-            />
-          </section>
-        ) : (
-          routeMapFallback(mapStyleUrl, routeResult)
-        )}
-        {routeResult && mapStyleUrl && !mapUnavailable && (
-          <p className="text-sm leading-6 text-muted-foreground">
-            {routeDescription(routeResult.geometry)}
-          </p>
-        )}
+      )}
+      {displayIncidents.length > 0 && (
         <ul aria-label="Incidents" className="space-y-3">
           {displayIncidents.map((incident) => (
             <li key={incident.id}>
@@ -340,13 +330,15 @@ function IncidentMapContent({
             </li>
           ))}
         </ul>
+      )}
+      {displayIncidents.length > 0 && (
         <p className="text-sm leading-6 text-muted-foreground">
           Areas are generalized. Confidence is not proof; severity describes
           potential impact.
         </p>
-      </div>
-    );
-  }
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-3">
@@ -369,14 +361,37 @@ export function IncidentMapExperience({
   evaluateRoute,
   ...props
 }: IncidentMapExperienceProps) {
-  const [routeResult, setRouteResult] = useState<RouteMapResult | null>(null);
+  const incidentRevisionRef = useRef(0);
+  const [incidentRevision, setIncidentRevision] = useState(0);
+  const [routeResult, setRouteResult] = useState<{
+    result: RouteMapResult;
+    revision: number;
+  } | null>(null);
+  const onRouteResultChange = useCallback((result: RouteMapResult | null) => {
+    setRouteResult(
+      result ? { result, revision: incidentRevisionRef.current } : null,
+    );
+  }, []);
+
+  const revisionCallback = useCallback(() => {
+    incidentRevisionRef.current += 1;
+    setIncidentRevision(incidentRevisionRef.current);
+  }, []);
+
   return (
     <div className="space-y-4">
       <RouteRelevanceExperience
         evaluate={evaluateRoute}
-        onResultChange={setRouteResult}
+        incidentRevision={incidentRevision}
+        incidentRevisionRef={incidentRevisionRef}
+        onResultChange={onRouteResultChange}
       />
-      <IncidentMapContent {...props} routeResult={routeResult} />
+      <IncidentMapContent
+        {...props}
+        incidentRevision={incidentRevision}
+        routeResult={routeResult}
+        onIncidentInvalidation={revisionCallback}
+      />
     </div>
   );
 }

@@ -116,6 +116,21 @@ describe("RouteRelevancePanel", () => {
     expect(
       screen.getByText(/missing data does not mean the route is safe/i),
     ).toBeTruthy();
+    rerender(
+      <RouteRelevancePanel state={{ status: "stale", onRetry: retry }} />,
+    );
+    expect(
+      screen.getByRole("alert", {
+        name: "Route result may be out of date",
+      }),
+    ).toBeTruthy();
+    const checkAgain = screen.getByRole("button", {
+      name: "Check route again",
+    });
+    checkAgain.focus();
+    expect(document.activeElement).toBe(checkAgain);
+    fireEvent.click(checkAgain);
+    expect(retry).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -149,6 +164,7 @@ describe("RouteRelevanceExperience", () => {
     expect(onResultChange).toHaveBeenLastCalledWith({
       geometry: routeResponse.route_geometry,
       incidents: [],
+      isStale: false,
     });
   });
 
