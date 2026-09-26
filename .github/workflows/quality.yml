@@ -49,6 +49,17 @@ jobs:
         with:
           version: v2.13.2
 
+  deploy-scripts:
+    name: Deploy scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Run migrate entrypoint retry tests
+        run: sh deploy/migrate/entrypoint_test.sh
+
   web-openapi-quality:
     name: Web and OpenAPI quality
     runs-on: ubuntu-latest
