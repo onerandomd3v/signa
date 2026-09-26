@@ -1,7 +1,7 @@
 # COD-219 — Trusted Verifier Roles and Verification API
 
-Status: conversational design approved; written-spec review pending  
-Linear: [COD-219 — VER-01](https://linear.app/codeddevs/issue/COD-219/ver-01-add-trusted-verifier-roles-and-verification-api)  
+Status: conversational design and written spec approved; user-requested clarifications incorporated
+Linear: [COD-219 — VER-01](https://linear.app/codeddevs/issue/COD-219/ver-01-add-trusted-verifier-roles-and-verification-api)
 Target branch: `dev`
 
 ## Intent and scope
@@ -36,7 +36,10 @@ identify that actor with `granted_by`. Enforce consistency between actor and
 provenance fields. Revoke by setting `revoked_at` and recording the available
 actor/provenance, never by deleting the grant. A later regrant is a new row. A
 partial unique index prevents more than one active row for the same user and
-capability.
+capability. No foreign key to a `users` table is introduced: the current
+canonical identity remains the UUID `auth.Principal.UserID` resolved through
+auth sessions, and no durable users table exists. No cascade may erase grant
+history; operational revocation updates the grant row instead of deleting it.
 
 Every verifier-only request resolves the session first and then checks durable
 grant state (`revoked_at IS NULL`). No hardcoded IDs, environment allowlists,
@@ -54,7 +57,16 @@ targets or expose request creation. Unassigned active requests are available to
 trusted verifiers; an assigned request is available only to its assigned user,
 and only while that user's trusted-verifier grant remains active. Expired,
 cancelled, absent, and differently assigned requests share the same privacy-safe
-not-found result.
+not-found result. Request rows reference incidents restrictively; accepted
+responses reference their request/incident pair restrictively as well.
+
+`ListRequests` reads at most 100 eligible request rows, ordered deterministically
+by `created_at DESC, id DESC`, before returning the list. The maximum is
+server-enforced, not client-controlled. A request whose incident is no longer
+eligible for the existing public incident projection is omitted from the list
+(equivalent to not found); detail and submit return the same privacy-safe
+not-found result. No list, read, or submit path falls back to raw reports or a
+private incident query.
 
 The verifier read projection combines request metadata with only the existing
 generalized public incident projection: public incident ID, event type, status,
@@ -72,18 +84,30 @@ creation timestamp. Conclusion is independently optional and has values
 and has values `SAW` or `HEARD`. Require at least one dimension. Responses are
 append-only: the API never overwrites or deletes accepted evidence. A unique
 boundary on request, verifier and idempotency key handles concurrent retries.
-For the same key and same normalized response, return the original response;
-for the same key with different content, return `409`. A new key appends a new
-auditable response. No response operation changes incident confidence or
-lifecycle.
+Persist a deterministic, versioned semantic-payload fingerprint alongside each
+response: version `1` is SHA-256 over canonical JSON with fixed field order and
+explicit nullable `conclusion` and `observation` values after enum validation.
+For the same request/verifier/key and same fingerprint, return the original
+response; for a different fingerprint, return `409`. A different key appends a
+new immutable response. No cascade or deletion path may erase accepted response
+history. No response operation changes incident confidence or lifecycle.
+
+Submission runs in one PostgreSQL transaction. It locks the verifier's active
+grant row, rechecks `revoked_at IS NULL` after acquiring the lock, locks and
+rechecks the eligible request (expiry using the database's current clock,
+cancellation, and assignment), inserts or resolves the idempotency result, then
+commits. Operational revocation updates the same grant row, so row locking
+serializes revocation against submission: whichever acquires/commits first
+determines whether the response is accepted.
 
 ## Module and HTTP API
 
 Implement domain/service/store behavior in a dedicated `internal/verification`
 module. `internal/api` is the HTTP adapter and obtains the authenticated
 principal from request context; it does not accept identity or capability from
-the client. The module depends on PostgreSQL and the safe incident projection,
-not raw report queries.
+the client. The module depends on PostgreSQL and the existing
+`incidents.PublicIncidentReader` projection, not raw report or private incident
+queries. Failure to produce that public projection is privacy-safe not found.
 
 Add these CookieAuth operations to the OpenAPI contract and regenerate the
 TypeScript client:
@@ -105,8 +129,11 @@ is a generic `503`. Do not return internal database errors.
 
 Add a new reversible, transactional Goose migration after the current latest
 migration to create only the new capability, request and response tables,
-constraints and indexes. The migration inserts no grants and does not alter
-existing incident, report, session or other busy tables.
+constraints and indexes, including the persisted fingerprint version/digest.
+All foreign keys use restrictive/no-action deletion semantics; no cascade may
+erase verifier responses or grant history. The migration inserts no grants and
+does not create a users table/FK or alter existing incident, report, session or
+other busy tables.
 
 Add a concise operations runbook describing deployment/database provisioning
 and revocation for the pilot, including how to record `operational_system`
@@ -132,9 +159,13 @@ alert authorization, delivery behavior, SSE behavior, or telemetry labels.
   absence of reporter/private fields in JSON.
 - PostgreSQL integration tests: operational and principal-attributed grants;
   active/revoked authorization; durable request/response reads and writes;
-  concurrent same-key retries yielding one response; distinct keys preserving
-  append-only history; and proof that response submission does not update
-  incident confidence.
+  bounded, deterministically ordered request lists; request reads/submissions
+  whose incidents are absent from the public projection return/behave as
+  not-found without private-query fallback; concurrent same-key/same-fingerprint
+  retries yielding one response; same-key/different-fingerprint conflict;
+  different keys preserving append-only history; revocation/submission
+  serialization; and proof that response submission does not update incident
+  confidence.
 - Migration tests: up/down behavior and schema constraints/indexes.
 - OpenAPI lint/generation checks ensure generated TypeScript remains in sync.
 - Run `go test ./...`, `go vet ./...`, `golangci-lint v2.13.2 run`,
