@@ -147,6 +147,8 @@ Exact reporter location may itself be sensitive.
 
 The system should collect only what is necessary and should avoid retaining continuous user movement unless a feature explicitly requires it.
 
+The authenticated route-relevance API is a request-scoped browser-display projection: it may return validated route geometry to the requesting session for map display, but it does not persist or publish route input or geometry. This projection is separate from COD-210 priority evaluation, which does not return or embed route geometry in priority reasons or events.
+
 Public-facing incident information should expose an appropriate area or zone rather than a reporter's exact position.
 
 ## 4.7 Text-first, media-optional
@@ -846,10 +848,25 @@ Exact user location used for internal proximity work is kept as a current
 snapshot only; Signa does not create continuous user-location history here.
 Internal proximity queries require an explicit caller-supplied observation
 cutoff, while final retention and expiry enforcement remains owned by the
-retention-policy work.
+retention worker. The worker requires explicit deployment configuration for
+report exact-location minimization and current-user-location expiry; it does
+not select hidden product-policy durations.
 The snapshot's `user_id` is an opaque boundary until the future user/auth
 domain owns referential constraints. Exact user and report coordinates remain
 restricted internal data and are omitted from generic public representations.
+
+Route geometry is request-scoped in the MVP. The routing provider response is
+used for relevance evaluation and is not written to PostgreSQL. Privacy-
+sensitive report/user locations, repository-controlled media metadata,
+published outbox transport records, and terminal auth sessions are swept in
+bounded batches when their explicit retention settings are present. Incident
+state history and delivery attempts/quarantine are durable audit history for
+operator review and remain intact in this policy until a distinct approved
+retention policy exists. External OpenShip, Cloudflare, and Vercel logs remain
+deployment-policy boundaries rather than application deletion targets. The
+sweep removes PostgreSQL media metadata only; external object storage objects
+remain outside the application deletion boundary until a safe storage-delete
+policy is approved.
 
 ### 18.1 Public incident geometry
 
@@ -1031,6 +1048,8 @@ This removes the need to share implementation-language types directly between Go
 ---
 
 # 25. Authentication and Roles
+
+Authentication uses the accepted ADR-0012 opaque PostgreSQL-backed browser session architecture. The API resolves a stable authenticated principal from the `HttpOnly` `signa_session` cookie and injects it into request context. Protected endpoints and SSE consume that server-resolved principal; browsers must not assert identity, roles, or authorization scope through headers or query parameters. Local and production cookie/CORS settings are documented in ADR-0012 and the service environment examples.
 
 Initial roles may include:
 
@@ -1297,6 +1316,7 @@ ADR-0007: OpenAPI contract between Go and TypeScript
 ADR-0008: AI interpretation separated from deterministic decisions
 ADR-0009: Location minimization and approximate public geography
 ADR-0011: OSRM-compatible routing adapter for request-scoped route geometry
+ADR-0012: Opaque database-backed browser sessions
 ```
 
 ---
@@ -1336,17 +1356,16 @@ The architecture direction and foundation decisions above are established. Sever
 
 1. PostgreSQL hosting provider.
 2. Redis hosting provider.
-3. Authentication provider vs in-house session implementation.
-4. R2 vs another S3-compatible storage provider.
-5. Exact MVP incident state machine.
-6. Initial confidence transition rules.
-7. Exact P1/P2/P3 thresholds.
-8. Exact location-retention precision and duration.
-9. Media size/type limits.
-10. Initial alert delivery SLO.
-11. Pilot scale assumptions.
-12. Error monitoring provider.
-13. CI/CD provider and environment strategy.
+3. R2 vs another S3-compatible storage provider.
+4. Exact MVP incident state machine.
+5. Initial confidence transition rules.
+6. Exact P1/P2/P3 thresholds.
+7. Exact location-retention precision and duration.
+8. Media size/type limits.
+9. Initial alert delivery SLO.
+10. Pilot scale assumptions.
+11. Error monitoring provider.
+12. CI/CD provider and environment strategy.
 
 These choices must not be silently embedded in implementation code. The initial routing-provider choice is resolved by ADR-0011.
 

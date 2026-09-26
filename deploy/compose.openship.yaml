@@ -1,0 +1,164 @@
+# Production stack for deploying Signa on OpenShip via its "Compose file" option.
+#
+# Builds api / worker / migrate from the existing Dockerfiles (repository-root
+# build context, per docs/deployment-openship.md) and runs PostGIS 17 + Redis
+# internally with persistent volumes. This is deployment glue for the SAME
+# architecture the target already defines — it does not introduce a new one.
+#
+# build.context is `..` because this compose file lives in deploy/, and the
+# Dockerfiles COPY from the repository root (cmd/, internal/, contracts/,
+# go.mod). The dockerfile paths stay relative to that root context.
+#
+# DATABASE AUTH: Postgres runs with POSTGRES_HOST_AUTH_METHOD=trust. It is
+# internal-only — no published ports, on an isolated per-project Docker network
+# reachable only by this stack's own services — so no password is required or
+# used. This is deliberate: OpenShip's compose env substitution only populates a
+# standalone POSTGRES_PASSWORD and leaves every other ${SIGNA_DB_PASSWORD}
+# reference (the URL, a PGPASSWORD fallback) empty, so password auth could not
+# be made consistent between Postgres and the apps.
+#
+# Restoring password auth WITHOUT data loss — do NOT re-initialize the pgdata
+# volume (that would destroy all reports/incidents/sessions/audit state):
+#   1. Set the role password on the running database (trust lets you connect):
+#        psql -U signa -d signa -c "ALTER USER signa PASSWORD '<password>';"
+#   2. Switch the LIVE database off trust without re-init: in the pgdata
+#      volume's pg_hba.conf replace the `trust` method(s) with `scram-sha-256`,
+#      then reload:  psql -c "SELECT pg_reload_conf();"
+#   3. REMOVE `POSTGRES_HOST_AUTH_METHOD: trust` below (leaving it would keep
+#      trusting clients even on a future re-init), and give api/worker/migrate
+#      the same password via a LITERAL `PGPASSWORD` (never a ${VAR} — OpenShip
+#      leaves those empty). Redeploy the app services; no volume wipe needed.
+#
+# Secrets are NEVER committed. OpenShip injects SIGNA_OPENAI_API_KEY (worker).
+#
+# Product-policy values below are the approved DEMO/PILOT set (representative
+# values drawn from the repo's own tests); override per environment in OpenShip.
+name: signa
+
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_DB: signa
+      POSTGRES_USER: signa
+      # Internal-only DB (no published ports); trust auth on the isolated
+      # per-project network. See the DATABASE AUTH note at the top of the file,
+      # including how to restore password auth without re-initializing the volume.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - signa_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U signa -d signa"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    # Internal only — no published ports.
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - signa_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    # Internal only — never expose publicly.
+
+  # One-shot Goose migration job. Runs to completion before api/worker start.
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/migrate/Dockerfile
+    environment:
+      SIGNA_DATABASE_URL: postgres://signa@postgres:5432/signa?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api/Dockerfile
+    environment:
+      SIGNA_API_ADDR: ":8080"
+      SIGNA_DATABASE_URL: postgres://signa@postgres:5432/signa?sslmode=disable
+      SIGNA_REDIS_ADDR: redis:6379
+      SIGNA_SHUTDOWN_TIMEOUT: 10s
+      SIGNA_REPORT_RATE_PER_MINUTE: "6"
+      SIGNA_REPORT_RATE_BURST: "3"
+      SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE: "120"
+      SIGNA_REPORT_GLOBAL_RATE_BURST: "30"
+      SIGNA_WEB_ALLOWED_ORIGINS: https://signa-green.vercel.app
+      SIGNA_SESSION_COOKIE_SECURE: "true"
+      SIGNA_SESSION_COOKIE_SAME_SITE: none
+      # Required public-incident geometry policy (DEMO/PILOT).
+      SIGNA_PUBLIC_INCIDENT_GRID_METERS: "100"
+      SIGNA_PUBLIC_INCIDENT_MIN_RADIUS_METERS: "250"
+      SIGNA_PUBLIC_INCIDENT_SIMPLIFY_METERS: "25"
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    # OpenShip routes the public API hostname (api.twizrr.com) to this service:8080.
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/worker/Dockerfile
+    environment:
+      SIGNA_DATABASE_URL: postgres://signa@postgres:5432/signa?sslmode=disable
+      SIGNA_REDIS_ADDR: redis:6379
+      # Requires a valid key to stay up (api/golden-path is unaffected if unset).
+      SIGNA_OPENAI_API_KEY: ${SIGNA_OPENAI_API_KEY}
+      SIGNA_OPENAI_MODEL: gpt-4.1-mini
+      SIGNA_OPENAI_BASE_URL: https://api.openai.com/v1
+      # Required incident-candidate policy (DEMO/PILOT).
+      SIGNA_INCIDENT_CANDIDATE_RADIUS_METERS: "1000"
+      SIGNA_INCIDENT_CANDIDATE_TIME_WINDOW: 2h
+      SIGNA_INCIDENT_CANDIDATE_LIMIT: "10"
+      SIGNA_INCIDENT_SIMILARITY_THRESHOLD: "0.5"
+      SIGNA_INCIDENT_SIMILARITY_WINNER_MARGIN: "0.1"
+      # Required confidence policy (strictly increasing).
+      SIGNA_CONFIDENCE_EMERGING_MIN_EVIDENCE: "1"
+      SIGNA_CONFIDENCE_CORROBORATED_MIN_EVIDENCE: "2"
+      SIGNA_CONFIDENCE_HIGH_MIN_EVIDENCE: "3"
+      # Required coordination + lifecycle policy.
+      SIGNA_COORDINATION_SYNC_WINDOW: 5m
+      SIGNA_INCIDENT_RESOLVING_AFTER: 1h
+      SIGNA_INCIDENT_RESOLVED_AFTER: 2h
+      SIGNA_INCIDENT_EXPIRED_AFTER: 3h
+      SIGNA_INCIDENT_LIFECYCLE_SWEEP_INTERVAL: 30s
+      # Required deterministic priority policy (P1 < P2).
+      SIGNA_PRIORITY_P1_RADIUS_METERS: "100"
+      SIGNA_PRIORITY_P2_RADIUS_METERS: "500"
+      SIGNA_PRIORITY_LOCATION_MAX_AGE: 10m
+      SIGNA_PRIORITY_INCIDENT_MAX_AGE: 30m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # No public route.
+
+volumes:
+  signa_pgdata:
+  signa_redis:

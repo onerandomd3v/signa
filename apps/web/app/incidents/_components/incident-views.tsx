@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import type { RealtimeConnectionStatus } from "./use-realtime-updates";
 
 /**
  * A deliberately small presentation projection—not an API contract. Keep it
@@ -29,6 +30,54 @@ export type IncidentFeedState =
   | { status: "error" }
   | { status: "unavailable" }
   | { status: "ready"; incidents: IncidentView[] };
+
+export function RealtimeConnectionStatusMessage({
+  status,
+  alertUpdateReceived,
+  onRetry,
+}: {
+  status: RealtimeConnectionStatus | "degraded";
+  alertUpdateReceived: boolean;
+  onRetry?: () => void;
+}) {
+  const messages: Record<RealtimeConnectionStatus | "degraded", string> = {
+    connecting: "Connecting to incident updates…",
+    live: "Connected to realtime updates.",
+    reconnecting: "Realtime connection interrupted. Reconnecting…",
+    unavailable:
+      "Realtime updates unavailable. Incident information remains available.",
+    degraded:
+      "Realtime updates are degraded. Couldn’t refresh incidents; displayed information may be out of date.",
+  };
+  const isDegraded = status === "degraded";
+
+  return (
+    <div className="space-y-1">
+      <p
+        aria-atomic="true"
+        aria-live="polite"
+        className="text-xs text-muted-foreground"
+        role="status"
+      >
+        {messages[status]}
+      </p>
+      {isDegraded && onRetry && (
+        <button
+          className="inline-flex min-h-11 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          onClick={onRetry}
+          type="button"
+        >
+          Retry incident refresh
+        </button>
+      )}
+      {alertUpdateReceived && (
+        <p className="text-xs text-muted-foreground">
+          An alert update was received.
+        </p>
+      )}
+    </div>
+  );
+}
 
 const contentWidth = "mx-auto w-full max-w-3xl px-4 sm:px-6";
 const terminalStatuses = new Set(["resolved", "expired"]);

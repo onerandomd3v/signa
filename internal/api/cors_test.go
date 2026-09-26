@@ -156,3 +156,22 @@ func TestCORSAllowsMultipleConfiguredOrigins(t *testing.T) {
 		}
 	}
 }
+
+func TestCORSAllowsCredentialedSSEPreflightForConfiguredOrigin(t *testing.T) {
+	handler := NewHandlerWithCORS(nil, DefaultRateLimitConfig(), []string{"https://app.signa.test"}, &fakeIngestor{})
+	request := httptest.NewRequest(http.MethodOptions, "/events", nil)
+	request.Header.Set("Origin", "https://app.signa.test")
+	request.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d, want 204", response.Code)
+	}
+	if response.Header().Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatal("credentialed CORS response did not allow credentials")
+	}
+	if response.Header().Get("Access-Control-Allow-Methods") != http.MethodGet {
+		t.Fatalf("allow methods = %q, want GET", response.Header().Get("Access-Control-Allow-Methods"))
+	}
+}

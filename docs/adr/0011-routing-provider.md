@@ -13,9 +13,11 @@ The initial routing provider is an OSRM-compatible HTTP endpoint selected throug
 
 The adapter validates coordinates and returned geometry, limits response size, supports cancellation, and returns safe typed error categories without copying upstream bodies or sensitive coordinates into errors or logs. Route results remain request-scoped; COD-208 does not persist route geometry or publish it through events.
 
+COD-253 adds a separate authenticated `POST /v1/route-relevance` browser projection. That operation may return the validated provider `LineString` to the authenticated requester for that request's map display only. The projection does not persist route input or geometry, publish an event, expose provider metadata, or change COD-210 priority evaluation, audit behavior, reasons, or events.
+
 ## Consequences
 
 - OSRM-compatible protocol details can be replaced behind the `Provider` interface without changing route consumers.
 - Operators must supply a private, approved routing endpoint; no public provider URL is hardcoded.
 - Provider availability and response quality remain external dependencies and require operational monitoring.
-- Alternative routes, route safety recommendations, route persistence, and incident/route intersection remain separate future work.
+- Alternative routes, route safety recommendations, and route persistence remain outside this decision. COD-253 owns the browser-facing request-scoped route relevance contract; it must not be interpreted as a route safety guarantee.

@@ -8,10 +8,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/alerts"
+	"github.com/onerandomd3v/signa/internal/auth"
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/media"
+	"github.com/onerandomd3v/signa/internal/push"
 	"github.com/onerandomd3v/signa/internal/reports"
+	"github.com/onerandomd3v/signa/internal/routing"
 )
 
 // NewHandler builds the HTTP handler while keeping the endpoint compatible with net/http.
@@ -36,12 +40,33 @@ func NewHandlerWithMediaAndCORS(logger *slog.Logger, rateConfig RateLimitConfig,
 }
 
 func NewHandlerWithMediaAndCORSAndPublicIncidents(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, ingestors ...reports.Ingestor) http.Handler {
+	return NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, AuthConfig{}, nil, ingestors...)
+}
+
+type AuthConfig struct {
+	Store          auth.SessionStore
+	Alerts         alerts.AlertReader
+	RouteRelevance RouteRelevanceConfig
+}
+
+type RouteRelevanceConfig struct {
+	Provider routing.Provider
+	Reader   incidents.RouteRelevanceReader
+	Policy   config.PublicIncidentGeometryPolicy
+}
+
+func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, ingestors ...reports.Ingestor) http.Handler {
+	return NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, authConfig, nil, ingestors...)
+}
+
+func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, realtimeHandler http.Handler, ingestors ...reports.Ingestor) http.Handler {
 	var ingestor reports.Ingestor
 	if len(ingestors) > 0 {
 		ingestor = ingestors[0]
 	}
 	router := chi.NewRouter()
-	router.Use(newCORSMiddleware(allowedOrigins).Middleware)
+	cors := newCORSMiddleware(allowedOrigins)
+	router.Use(cors.Middleware)
 	router.Get("/healthz", healthHandler(logger))
 	router.With(NewRateLimiter(rateConfig, RateLimiterOptions{}).Middleware).Post("/reports", reportIngestHandler(logger, ingestor))
 	mediaLimiter := NewRateLimiter(rateConfig, RateLimiterOptions{})
@@ -51,6 +76,48 @@ func NewHandlerWithMediaAndCORSAndPublicIncidents(logger *slog.Logger, rateConfi
 	if publicReader != nil {
 		router.Get("/incidents", publicIncidentListHandler(logger, publicReader, publicPolicy))
 		router.Get("/incidents/{incident_id}", publicIncidentDetailHandler(logger, publicReader, publicPolicy))
+	}
+	if authConfig.Store != nil {
+		principalMiddleware := auth.RequirePrincipalWithLogger(authConfig.Store, logger)
+		router.With(principalMiddleware).Get("/auth/session", currentSessionHandler)
+		alertReader := authConfig.Alerts
+		if alertReader == nil && pool != nil {
+			alertReader = alerts.NewStore(pool)
+		}
+		if alertReader != nil {
+			router.With(principalMiddleware).Get("/alerts/{alert_id}", alertReadHandler(logger, alertReader))
+		}
+		if authConfig.RouteRelevance.Reader != nil {
+			service := newRouteRelevanceService(authConfig.RouteRelevance.Provider, authConfig.RouteRelevance.Reader, authConfig.RouteRelevance.Policy)
+			routeLimiterConfig := rateConfig
+			if routeLimiterConfig.PerClientRouteRatePerMinute <= 0 {
+				routeLimiterConfig.PerClientRouteRatePerMinute = defaultRouteRatePerMinute
+			}
+			if routeLimiterConfig.PerClientRouteBurst <= 0 {
+				routeLimiterConfig.PerClientRouteBurst = defaultRouteRateBurst
+			}
+			if routeLimiterConfig.GlobalRouteRatePerMinute <= 0 {
+				routeLimiterConfig.GlobalRouteRatePerMinute = defaultGlobalRouteRatePerMinute
+			}
+			if routeLimiterConfig.GlobalRouteBurst <= 0 {
+				routeLimiterConfig.GlobalRouteBurst = defaultGlobalRouteRateBurst
+			}
+			routeLimiter := NewRateLimiter(RateLimitConfig{
+				PerClientRatePerMinute: routeLimiterConfig.PerClientRouteRatePerMinute,
+				PerClientBurst:         routeLimiterConfig.PerClientRouteBurst,
+				GlobalRatePerMinute:    routeLimiterConfig.GlobalRouteRatePerMinute,
+				GlobalBurst:            routeLimiterConfig.GlobalRouteBurst,
+			}, RateLimiterOptions{})
+			router.With(routeRelevanceRequestGuard(cors), principalMiddleware, routeLimiter.Middleware).Post("/v1/route-relevance", routeRelevanceHandler(logger, service).ServeHTTP)
+		}
+		if realtimeHandler != nil {
+			router.With(principalMiddleware).Get("/events", realtimeHandler.ServeHTTP)
+		}
+		if pool != nil {
+			pushStore := push.NewStore(pool)
+			router.With(principalMiddleware).Post("/push-subscriptions", pushSubscriptionCreateHandler(pushStore).ServeHTTP)
+			router.With(principalMiddleware).Delete("/push-subscriptions/{subscription_id}", pushSubscriptionDeleteHandler(pushStore).ServeHTTP)
+		}
 	}
 	return router
 }
@@ -73,9 +140,17 @@ func NewServerWithMediaAndCORS(addr string, logger *slog.Logger, rateConfig Rate
 }
 
 func NewServerWithMediaAndCORSAndPublicIncidents(addr string, logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, ingestors ...reports.Ingestor) *http.Server {
+	return NewServerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(addr, logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, AuthConfig{}, nil, ingestors...)
+}
+
+func NewServerWithMediaAndCORSAndPublicIncidentsAndAuth(addr string, logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, ingestors ...reports.Ingestor) *http.Server {
+	return NewServerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(addr, logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, authConfig, nil, ingestors...)
+}
+
+func NewServerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(addr string, logger *slog.Logger, rateConfig RateLimitConfig, allowedOrigins []string, pool *pgxpool.Pool, storage media.Storage, publicReader incidents.PublicIncidentReader, publicPolicy config.PublicIncidentGeometryPolicy, authConfig AuthConfig, realtimeHandler http.Handler, ingestors ...reports.Ingestor) *http.Server {
 	return &http.Server{
 		Addr:              addr,
-		Handler:           NewHandlerWithMediaAndCORSAndPublicIncidents(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, ingestors...),
+		Handler:           NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger, rateConfig, allowedOrigins, pool, storage, publicReader, publicPolicy, authConfig, realtimeHandler, ingestors...),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -90,4 +165,14 @@ func healthHandler(logger *slog.Logger) http.HandlerFunc {
 			logger.Error("write health response", "error", err)
 		}
 	}
+}
+
+func currentSessionHandler(writer http.ResponseWriter, request *http.Request) {
+	principal, ok := auth.PrincipalFromContext(request.Context())
+	if !ok {
+		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(writer).Encode(map[string]string{"user_id": principal.UserID.String()})
 }

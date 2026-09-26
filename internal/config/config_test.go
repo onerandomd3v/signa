@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_AI_PROVIDER_TIMEOUT", "SIGNA_AI_RETRY_MAX_ATTEMPTS", "SIGNA_AI_RETRY_BACKOFF", "SIGNA_DELIVERY_CONSUMER_GROUP", "SIGNA_DELIVERY_CONSUMER_NAME", "SIGNA_DELIVERY_POLL_INTERVAL", "SIGNA_DELIVERY_RETRY_MAX_ATTEMPTS", "SIGNA_DELIVERY_RETRY_BACKOFF", "SIGNA_DELIVERY_ATTEMPT_LEASE", "SIGNA_WEB_ALLOWED_ORIGINS"} {
+	for _, name := range []string{"SIGNA_API_ADDR", "SIGNA_SHUTDOWN_TIMEOUT", "SIGNA_SSE_HEARTBEAT_INTERVAL", "SIGNA_WORKER_INTERVAL", "SIGNA_REPORT_RATE_PER_MINUTE", "SIGNA_REPORT_RATE_BURST", "SIGNA_REPORT_GLOBAL_RATE_PER_MINUTE", "SIGNA_REPORT_GLOBAL_RATE_BURST", "SIGNA_OPENAI_API_KEY", "SIGNA_OPENAI_MODEL", "SIGNA_OPENAI_BASE_URL", "SIGNA_AI_SCHEMA_PATH", "SIGNA_AI_GENERATION_SCHEMA_PATH", "SIGNA_AI_CONSUMER_GROUP", "SIGNA_AI_CONSUMER_NAME", "SIGNA_AI_POLL_INTERVAL", "SIGNA_AI_PROVIDER_TIMEOUT", "SIGNA_AI_RETRY_MAX_ATTEMPTS", "SIGNA_AI_RETRY_BACKOFF", "SIGNA_DELIVERY_CONSUMER_GROUP", "SIGNA_DELIVERY_CONSUMER_NAME", "SIGNA_DELIVERY_POLL_INTERVAL", "SIGNA_DELIVERY_RETRY_MAX_ATTEMPTS", "SIGNA_DELIVERY_RETRY_BACKOFF", "SIGNA_DELIVERY_ATTEMPT_LEASE", "SIGNA_WEB_ALLOWED_ORIGINS", "SIGNA_SESSION_COOKIE_SECURE", "SIGNA_SESSION_COOKIE_SAME_SITE"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("SIGNA_DATABASE_URL", "")
@@ -30,6 +30,9 @@ func TestLoadDefaults(t *testing.T) {
 	if got.ShutdownTimeout != defaultShutdownTimeout {
 		t.Errorf("ShutdownTimeout = %s, want %s", got.ShutdownTimeout, defaultShutdownTimeout)
 	}
+	if got.SSEHeartbeatInterval != defaultSSEHeartbeatInterval {
+		t.Errorf("SSEHeartbeatInterval = %s, want %s", got.SSEHeartbeatInterval, defaultSSEHeartbeatInterval)
+	}
 	if got.WorkerInterval != defaultWorkerInterval {
 		t.Errorf("WorkerInterval = %s, want %s", got.WorkerInterval, defaultWorkerInterval)
 	}
@@ -45,6 +48,9 @@ func TestLoadDefaults(t *testing.T) {
 	if !reflect.DeepEqual(got.WebAllowedOrigins, []string{defaultWebAllowedOrigin}) {
 		t.Fatalf("WebAllowedOrigins = %#v, want %#v", got.WebAllowedOrigins, []string{defaultWebAllowedOrigin})
 	}
+	if got.SessionCookieSecure != defaultSessionCookieSecure || got.SessionCookieSameSite != defaultSessionCookieSameSite {
+		t.Fatalf("session cookie defaults = %#v", got)
+	}
 }
 
 func TestLoadEnvironment(t *testing.T) {
@@ -52,6 +58,7 @@ func TestLoadEnvironment(t *testing.T) {
 	t.Setenv("SIGNA_DATABASE_URL", "postgres://user:password@localhost:5432/example?sslmode=disable")
 	t.Setenv("SIGNA_REDIS_ADDR", "127.0.0.1:6380")
 	t.Setenv("SIGNA_SHUTDOWN_TIMEOUT", "2s")
+	t.Setenv("SIGNA_SSE_HEARTBEAT_INTERVAL", "3s")
 	t.Setenv("SIGNA_WORKER_INTERVAL", "250ms")
 	t.Setenv("SIGNA_REPORT_RATE_PER_MINUTE", "10")
 	t.Setenv("SIGNA_REPORT_RATE_BURST", "4")
@@ -75,6 +82,8 @@ func TestLoadEnvironment(t *testing.T) {
 	t.Setenv("SIGNA_DELIVERY_RETRY_BACKOFF", "300ms")
 	t.Setenv("SIGNA_DELIVERY_ATTEMPT_LEASE", "7m")
 	t.Setenv("SIGNA_WEB_ALLOWED_ORIGINS", " http://localhost:3000, https://staging.signa.test, http://localhost:3000 ")
+	t.Setenv("SIGNA_SESSION_COOKIE_SECURE", "true")
+	t.Setenv("SIGNA_SESSION_COOKIE_SAME_SITE", "none")
 
 	got, err := Load()
 	if err != nil {
@@ -86,6 +95,7 @@ func TestLoadEnvironment(t *testing.T) {
 		DatabaseURL:               "postgres://user:password@localhost:5432/example?sslmode=disable",
 		RedisAddr:                 "127.0.0.1:6380",
 		ShutdownTimeout:           2 * time.Second,
+		SSEHeartbeatInterval:      3 * time.Second,
 		WorkerInterval:            250 * time.Millisecond,
 		ReportRatePerMinute:       10,
 		ReportRateBurst:           4,
@@ -109,6 +119,8 @@ func TestLoadEnvironment(t *testing.T) {
 		DeliveryRetryBackoff:      300 * time.Millisecond,
 		DeliveryAttemptLease:      7 * time.Minute,
 		WebAllowedOrigins:         []string{"http://localhost:3000", "https://staging.signa.test"},
+		SessionCookieSecure:       true,
+		SessionCookieSameSite:     "none",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Load() = %+v, want %+v", got, want)
@@ -119,6 +131,14 @@ func TestLoadRejectsInvalidDuration(t *testing.T) {
 	t.Setenv("SIGNA_SHUTDOWN_TIMEOUT", "not-a-duration")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() error = nil, want an invalid-duration error")
+	}
+}
+
+func TestLoadRejectsInsecureNoneSessionCookie(t *testing.T) {
+	t.Setenv("SIGNA_SESSION_COOKIE_SECURE", "false")
+	t.Setenv("SIGNA_SESSION_COOKIE_SAME_SITE", "none")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want insecure SameSite=None error")
 	}
 }
 
@@ -269,6 +289,36 @@ func TestLoadRejectsOutOfRangeWebOriginPort(t *testing.T) {
 		t.Fatal("webAllowedOriginsFromEnv() error = nil, want invalid port error")
 	}
 }
+
+func TestLoadWebPushConfigRequiresServerOnlyVAPIDSettings(t *testing.T) {
+	for _, name := range []string{"SIGNA_WEB_PUSH_VAPID_SUBJECT", "SIGNA_WEB_PUSH_VAPID_PUBLIC_KEY", "SIGNA_WEB_PUSH_VAPID_PRIVATE_KEY"} {
+		t.Setenv(name, "")
+	}
+	if _, err := LoadWebPushConfig(); err == nil {
+		t.Fatal("LoadWebPushConfig() error = nil, want missing setting error")
+	}
+}
+
+func TestLoadWebPushConfigParsesBoundedWorkerSettings(t *testing.T) {
+	t.Setenv("SIGNA_WEB_PUSH_VAPID_SUBJECT", "mailto:alerts@example.test")
+	t.Setenv("SIGNA_WEB_PUSH_VAPID_PUBLIC_KEY", "public-key")
+	t.Setenv("SIGNA_WEB_PUSH_VAPID_PRIVATE_KEY", "private-key")
+	t.Setenv("SIGNA_WEB_PUSH_TTL", "2m")
+	t.Setenv("SIGNA_WEB_PUSH_TIMEOUT", "7s")
+
+	got, err := LoadWebPushConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Subscriber != "mailto:alerts@example.test" || got.VAPIDPublicKey != "public-key" || got.VAPIDPrivateKey != "private-key" || got.TTL != 2*time.Minute || got.Timeout != 7*time.Second {
+		t.Fatalf("web push config = %+v", got)
+	}
+
+	t.Setenv("SIGNA_WEB_PUSH_TTL", "2419201s")
+	if _, err := LoadWebPushConfig(); err == nil {
+		t.Fatal("LoadWebPushConfig() error = nil for excessive TTL")
+	}
+}
 func TestLoadPriorityPolicyRequiresExplicitValidConfiguration(t *testing.T) {
 	setPriorityEnv(t, "100", "500", "10m", "30m")
 
@@ -302,6 +352,59 @@ func TestLoadPriorityPolicyRequiresExplicitValidConfiguration(t *testing.T) {
 				t.Fatal("LoadPriorityPolicy() error = nil")
 			}
 		})
+	}
+}
+
+func TestLoadRetentionPolicyRequiresExplicitValidConfiguration(t *testing.T) {
+	setRetentionEnv(t, "24h", "1h", "168h", "720h", "24h", "15m", "100")
+	got, err := LoadRetentionPolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BatchSize != 100 || got.ReportExactLocation != 24*time.Hour || got.UserLocation != time.Hour {
+		t.Fatalf("retention policy = %+v", got)
+	}
+
+	for _, name := range []string{"SIGNA_RETENTION_REPORT_EXACT_LOCATION", "SIGNA_RETENTION_USER_LOCATION", "SIGNA_RETENTION_MEDIA_METADATA", "SIGNA_RETENTION_OPERATIONAL_LOGS", "SIGNA_RETENTION_AUTH_SESSIONS", "SIGNA_RETENTION_SWEEP_INTERVAL", "SIGNA_RETENTION_BATCH_SIZE"} {
+		t.Run("missing "+name, func(t *testing.T) {
+			setRetentionEnv(t, "24h", "1h", "168h", "720h", "24h", "15m", "100")
+			t.Setenv(name, "")
+			if _, err := LoadRetentionPolicy(); err == nil {
+				t.Fatal("LoadRetentionPolicy() error = nil")
+			}
+		})
+	}
+	for _, value := range []string{"0s", "-1h", "not-a-duration"} {
+		t.Run("invalid duration "+value, func(t *testing.T) {
+			setRetentionEnv(t, "24h", "1h", "168h", "720h", "24h", "15m", "100")
+			t.Setenv("SIGNA_RETENTION_USER_LOCATION", value)
+			if _, err := LoadRetentionPolicy(); err == nil {
+				t.Fatal("LoadRetentionPolicy() error = nil")
+			}
+		})
+	}
+	for _, value := range []string{"0", "10001", "bad"} {
+		t.Run("invalid batch "+value, func(t *testing.T) {
+			setRetentionEnv(t, "24h", "1h", "168h", "720h", "24h", "15m", value)
+			if _, err := LoadRetentionPolicy(); err == nil {
+				t.Fatal("LoadRetentionPolicy() error = nil")
+			}
+		})
+	}
+}
+
+func setRetentionEnv(t *testing.T, report, user, media, operational, sessions, sweep, batch string) {
+	t.Helper()
+	for name, value := range map[string]string{
+		"SIGNA_RETENTION_REPORT_EXACT_LOCATION": report,
+		"SIGNA_RETENTION_USER_LOCATION":         user,
+		"SIGNA_RETENTION_MEDIA_METADATA":        media,
+		"SIGNA_RETENTION_OPERATIONAL_LOGS":      operational,
+		"SIGNA_RETENTION_AUTH_SESSIONS":         sessions,
+		"SIGNA_RETENTION_SWEEP_INTERVAL":        sweep,
+		"SIGNA_RETENTION_BATCH_SIZE":            batch,
+	} {
+		t.Setenv(name, value)
 	}
 }
 

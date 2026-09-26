@@ -1,13 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { PublicIncident } from "@/lib/api/generated";
 import { fetchPublicIncident } from "@/lib/api/incidents";
+import type { AlertReader } from "./use-alert-reconciliation";
+import { useCoalescedRefresh } from "./use-coalesced-refresh";
 import {
   IncidentDetail,
+  RealtimeConnectionStatusMessage,
   type IncidentDetailState,
   type IncidentView,
 } from "./incident-views";
+import { RealtimeAlertSnapshots } from "./realtime-alert-snapshots";
+import { useAlertReconciliation } from "./use-alert-reconciliation";
+import type { RealtimeConnector } from "./use-realtime-updates";
+import { useRealtimeUpdates } from "./use-realtime-updates";
 
 function toIncidentView(incident: PublicIncident): IncidentView {
   return {
@@ -25,49 +32,110 @@ function toIncidentView(incident: PublicIncident): IncidentView {
 
 export function IncidentDetailExperience({
   incidentId,
+  connectRealtime,
+  readAlert,
 }: {
   incidentId: string;
+  connectRealtime?: RealtimeConnector;
+  readAlert?: AlertReader;
 }) {
   const [state, setState] = useState<IncidentDetailState>({
     status: "loading",
   });
-  const [retryCount, setRetryCount] = useState(0);
+  const [reconciliationFailed, setReconciliationFailed] = useState(false);
+  const loadedIncidentIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    fetchPublicIncident(incidentId)
-      .then((result) => {
-        if (!active) return;
-        if (result.status === "ready") {
-          setState({
-            status: "ready",
-            incident: toIncidentView(result.incident),
-          });
+  const refresh = useCoalescedRefresh({
+    key: incidentId,
+    load: (signal: AbortSignal) =>
+      fetchPublicIncident(incidentId, globalThis.fetch, signal),
+    onSuccess: (result) => {
+      if (result.status === "ready") {
+        loadedIncidentIdRef.current = incidentId;
+        setReconciliationFailed(false);
+        setState({
+          status: "ready",
+          incident: toIncidentView(result.incident),
+        });
+      } else if (result.status === "error") {
+        if (loadedIncidentIdRef.current === incidentId) {
+          setReconciliationFailed(true);
         } else {
-          setState({ status: result.status });
+          setState({ status: "error" });
         }
-      })
-      .catch(() => {
-        if (active) setState({ status: "error" });
-      });
-    return () => {
-      active = false;
-    };
-  }, [incidentId, retryCount]);
+      } else {
+        loadedIncidentIdRef.current = null;
+        setReconciliationFailed(false);
+        setState({ status: result.status });
+      }
+    },
+    onError: () => {
+      if (loadedIncidentIdRef.current === incidentId) {
+        setReconciliationFailed(true);
+      } else {
+        setState({ status: "error" });
+      }
+    },
+  });
+  const alertReconciliation = useAlertReconciliation({ readAlert });
+  const acceptAlertEvents = alertReconciliation.acceptEvents;
+  const revalidateAlerts = alertReconciliation.revalidateKnown;
+  const clearProtectedAlerts = alertReconciliation.clearProtectedAlerts;
+  const onInvalidation = useCallback(
+    ({
+      incidents: incidentsChanged,
+      alerts,
+    }: {
+      incidents: boolean;
+      alerts: { alertId: string; incidentId: string }[];
+    }) => {
+      if (incidentsChanged) refresh();
+      acceptAlertEvents(
+        alerts.filter((alert) => alert.incidentId === incidentId),
+      );
+    },
+    [acceptAlertEvents, incidentId, refresh],
+  );
+  const realtime = useRealtimeUpdates({
+    onInvalidation,
+    onConnected: revalidateAlerts,
+    onUnauthorized: clearProtectedAlerts,
+    connect: connectRealtime,
+  });
 
-  if (state.status === "error") {
-    return (
-      <IncidentDetail
-        state={{
-          ...state,
+  const visibleState =
+    state.status === "ready" && state.incident.id !== incidentId
+      ? { status: "loading" as const }
+      : state;
+  const detailState: IncidentDetailState =
+    visibleState.status === "error"
+      ? {
+          ...visibleState,
           onRetry: () => {
             setState({ status: "loading" });
-            setRetryCount((count) => count + 1);
+            refresh();
           },
-        }}
-      />
-    );
-  }
+        }
+      : visibleState;
+  const isReconciliationFailed =
+    reconciliationFailed &&
+    state.status === "ready" &&
+    state.incident.id === incidentId;
 
-  return <IncidentDetail state={state} />;
+  return (
+    <div className="space-y-3">
+      <RealtimeConnectionStatusMessage
+        alertUpdateReceived={realtime.alertUpdateReceived}
+        status={isReconciliationFailed ? "degraded" : realtime.status}
+        onRetry={refresh}
+      />
+      <IncidentDetail state={detailState} />
+      <RealtimeAlertSnapshots
+        alerts={alertReconciliation.alerts}
+        hasOverflow={alertReconciliation.hasOverflow}
+        incidentId={incidentId}
+        onRetry={alertReconciliation.retry}
+      />
+    </div>
+  );
 }

@@ -18,6 +18,22 @@ describe("fetchPublicIncidents", () => {
     });
   });
 
+  it("passes cancellation through to the generated list request", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("[]", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const controller = new AbortController();
+
+    await fetchPublicIncidents(fetchMock, controller.signal);
+
+    expect(fetchMock.mock.calls[0][0]).toMatchObject({
+      signal: controller.signal,
+    });
+  });
+
   it("surfaces API failure instead of treating it as an empty map", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

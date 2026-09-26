@@ -10,17 +10,10 @@
 
 The map uses MapLibre GL JS and generalized public incident geometry from the Go API. Set `NEXT_PUBLIC_MAP_STYLE_URL` to a public style URL for a provider approved for the deployment. This URL is visible to browsers; do not include credentials. Review the provider’s terms, rate limits, and privacy practices before configuring it. With no valid style configured, incident details remain available in the text list and the map shows an unavailable message.
 
-## Route relevance boundary (COD-209)
+## Route relevance (COD-209)
 
-The current OpenAPI contract has no browser-facing route request, route geometry response, or route/incident relevance operation. COD-208's OSRM-compatible adapter and COD-210's route policy are internal and request-scoped. The browser must not call the routing provider directly, infer relevance from visual proximity/overlap, or calculate alert priority.
+Route checks use the authenticated, generated `POST /v1/route-relevance` client. Users enter origin, destination, and optional ordered waypoints explicitly; the browser sends one request and does not track or persist route inputs. Requests use the configured Go API and the HttpOnly `signa_session` cookie.
 
-The route panel accepts a typed presentation state; it is not an API schema. The map has an optional validated route-line display prop, but the production page supplies no route geometry and shows that route checks are unavailable. Geometry and relevance fixtures are limited to automated tests. Route lines are visual context only; only a future approved backend classification may label a route relevant or not relevant.
+The backend owns `RELEVANT`, `NOT_RELEVANT`, and `UNKNOWN`. The returned LineString is display-only and request-scoped; it is validated before drawing. Only generalized public incident projections are shown. `NOT_RELEVANT`, missing data, and failed checks do not mean a route is safe. The browser never calls the routing provider or computes relevance.
 
-Before production integration, the backend/API owner must approve a versioned browser-facing contract and privacy policy covering:
-
-- how a user explicitly submits a request-scoped origin, destination, and optional waypoints without persisting route geometry or exposing the OSRM provider;
-- whether and at what precision a route line may be returned to the requesting browser, and how request identity, consent, logging, retention, and rate limits protect it;
-- a generated public response that distinguishes route relevance (`RELEVANT`, `NOT_RELEVANT`, or `UNKNOWN`) from incident-data-unavailable and routing/request failures, and identifies only incidents safe for public display;
-- timeout, retry, freshness, and partial-result behavior, without treating absent data or `NOT_RELEVANT` as a safety guarantee.
-
-No endpoint path, request/response schema, provider URL, route persistence, or browser integration is defined here. The follow-up is for the owner to approve that contract (and any necessary ADR/privacy decision), add it to OpenAPI and the backend, then wire the generated client to these presentation and map boundaries.
+401/403, 429, 500/503, validation, and network failures are presented separately using the API contract. A 503 may indicate routing or public-incident dependency failure; the interface does not guess which unless the backend error code distinguishes it. Requests are abortable on edits, resubmission, and unmount. Route inputs and geometry are not persisted by the backend, per the approved contract.

@@ -4,6 +4,31 @@ export type ClientOptions = {
     baseUrl: 'http://localhost:8080' | (string & {});
 };
 
+export type CurrentSession = {
+    /**
+     * Canonical user identity resolved by the API session store.
+     */
+    user_id: string;
+};
+
+/**
+ * Immutable, privacy-safe alert snapshot authorized by the authenticated user's durable delivery relationship. Delivery/provider internals, reporter identity, raw evidence, and exact private coordinates are omitted.
+ */
+export type AlertRead = {
+    alert_id: string;
+    incident_id: string;
+    alert_type: 'IMMEDIATE' | 'NEARBY';
+    confidence_snapshot: 'UNVERIFIED' | 'EMERGING' | 'CORROBORATED' | 'HIGH_CONFIDENCE' | 'DISPUTED';
+    severity_snapshot: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+    status_snapshot: 'OPEN' | 'RESOLVING' | 'RESOLVED' | 'EXPIRED';
+    priority_snapshot: 'P1' | 'P2' | 'P3' | 'NONE';
+    freshness_snapshot: 'FRESH' | 'STALE' | 'UNKNOWN';
+    message: string;
+    as_of: string;
+    created_at: string;
+    supersedes_alert_id: string | null;
+};
+
 export type HealthResponse = {
     /**
      * Health status returned by the API.
@@ -81,6 +106,20 @@ export type ReportMedia = {
     created_at: string;
 };
 
+export type PushSubscriptionRequest = {
+    endpoint: string;
+    keys: {
+        p256dh: string;
+        auth: string;
+    };
+};
+
+export type PushSubscriptionResponse = {
+    id: string;
+    created_at: string;
+    updated_at: string;
+};
+
 /**
  * Active incident projection with generalized public geometry; exact internal coordinates and report evidence are omitted.
  */
@@ -94,6 +133,40 @@ export type PublicIncident = {
     started_at: string | null;
     last_signal_at: string | null;
     updated_at: string;
+};
+
+export type RouteRelevanceRequest = {
+    origin: RouteCoordinate;
+    destination: RouteCoordinate;
+    /**
+     * Optional ordered intermediate points; no continuous tracking is accepted.
+     */
+    waypoints?: Array<RouteCoordinate>;
+};
+
+export type RouteCoordinate = {
+    latitude: number;
+    longitude: number;
+};
+
+export type RouteRelevanceResponse = {
+    /**
+     * Server-authoritative route relevance; NOT_RELEVANT does not mean safe or clear.
+     */
+    classification: 'RELEVANT' | 'NOT_RELEVANT' | 'UNKNOWN';
+    route_geometry: RouteLineString;
+    /**
+     * Existing browser-safe public incident projections associated with the route evaluation.
+     */
+    incidents: Array<PublicIncident>;
+};
+
+/**
+ * Request-scoped validated GeoJSON LineString in EPSG:4326 returned only to the authenticated requester for map display.
+ */
+export type RouteLineString = {
+    type: 'LineString';
+    coordinates: Array<Array<number>>;
 };
 
 /**
@@ -136,6 +209,10 @@ export type ReportId = string;
 
 export type IncidentId = string;
 
+export type SubscriptionId = string;
+
+export type AlertId = string;
+
 export type GetHealthData = {
     body?: never;
     path?: never;
@@ -151,6 +228,119 @@ export type GetHealthResponses = {
 };
 
 export type GetHealthResponse = GetHealthResponses[keyof GetHealthResponses];
+
+export type GetCurrentSessionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/session';
+};
+
+export type GetCurrentSessionErrors = {
+    /**
+     * Missing, malformed, expired, or revoked session
+     */
+    401: ErrorResponse;
+    /**
+     * Authentication session store unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type GetCurrentSessionError = GetCurrentSessionErrors[keyof GetCurrentSessionErrors];
+
+export type GetCurrentSessionResponses = {
+    /**
+     * Authenticated session principal
+     */
+    200: CurrentSession;
+};
+
+export type GetCurrentSessionResponse = GetCurrentSessionResponses[keyof GetCurrentSessionResponses];
+
+export type EvaluateRouteRelevanceData = {
+    body: RouteRelevanceRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/route-relevance';
+};
+
+export type EvaluateRouteRelevanceErrors = {
+    /**
+     * Invalid coordinate, waypoint, or request body.
+     */
+    400: ErrorResponse;
+    /**
+     * Missing, malformed, expired, or revoked canonical session.
+     */
+    401: ErrorResponse;
+    /**
+     * Request origin is not allowed for this browser-facing operation.
+     */
+    403: ErrorResponse;
+    /**
+     * Route-work rate limit exceeded.
+     */
+    429: ErrorResponse;
+    /**
+     * Internal server error.
+     */
+    500: ErrorResponse;
+    /**
+     * Routing or public incident data dependency unavailable or timed out.
+     */
+    503: ErrorResponse;
+};
+
+export type EvaluateRouteRelevanceError = EvaluateRouteRelevanceErrors[keyof EvaluateRouteRelevanceErrors];
+
+export type EvaluateRouteRelevanceResponses = {
+    /**
+     * Authoritative route relevance result and browser-display geometry.
+     */
+    200: RouteRelevanceResponse;
+};
+
+export type EvaluateRouteRelevanceResponse = EvaluateRouteRelevanceResponses[keyof EvaluateRouteRelevanceResponses];
+
+export type GetAlertData = {
+    body?: never;
+    path: {
+        alert_id: string;
+    };
+    query?: never;
+    url: '/alerts/{alert_id}';
+};
+
+export type GetAlertErrors = {
+    /**
+     * Invalid alert identifier
+     */
+    400: ErrorResponse;
+    /**
+     * Missing, malformed, expired, or revoked session
+     */
+    401: ErrorResponse;
+    /**
+     * Alert is not visible to the authenticated user
+     */
+    404: ErrorResponse;
+    /**
+     * Alert or authentication store unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type GetAlertError = GetAlertErrors[keyof GetAlertErrors];
+
+export type GetAlertResponses = {
+    /**
+     * Authorized alert snapshot
+     */
+    200: AlertRead;
+};
+
+export type GetAlertResponse = GetAlertResponses[keyof GetAlertResponses];
 
 export type CreateReportData = {
     body: CreateReportRequest;
@@ -252,6 +442,45 @@ export type GetIncidentResponses = {
 
 export type GetIncidentResponse = GetIncidentResponses[keyof GetIncidentResponses];
 
+export type StreamRealtimeEventsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Opaque base64url cursor returned in each SSE event id.
+         */
+        'Last-Event-ID'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/events';
+};
+
+export type StreamRealtimeEventsErrors = {
+    /**
+     * Invalid reconnect cursor
+     */
+    400: ErrorResponse;
+    /**
+     * Authentication required
+     */
+    401: ErrorResponse;
+    /**
+     * Realtime source unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type StreamRealtimeEventsError = StreamRealtimeEventsErrors[keyof StreamRealtimeEventsErrors];
+
+export type StreamRealtimeEventsResponses = {
+    /**
+     * Long-lived authorized event stream.
+     */
+    200: string;
+};
+
+export type StreamRealtimeEventsResponse = StreamRealtimeEventsResponses[keyof StreamRealtimeEventsResponses];
+
 export type AuthorizeReportMediaUploadData = {
     body: MediaUploadRequest;
     path: {
@@ -333,3 +562,79 @@ export type AttachReportMediaResponses = {
 };
 
 export type AttachReportMediaResponse = AttachReportMediaResponses[keyof AttachReportMediaResponses];
+
+export type RegisterPushSubscriptionData = {
+    body: PushSubscriptionRequest;
+    path?: never;
+    query?: never;
+    url: '/push-subscriptions';
+};
+
+export type RegisterPushSubscriptionErrors = {
+    /**
+     * Invalid subscription
+     */
+    400: ErrorResponse;
+    /**
+     * Authentication required
+     */
+    401: ErrorResponse;
+    /**
+     * Subscription belongs to another user
+     */
+    409: ErrorResponse;
+    /**
+     * Subscription persistence failure
+     */
+    500: ErrorResponse;
+};
+
+export type RegisterPushSubscriptionError = RegisterPushSubscriptionErrors[keyof RegisterPushSubscriptionErrors];
+
+export type RegisterPushSubscriptionResponses = {
+    /**
+     * Existing subscription updated idempotently
+     */
+    200: PushSubscriptionResponse;
+    /**
+     * Push subscription registered
+     */
+    201: PushSubscriptionResponse;
+};
+
+export type RegisterPushSubscriptionResponse = RegisterPushSubscriptionResponses[keyof RegisterPushSubscriptionResponses];
+
+export type RevokePushSubscriptionData = {
+    body?: never;
+    path: {
+        subscription_id: string;
+    };
+    query?: never;
+    url: '/push-subscriptions/{subscription_id}';
+};
+
+export type RevokePushSubscriptionErrors = {
+    /**
+     * Authentication required
+     */
+    401: ErrorResponse;
+    /**
+     * Push subscription not found for this user
+     */
+    404: ErrorResponse;
+    /**
+     * Subscription persistence failure
+     */
+    500: ErrorResponse;
+};
+
+export type RevokePushSubscriptionError = RevokePushSubscriptionErrors[keyof RevokePushSubscriptionErrors];
+
+export type RevokePushSubscriptionResponses = {
+    /**
+     * Push subscription revoked
+     */
+    204: void;
+};
+
+export type RevokePushSubscriptionResponse = RevokePushSubscriptionResponses[keyof RevokePushSubscriptionResponses];

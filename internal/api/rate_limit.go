@@ -10,26 +10,38 @@ import (
 )
 
 const (
-	defaultRatePerMinute       = 6
-	defaultRateBurst           = 3
-	defaultGlobalRatePerMinute = 120
-	defaultGlobalRateBurst     = 30
-	defaultIdleAfter           = 10 * time.Minute
+	defaultRatePerMinute            = 6
+	defaultRateBurst                = 3
+	defaultGlobalRatePerMinute      = 120
+	defaultGlobalRateBurst          = 30
+	defaultRouteRatePerMinute       = 10
+	defaultRouteRateBurst           = 2
+	defaultGlobalRouteRatePerMinute = 120
+	defaultGlobalRouteRateBurst     = 30
+	defaultIdleAfter                = 10 * time.Minute
 )
 
 type RateLimitConfig struct {
-	PerClientRatePerMinute int
-	PerClientBurst         int
-	GlobalRatePerMinute    int
-	GlobalBurst            int
+	PerClientRatePerMinute      int
+	PerClientBurst              int
+	GlobalRatePerMinute         int
+	GlobalBurst                 int
+	PerClientRouteRatePerMinute int
+	PerClientRouteBurst         int
+	GlobalRouteRatePerMinute    int
+	GlobalRouteBurst            int
 }
 
 func DefaultRateLimitConfig() RateLimitConfig {
 	return RateLimitConfig{
-		PerClientRatePerMinute: defaultRatePerMinute,
-		PerClientBurst:         defaultRateBurst,
-		GlobalRatePerMinute:    defaultGlobalRatePerMinute,
-		GlobalBurst:            defaultGlobalRateBurst,
+		PerClientRatePerMinute:      defaultRatePerMinute,
+		PerClientBurst:              defaultRateBurst,
+		GlobalRatePerMinute:         defaultGlobalRatePerMinute,
+		GlobalBurst:                 defaultGlobalRateBurst,
+		PerClientRouteRatePerMinute: defaultRouteRatePerMinute,
+		PerClientRouteBurst:         defaultRouteRateBurst,
+		GlobalRouteRatePerMinute:    defaultGlobalRouteRatePerMinute,
+		GlobalRouteBurst:            defaultGlobalRouteRateBurst,
 	}
 }
 

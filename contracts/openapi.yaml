@@ -21,6 +21,137 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
               example:
                 status: ok
+  /auth/session:
+    get:
+      operationId: getCurrentSession
+      summary: Resolve the authenticated browser session
+      description: Returns the canonical principal resolved from the HttpOnly session cookie.
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: Authenticated session principal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentSession'
+        '401':
+          description: Missing, malformed, expired, or revoked session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Authentication session store unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/route-relevance:
+    post:
+      operationId: evaluateRouteRelevance
+      summary: Evaluate route relevance against public incidents
+      description: >-
+        Evaluates one authenticated, request-scoped origin-to-destination route
+        with optional waypoints. The server owns the relevance classification.
+        Route inputs and returned geometry are not persisted, published, or
+        included in application logs. NOT_RELEVANT does not mean that a route
+        is safe or clear.
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteRelevanceRequest'
+      responses:
+        '200':
+          description: Authoritative route relevance result and browser-display geometry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteRelevanceResponse'
+        '400':
+          description: Invalid coordinate, waypoint, or request body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing, malformed, expired, or revoked canonical session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Request origin is not allowed for this browser-facing operation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Route-work rate limit exceeded.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Routing or public incident data dependency unavailable or timed out.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alerts/{alert_id}:
+    get:
+      operationId: getAlert
+      summary: Read an authorized alert snapshot
+      description: Returns the immutable, privacy-safe alert snapshot for the authenticated user's non-terminal delivery relationship. A stale, superseded, resolving, resolved, or expired snapshot is returned as stored; SSE remains a change notification and this response is authoritative.
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AlertID'
+      responses:
+        '200':
+          description: Authorized alert snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertRead'
+        '400':
+          description: Invalid alert identifier
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing, malformed, expired, or revoked session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Alert is not visible to the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Alert or authentication store unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports:
     post:
       operationId: createReport
@@ -131,6 +262,28 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /events:
+    get:
+      operationId: streamRealtimeEvents
+      security:
+        - CookieAuth: []
+      summary: Stream authorized incident and alert updates
+      description: Authenticated SSE stream protected by the ADR-0012 HttpOnly signa_session cookie. Clients reconnect with Last-Event-ID and reconcile authoritative state after disconnect gaps.
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: { type: string }
+          description: Opaque base64url cursor returned in each SSE event id.
+      responses:
+        '200':
+          description: Long-lived authorized event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '400': { description: Invalid reconnect cursor, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: Realtime source unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   /reports/{report_id}/media/uploads:
     post:
       operationId: authorizeReportMediaUpload
@@ -180,7 +333,56 @@ paths:
         '409': { description: Media attachment conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '429': { description: Rate limit exceeded, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '503': { description: Media storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /push-subscriptions:
+    post:
+      operationId: registerPushSubscription
+      summary: Register the authenticated browser's Web Push subscription
+      description: Stores the subscription for the authenticated user. Endpoint and key material are never returned.
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushSubscriptionRequest'
+      responses:
+        '201':
+          description: Push subscription registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushSubscriptionResponse'
+        '200':
+          description: Existing subscription updated idempotently
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushSubscriptionResponse'
+        '400': { description: Invalid subscription, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '409': { description: Subscription belongs to another user, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { description: Subscription persistence failure, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /push-subscriptions/{subscription_id}:
+    delete:
+      operationId: revokePushSubscription
+      summary: Revoke one authenticated user's Web Push subscription
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SubscriptionID'
+      responses:
+        '204': { description: Push subscription revoked }
+        '401': { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Push subscription not found for this user, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { description: Subscription persistence failure, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: signa_session
+      description: HttpOnly opaque session cookie. The browser supplies it with credentialed API and SSE requests; credentials never appear in URLs.
   parameters:
     ReportID:
       name: report_id
@@ -196,7 +398,58 @@ components:
       schema:
         type: string
         format: uuid
+    SubscriptionID:
+      name: subscription_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AlertID:
+      name: alert_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   schemas:
+    CurrentSession:
+      type: object
+      required: [user_id]
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Canonical user identity resolved by the API session store.
+    AlertRead:
+      type: object
+      description: Immutable, privacy-safe alert snapshot authorized by the authenticated user's durable delivery relationship. Delivery/provider internals, reporter identity, raw evidence, and exact private coordinates are omitted.
+      additionalProperties: false
+      required: [alert_id, incident_id, alert_type, confidence_snapshot, severity_snapshot, status_snapshot, priority_snapshot, freshness_snapshot, message, as_of, created_at, supersedes_alert_id]
+      properties:
+        alert_id: { type: string, format: uuid }
+        incident_id: { type: string, format: uuid }
+        alert_type: { type: string, enum: [IMMEDIATE, NEARBY] }
+        confidence_snapshot:
+          type: string
+          enum: [UNVERIFIED, EMERGING, CORROBORATED, HIGH_CONFIDENCE, DISPUTED]
+        severity_snapshot:
+          type: string
+          enum: [LOW, MODERATE, HIGH, CRITICAL]
+        status_snapshot:
+          type: string
+          enum: [OPEN, RESOLVING, RESOLVED, EXPIRED]
+        priority_snapshot:
+          type: string
+          enum: [P1, P2, P3, NONE]
+        freshness_snapshot:
+          type: string
+          enum: [FRESH, STALE, UNKNOWN]
+        message: { type: string }
+        as_of: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        supersedes_alert_id: { type: [string, 'null'], format: uuid }
     HealthResponse:
       type: object
       required:
@@ -337,6 +590,30 @@ components:
         content_type: { type: string }
         size_bytes: { type: integer, format: int64 }
         created_at: { type: string, format: date-time }
+    PushSubscriptionRequest:
+      type: object
+      required: [endpoint, keys]
+      additionalProperties: false
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          maxLength: 2048
+        keys:
+          type: object
+          required: [p256dh, auth]
+          additionalProperties: false
+          properties:
+            p256dh: { type: string, minLength: 1, maxLength: 256 }
+            auth: { type: string, minLength: 1, maxLength: 128 }
+    PushSubscriptionResponse:
+      type: object
+      required: [id, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     PublicIncident:
       type: object
       description: Active incident projection with generalized public geometry; exact internal coordinates and report evidence are omitted.
@@ -354,6 +631,69 @@ components:
         started_at: { type: [string, 'null'], format: date-time }
         last_signal_at: { type: [string, 'null'], format: date-time }
         updated_at: { type: string, format: date-time }
+    RouteRelevanceRequest:
+      type: object
+      required: [origin, destination]
+      additionalProperties: false
+      properties:
+        origin:
+          $ref: '#/components/schemas/RouteCoordinate'
+        destination:
+          $ref: '#/components/schemas/RouteCoordinate'
+        waypoints:
+          type: array
+          maxItems: 25
+          items:
+            $ref: '#/components/schemas/RouteCoordinate'
+          description: Optional ordered intermediate points; no continuous tracking is accepted.
+    RouteCoordinate:
+      type: object
+      required: [latitude, longitude]
+      additionalProperties: false
+      properties:
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+    RouteRelevanceResponse:
+      type: object
+      required: [classification, route_geometry, incidents]
+      additionalProperties: false
+      properties:
+        classification:
+          type: string
+          enum: [RELEVANT, NOT_RELEVANT, UNKNOWN]
+          description: Server-authoritative route relevance; NOT_RELEVANT does not mean safe or clear.
+        route_geometry:
+          $ref: '#/components/schemas/RouteLineString'
+        incidents:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PublicIncident'
+          description: Existing browser-safe public incident projections associated with the route evaluation.
+    RouteLineString:
+      type: object
+      required: [type, coordinates]
+      additionalProperties: false
+      description: Request-scoped validated GeoJSON LineString in EPSG:4326 returned only to the authenticated requester for map display.
+      properties:
+        type:
+          type: string
+          const: LineString
+        coordinates:
+          type: array
+          minItems: 2
+          items:
+            type: array
+            minItems: 2
+            maxItems: 3
+            items:
+              type: number
     PublicIncidentGeometry:
       description: GeoJSON-compatible generalized incident area in EPSG:4326.
       oneOf:

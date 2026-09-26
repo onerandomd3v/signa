@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/geospatial"
+	"github.com/onerandomd3v/signa/internal/routing"
 )
 
 func TestPublicIncidentGeometryIntegration(t *testing.T) {
@@ -112,12 +114,67 @@ func TestPublicIncidentGeometryIntegration(t *testing.T) {
 	}
 
 	store := NewStore(pool)
+	route := routing.GeoJSONLineString{Type: "LineString", Coordinates: [][]float64{{3.376, 6.5244}, {3.382, 6.5244}}}
+	classification, routeIncidents, err := store.FindPublicRouteRelevance(ctx, route, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if classification != geospatial.RouteRelevanceRelevant {
+		t.Fatalf("route classification = %q, want RELEVANT", classification)
+	}
+	if len(routeIncidents) == 0 {
+		t.Fatal("route relevance returned no public incident references")
+	}
+	encodedRouteIncidents, err := json.Marshal(routeIncidents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encodedRouteIncidents), "center_point") || strings.Contains(string(encodedRouteIncidents), "reporter") {
+		t.Fatalf("route relevance exposed private incident fields: %s", encodedRouteIncidents)
+	}
 	items, err := store.ListPublicIncidents(ctx, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(items) != maxPublicIncidentLimit {
 		t.Fatalf("public incident count = %d, want bounded limit %d", len(items), maxPublicIncidentLimit)
+	}
+
+	truncatedRouteAffectedID := uuid.New()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO incidents (id, event_type, status, confidence_state, affected_geometry, started_at, last_signal_at, created_at, updated_at)
+		VALUES ($1, 'older_route_intersection', 'OPEN', 'EMERGING',
+			ST_GeomFromText('POLYGON((10.000 10.000, 10.010 10.000, 10.010 10.010, 10.000 10.010, 10.000 10.000))', 4326)::geography,
+			$2, $2, $2, $2)
+	`, truncatedRouteAffectedID, base.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < maxPublicIncidentLimit+5; i++ {
+		id := uuid.New()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO incidents (id, event_type, status, confidence_state, center_point, started_at, last_signal_at, created_at, updated_at)
+			VALUES ($1, 'newer_non_intersecting', 'OPEN', 'UNVERIFIED', ST_SetSRID(ST_MakePoint(20, 20), 4326)::geography, $2, $2, $2, $2)
+		`, id, base.Add(time.Duration(i+10)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	truncatedRoute := routing.GeoJSONLineString{Type: "LineString", Coordinates: [][]float64{{9.99, 10.005}, {10.02, 10.005}}}
+	truncatedClassification, truncatedIncidents, err := store.FindPublicRouteRelevance(ctx, truncatedRoute, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncatedClassification != geospatial.RouteRelevanceRelevant {
+		t.Fatalf("truncated route classification = %q, want RELEVANT", truncatedClassification)
+	}
+	if len(truncatedIncidents) != maxPublicIncidentLimit {
+		t.Fatalf("truncated route incident count = %d, want bounded limit %d", len(truncatedIncidents), maxPublicIncidentLimit)
+	}
+	for _, incident := range truncatedIncidents {
+		if incident.ID == truncatedRouteAffectedID {
+			t.Fatalf("older intersecting incident %s was returned despite projection truncation", truncatedRouteAffectedID)
+		}
 	}
 	for _, item := range items {
 		if item.Status != "OPEN" && item.Status != "RESOLVING" {

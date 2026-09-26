@@ -5,8 +5,10 @@ import { getApiBaseUrl } from "./reports";
 
 export async function fetchPublicIncidents(
   fetchImplementation: typeof fetch = globalThis.fetch,
+  signal?: AbortSignal,
 ): Promise<PublicIncident[]> {
   const result = await listIncidents({
+    signal,
     client: createClient({
       baseUrl: getApiBaseUrl(),
       fetch: fetchImplementation,
@@ -24,9 +26,11 @@ export type PublicIncidentResult =
 export async function fetchPublicIncident(
   incidentId: string,
   fetchImplementation: typeof fetch = globalThis.fetch,
+  signal?: AbortSignal,
 ): Promise<PublicIncidentResult> {
   const result = await getIncident({
     path: { incident_id: incidentId },
+    signal,
     client: createClient({
       baseUrl: getApiBaseUrl(),
       fetch: fetchImplementation,

@@ -55,6 +55,11 @@ type Provider interface {
 	Route(context.Context, Request) (Route, error)
 }
 
+// Validate checks request-scoped route input before it reaches a provider.
+func (r Request) Validate() error {
+	return r.validate()
+}
+
 func (r Request) validate() error {
 	if err := validatePoint(r.Origin); err != nil {
 		return err

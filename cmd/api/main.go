@@ -12,11 +12,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/onerandomd3v/signa/internal/api"
+	"github.com/onerandomd3v/signa/internal/auth"
 	"github.com/onerandomd3v/signa/internal/config"
 	"github.com/onerandomd3v/signa/internal/incidents"
 	"github.com/onerandomd3v/signa/internal/logging"
 	"github.com/onerandomd3v/signa/internal/media"
+	platformredis "github.com/onerandomd3v/signa/internal/platform/redis"
+	"github.com/onerandomd3v/signa/internal/realtime"
 	"github.com/onerandomd3v/signa/internal/reports"
+	"github.com/onerandomd3v/signa/internal/routing"
 )
 
 func main() {
@@ -36,6 +40,18 @@ func run(parent context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("load public incident geometry policy: %w", err)
 	}
+	var routeProvider routing.Provider
+	if routingConfig, routingErr := config.LoadRoutingConfig(); routingErr != nil {
+		logger.Warn("route relevance is disabled; routing configuration is unavailable", "error", routingErr)
+	} else if provider, providerErr := routing.NewProvider(routing.Config{
+		Provider: routingConfig.Provider,
+		BaseURL:  routingConfig.BaseURL,
+		Timeout:  routingConfig.Timeout,
+	}, http.DefaultClient); providerErr != nil {
+		logger.Warn("route relevance is disabled; routing provider could not be initialized", "error", providerErr)
+	} else {
+		routeProvider = provider
+	}
 
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -47,6 +63,12 @@ func run(parent context.Context, logger *slog.Logger) error {
 	defer pool.Close()
 	if err := pool.Ping(ctx); err != nil {
 		return err
+	}
+	redisClient, err := platformredis.Connect(ctx, cfg.RedisAddr)
+	if err != nil {
+		logger.Warn("redis unavailable; realtime events are disabled until restart", "error", err)
+	} else {
+		defer func() { _ = redisClient.Close() }()
 	}
 
 	var storage media.Storage
@@ -64,12 +86,25 @@ func run(parent context.Context, logger *slog.Logger) error {
 		}
 	}
 
-	server := api.NewServerWithMediaAndCORSAndPublicIncidents(cfg.APIAddr, logger, api.RateLimitConfig{
+	var realtimeSource realtime.Source
+	if redisClient != nil {
+		realtimeSource = &realtime.RedisSource{Client: redisClient, Block: cfg.SSEHeartbeatInterval}
+	}
+	sseHandler := realtime.NewHandlerWithContext(ctx, realtimeSource, realtime.ScopeAuthorizer{Resolver: realtime.NewPostgresScopeResolver(pool)}, cfg.SSEHeartbeatInterval)
+	sessionStore := auth.NewPostgresStore(pool)
+	server := api.NewServerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(cfg.APIAddr, logger, api.RateLimitConfig{
 		PerClientRatePerMinute: cfg.ReportRatePerMinute,
 		PerClientBurst:         cfg.ReportRateBurst,
 		GlobalRatePerMinute:    cfg.GlobalReportRatePerMinute,
 		GlobalBurst:            cfg.GlobalReportRateBurst,
-	}, cfg.WebAllowedOrigins, pool, storage, incidents.NewStore(pool), publicGeometryPolicy, reports.NewStore(pool))
+	}, cfg.WebAllowedOrigins, pool, storage, incidents.NewStore(pool), publicGeometryPolicy, api.AuthConfig{
+		Store: sessionStore,
+		RouteRelevance: api.RouteRelevanceConfig{
+			Provider: routeProvider,
+			Reader:   incidents.NewStore(pool),
+			Policy:   publicGeometryPolicy,
+		},
+	}, sseHandler, reports.NewStore(pool))
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("api starting", "addr", cfg.APIAddr)

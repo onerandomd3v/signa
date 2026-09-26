@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,7 @@ const (
 	defaultDatabaseURL                  = "postgres://signa:signa_local@localhost:5432/signa?sslmode=disable"
 	defaultRedisAddr                    = "localhost:6379"
 	defaultShutdownTimeout              = 10 * time.Second
+	defaultSSEHeartbeatInterval         = 25 * time.Second
 	defaultWorkerInterval               = 500 * time.Millisecond
 	defaultReportRatePerMinute          = 6
 	defaultReportRateBurst              = 3
@@ -32,6 +34,10 @@ const (
 	defaultDeliveryRetryMaxAttempts     = 3
 	defaultDeliveryRetryBackoff         = 500 * time.Millisecond
 	defaultDeliveryAttemptLease         = 5 * time.Minute
+	defaultWebPushTTL                   = 5 * time.Minute
+	defaultWebPushTimeout               = 10 * time.Second
+	defaultSessionCookieSecure          = false
+	defaultSessionCookieSameSite        = "lax"
 	maxAIRetryAttempts                  = 5
 	PublicIncidentGeometryPolicyVersion = "signa.public-incident-geometry.v1"
 )
@@ -42,6 +48,7 @@ type Config struct {
 	DatabaseURL               string
 	RedisAddr                 string
 	ShutdownTimeout           time.Duration
+	SSEHeartbeatInterval      time.Duration
 	WorkerInterval            time.Duration
 	ReportRatePerMinute       int
 	ReportRateBurst           int
@@ -65,11 +72,56 @@ type Config struct {
 	DeliveryRetryBackoff      time.Duration
 	DeliveryAttemptLease      time.Duration
 	WebAllowedOrigins         []string
+	SessionCookieSecure       bool
+	SessionCookieSameSite     string
 	ObjectStorageEndpoint     string
 	ObjectStorageRegion       string
 	ObjectStorageBucket       string
 	ObjectStorageAccessKeyID  string
 	ObjectStorageSecret       string
+}
+
+type WebPushConfig struct {
+	Subscriber      string
+	VAPIDPublicKey  string
+	VAPIDPrivateKey string
+	TTL             time.Duration
+	Timeout         time.Duration
+}
+
+func LoadWebPushConfig() (WebPushConfig, error) {
+	subscriber, err := requiredEnv("SIGNA_WEB_PUSH_VAPID_SUBJECT")
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	publicKey, err := requiredEnv("SIGNA_WEB_PUSH_VAPID_PUBLIC_KEY")
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	privateKey, err := requiredEnv("SIGNA_WEB_PUSH_VAPID_PRIVATE_KEY")
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	ttl, err := durationFromEnv("SIGNA_WEB_PUSH_TTL", defaultWebPushTTL)
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	if ttl > 2_419_200*time.Second {
+		return WebPushConfig{}, fmt.Errorf("SIGNA_WEB_PUSH_TTL must be at most 2419200s")
+	}
+	timeout, err := durationFromEnv("SIGNA_WEB_PUSH_TIMEOUT", defaultWebPushTimeout)
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	return WebPushConfig{Subscriber: subscriber, VAPIDPublicKey: publicKey, VAPIDPrivateKey: privateKey, TTL: ttl, Timeout: timeout}, nil
+}
+
+func requiredEnv(name string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return "", fmt.Errorf("%s is required for Web Push delivery", name)
+	}
+	return value, nil
 }
 
 type IncidentPolicy struct {
@@ -257,6 +309,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	sseHeartbeatInterval, err := durationFromEnv("SIGNA_SSE_HEARTBEAT_INTERVAL", defaultSSEHeartbeatInterval)
+	if err != nil {
+		return Config{}, err
+	}
 	workerInterval, err := durationFromEnv("SIGNA_WORKER_INTERVAL", defaultWorkerInterval)
 	if err != nil {
 		return Config{}, err
@@ -313,6 +369,20 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	sessionCookieSecure, err := boolFromEnv("SIGNA_SESSION_COOKIE_SECURE", defaultSessionCookieSecure)
+	if err != nil {
+		return Config{}, err
+	}
+	sessionCookieSameSite := os.Getenv("SIGNA_SESSION_COOKIE_SAME_SITE")
+	if sessionCookieSameSite == "" {
+		sessionCookieSameSite = defaultSessionCookieSameSite
+	}
+	if sessionCookieSameSite != "lax" && sessionCookieSameSite != "strict" && sessionCookieSameSite != "none" {
+		return Config{}, fmt.Errorf("SIGNA_SESSION_COOKIE_SAME_SITE must be lax, strict, or none")
+	}
+	if sessionCookieSameSite == "none" && !sessionCookieSecure {
+		return Config{}, fmt.Errorf("SIGNA_SESSION_COOKIE_SECURE must be true when SIGNA_SESSION_COOKIE_SAME_SITE is none")
+	}
 
 	apiAddr := os.Getenv("SIGNA_API_ADDR")
 	if apiAddr == "" {
@@ -356,6 +426,7 @@ func Load() (Config, error) {
 		DatabaseURL:               databaseURL,
 		RedisAddr:                 redisAddr,
 		ShutdownTimeout:           shutdownTimeout,
+		SSEHeartbeatInterval:      sseHeartbeatInterval,
 		WorkerInterval:            workerInterval,
 		ReportRatePerMinute:       reportRatePerMinute,
 		ReportRateBurst:           reportRateBurst,
@@ -379,12 +450,26 @@ func Load() (Config, error) {
 		DeliveryRetryBackoff:      deliveryRetryBackoff,
 		DeliveryAttemptLease:      deliveryAttemptLease,
 		WebAllowedOrigins:         webAllowedOrigins,
+		SessionCookieSecure:       sessionCookieSecure,
+		SessionCookieSameSite:     sessionCookieSameSite,
 		ObjectStorageEndpoint:     os.Getenv("SIGNA_OBJECT_STORAGE_ENDPOINT"),
 		ObjectStorageRegion:       os.Getenv("SIGNA_OBJECT_STORAGE_REGION"),
 		ObjectStorageBucket:       os.Getenv("SIGNA_OBJECT_STORAGE_BUCKET"),
 		ObjectStorageAccessKeyID:  os.Getenv("SIGNA_OBJECT_STORAGE_ACCESS_KEY_ID"),
 		ObjectStorageSecret:       os.Getenv("SIGNA_OBJECT_STORAGE_SECRET_ACCESS_KEY"),
 	}, nil
+}
+
+func boolFromEnv(name string, fallback bool) (bool, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false", name)
+	}
+	return parsed, nil
 }
 
 func boundedIntFromEnv(name string, fallback, max int) (int, error) {
