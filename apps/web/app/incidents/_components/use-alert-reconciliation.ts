@@ -9,6 +9,8 @@ const MAX_VISIBLE_ALERTS = 3;
 const MAX_REMEMBERED_ALERTS = 128;
 const MAX_CONCURRENT_ALERT_READS = 3;
 const MAX_QUEUED_ALERT_READS = 12;
+// Event-triggered 404s get three retries after the first read: 1s, 2s, then 4s.
+const ALERT_VISIBILITY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -105,6 +107,20 @@ export function useAlertReconciliation({
   const queuedIdSetRef = useRef(new Set<string>());
   const drainQueueRef = useRef<() => void>(() => undefined);
   const rememberedRef = useRef(new Map<string, true>());
+  const eventAlertIdsRef = useRef(new Set<string>());
+  const pendingVisibilityRef = useRef(
+    new Map<
+      string,
+      {
+        retriesUsed: number;
+        retryQueued?: boolean;
+        timer?: ReturnType<typeof setTimeout>;
+      }
+    >(),
+  );
+  const enqueueRef = useRef<(alertId: string, force?: boolean) => void>(
+    () => undefined,
+  );
   const authBlockedRef = useRef(false);
   const authFailureIdRef = useRef<string | null>(null);
   const orderRef = useRef(0);
@@ -118,6 +134,8 @@ export function useAlertReconciliation({
     const requestControllers = requestControllersRef.current;
     const queuedIds = queuedIdsRef.current;
     const queuedIdSet = queuedIdSetRef.current;
+    const pendingVisibility = pendingVisibilityRef.current;
+    const eventAlertIds = eventAlertIdsRef.current;
     return () => {
       mountedRef.current = false;
       for (const controller of requestControllers.values()) {
@@ -126,6 +144,11 @@ export function useAlertReconciliation({
       requestControllers.clear();
       queuedIds.length = 0;
       queuedIdSet.clear();
+      for (const pending of pendingVisibility.values()) {
+        if (pending.timer !== undefined) clearTimeout(pending.timer);
+      }
+      pendingVisibility.clear();
+      eventAlertIds.clear();
     };
   }, []);
 
@@ -145,6 +168,11 @@ export function useAlertReconciliation({
     queuedIdsRef.current = [];
     queuedIdSetRef.current.clear();
     rememberedRef.current.clear();
+    for (const pending of pendingVisibilityRef.current.values()) {
+      if (pending.timer !== undefined) clearTimeout(pending.timer);
+    }
+    pendingVisibilityRef.current.clear();
+    eventAlertIdsRef.current.clear();
     if (mountedRef.current) setHasOverflow(false);
     publish([]);
   }, [publish]);
@@ -156,6 +184,10 @@ export function useAlertReconciliation({
       const oldest = rememberedRef.current.keys().next().value;
       if (oldest === undefined) break;
       rememberedRef.current.delete(oldest);
+      const pending = pendingVisibilityRef.current.get(oldest);
+      if (pending?.timer !== undefined) clearTimeout(pending.timer);
+      pendingVisibilityRef.current.delete(oldest);
+      eventAlertIdsRef.current.delete(oldest);
     }
   }, []);
 
@@ -166,6 +198,10 @@ export function useAlertReconciliation({
         if (!mountedRef.current || controller.signal.aborted) return;
 
         if (result.status === "authorized") {
+          const pending = pendingVisibilityRef.current.get(alertId);
+          if (pending?.timer !== undefined) clearTimeout(pending.timer);
+          pendingVisibilityRef.current.delete(alertId);
+          eventAlertIdsRef.current.delete(alertId);
           if (!isAlertRead(result.alert, alertId)) {
             const existing = alertsRef.current.find(
               (entry) => entry.alertId === alertId,
@@ -201,28 +237,45 @@ export function useAlertReconciliation({
         }
 
         if (result.status === "unauthorized") {
-          authBlockedRef.current = true;
+          clearProtectedAlerts();
           authFailureIdRef.current = alertId;
-          for (const [
-            otherId,
-            otherController,
-          ] of requestControllersRef.current) {
-            if (otherId !== alertId) otherController.abort();
+          return;
+        }
+
+        if (
+          result.status === "not-found" &&
+          eventAlertIdsRef.current.has(alertId)
+        ) {
+          const pending = pendingVisibilityRef.current.get(alertId) ?? {
+            retriesUsed: 0,
+          };
+          if (pending.retriesUsed < ALERT_VISIBILITY_RETRY_DELAYS_MS.length) {
+            const delay = ALERT_VISIBILITY_RETRY_DELAYS_MS[pending.retriesUsed];
+            const timer = setTimeout(() => {
+              const current = pendingVisibilityRef.current.get(alertId);
+              if (!current) return;
+              pendingVisibilityRef.current.set(alertId, {
+                ...current,
+                timer: undefined,
+                retryQueued: true,
+              });
+              enqueueRef.current(alertId, true);
+            }, delay);
+            pendingVisibilityRef.current.set(alertId, { ...pending, timer });
+          } else {
+            pendingVisibilityRef.current.set(alertId, pending);
           }
-          if (queuedIdsRef.current.length > 0) setHasOverflow(true);
-          queuedIdsRef.current = [];
-          queuedIdSetRef.current.clear();
-          publish([
-            {
-              alertId,
-              order: ++orderRef.current,
-              status: "unavailable",
-            },
-          ]);
+          publish(
+            alertsRef.current.filter((entry) => entry.alertId !== alertId),
+          );
           return;
         }
 
         if (result.status === "not-found" || result.status === "invalid") {
+          eventAlertIdsRef.current.delete(alertId);
+          const pending = pendingVisibilityRef.current.get(alertId);
+          if (pending?.timer !== undefined) clearTimeout(pending.timer);
+          pendingVisibilityRef.current.delete(alertId);
           publish(
             alertsRef.current.filter((entry) => entry.alertId !== alertId),
           );
@@ -271,7 +324,7 @@ export function useAlertReconciliation({
         drainQueueRef.current();
       }
     },
-    [publish],
+    [clearProtectedAlerts, publish],
   );
 
   const drainQueue = useCallback(() => {
@@ -283,6 +336,11 @@ export function useAlertReconciliation({
       const alertId = queuedIdsRef.current.shift();
       if (!alertId) continue;
       queuedIdSetRef.current.delete(alertId);
+      const pending = pendingVisibilityRef.current.get(alertId);
+      if (pending?.retryQueued) {
+        pending.retryQueued = false;
+        pending.retriesUsed += 1;
+      }
       const controller = new AbortController();
       requestControllersRef.current.set(alertId, controller);
       void fetchSnapshot(alertId, controller);
@@ -308,6 +366,8 @@ export function useAlertReconciliation({
 
       if (queuedIdsRef.current.length >= MAX_QUEUED_ALERT_READS) {
         remember(alertId);
+        const pending = pendingVisibilityRef.current.get(alertId);
+        if (pending?.retryQueued) pending.retryQueued = false;
         setHasOverflow(true);
         return;
       }
@@ -320,10 +380,22 @@ export function useAlertReconciliation({
     [remember],
   );
 
+  useEffect(() => {
+    enqueueRef.current = enqueue;
+  }, [enqueue]);
+
   const acceptEvents = useCallback(
     (events: RealtimeAlertReference[]) => {
       for (const event of events) {
         if (isUuid(event.alertId) && isUuid(event.incidentId)) {
+          const pending = pendingVisibilityRef.current.get(event.alertId);
+          if (
+            pending &&
+            pending.retriesUsed >= ALERT_VISIBILITY_RETRY_DELAYS_MS.length
+          ) {
+            continue;
+          }
+          eventAlertIdsRef.current.add(event.alertId);
           enqueue(event.alertId);
         }
       }
@@ -345,6 +417,19 @@ export function useAlertReconciliation({
 
   const revalidateKnown = useCallback(() => {
     const knownIds = new Set(alertsRef.current.map((entry) => entry.alertId));
+    for (const [alertId, pending] of pendingVisibilityRef.current) {
+      if (pending.retriesUsed >= ALERT_VISIBILITY_RETRY_DELAYS_MS.length) {
+        continue;
+      }
+      if (pending.timer !== undefined) clearTimeout(pending.timer);
+      if (pending.retryQueued) continue;
+      pendingVisibilityRef.current.set(alertId, {
+        ...pending,
+        timer: undefined,
+        retryQueued: true,
+      });
+      enqueue(alertId, true);
+    }
     if (authFailureIdRef.current) {
       knownIds.add(authFailureIdRef.current);
       authBlockedRef.current = false;

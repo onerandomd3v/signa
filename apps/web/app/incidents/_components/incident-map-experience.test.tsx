@@ -403,11 +403,10 @@ describe("IncidentMapExperience", () => {
     ).toBeTruthy();
 
     act(() => reconnect?.());
-    expect(
-      await screen.findByText(/alert details are unavailable/i),
-    ).toBeTruthy();
+    await waitFor(() => expect(readAlert).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("heading", { name: "Road Closure" })).toBeTruthy();
     expect(screen.queryByText("Authorized alert snapshot message.")).toBeNull();
+    expect(screen.queryByText(/alert details are unavailable/i)).toBeNull();
   });
 
   it("clears authorized snapshots on SSE 401 and ignores pending protected reads", async () => {

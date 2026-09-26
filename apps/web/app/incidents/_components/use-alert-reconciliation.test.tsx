@@ -89,14 +89,65 @@ describe("useAlertReconciliation", () => {
       expect(result.current.alerts[0]?.status).toBe("authorized"),
     );
     act(() => result.current.retry(firstId));
-    await waitFor(() =>
-      expect(result.current.alerts[0]?.status).toBe("unavailable"),
-    );
+    await waitFor(() => expect(result.current.alerts).toEqual([]));
     expect(JSON.stringify(result.current.alerts)).not.toContain("Authorized");
     unmount();
   });
 
-  it("discards an alert hidden by 404", async () => {
+  it("keeps a direct REST 404 privacy-safe without scheduling retries", async () => {
+    const readAlert = vi
+      .fn<AlertReader>()
+      .mockResolvedValue({ status: "not-found" });
+    const { result, unmount } = renderHook(() =>
+      useAlertReconciliation({ readAlert }),
+    );
+
+    act(() => result.current.retry(firstId));
+    await waitFor(() => expect(readAlert).toHaveBeenCalledOnce());
+    await waitFor(() => expect(result.current.alerts).toHaveLength(0));
+    unmount();
+  });
+
+  it("retries an SSE 404 with bounded backoff and renders only the authorized response", async () => {
+    vi.useFakeTimers();
+    const readAlert = vi
+      .fn<AlertReader>()
+      .mockResolvedValueOnce({ status: "not-found" })
+      .mockResolvedValueOnce({
+        status: "authorized",
+        alert: snapshot(firstId, "2026-09-26T10:00:00Z"),
+      });
+    const { result, unmount } = renderHook(() =>
+      useAlertReconciliation({ readAlert }),
+    );
+
+    act(() => result.current.acceptEvents([event(firstId)]));
+    await act(async () => Promise.resolve());
+    expect(readAlert).toHaveBeenCalledTimes(1);
+    expect(result.current.alerts).toEqual([]);
+    expect(JSON.stringify(result.current.alerts)).not.toContain(firstId);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999);
+    });
+    expect(readAlert).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(readAlert).toHaveBeenCalledTimes(2);
+    expect(result.current.alerts).toMatchObject([
+      {
+        status: "authorized",
+        alert: { alert_id: firstId, message: `Authorized ${firstId}` },
+      },
+    ]);
+
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("silently exhausts three SSE 404 retries and does not restart on reconnect", async () => {
+    vi.useFakeTimers();
     const readAlert = vi
       .fn<AlertReader>()
       .mockResolvedValue({ status: "not-found" });
@@ -105,9 +156,103 @@ describe("useAlertReconciliation", () => {
     );
 
     act(() => result.current.acceptEvents([event(firstId)]));
-    await waitFor(() => expect(readAlert).toHaveBeenCalledOnce());
-    await waitFor(() => expect(result.current.alerts).toHaveLength(0));
+    await act(async () => Promise.resolve());
+    for (const [delay, expectedCalls] of [
+      [1_000, 2],
+      [2_000, 3],
+      [4_000, 4],
+    ] as const) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(delay);
+      });
+      expect(readAlert).toHaveBeenCalledTimes(expectedCalls);
+      expect(result.current.alerts).toEqual([]);
+    }
+
+    act(() => result.current.revalidateKnown());
+    act(() => result.current.acceptEvents([event(firstId)]));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(readAlert).toHaveBeenCalledTimes(4);
+    expect(result.current.alerts).toEqual([]);
+
     unmount();
+    vi.useRealTimers();
+  });
+
+  it("revalidates pending visibility on reconnect without resetting the retry budget", async () => {
+    vi.useFakeTimers();
+    const readAlert = vi
+      .fn<AlertReader>()
+      .mockResolvedValue({ status: "not-found" });
+    const { result, unmount } = renderHook(() =>
+      useAlertReconciliation({ readAlert }),
+    );
+
+    act(() => result.current.acceptEvents([event(firstId)]));
+    await act(async () => Promise.resolve());
+    act(() => result.current.revalidateKnown());
+    await act(async () => Promise.resolve());
+    expect(readAlert).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_999);
+    });
+    expect(readAlert).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(readAlert).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => result.current.revalidateKnown());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(readAlert).toHaveBeenCalledTimes(4);
+    act(() => result.current.revalidateKnown());
+    await act(async () => Promise.resolve());
+    expect(readAlert).toHaveBeenCalledTimes(4);
+    expect(result.current.alerts).toEqual([]);
+
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("cancels pending visibility timers on authentication loss and unmount", async () => {
+    vi.useFakeTimers();
+    const readAlert = vi
+      .fn<AlertReader>()
+      .mockResolvedValue({ status: "not-found" });
+    const { result, unmount } = renderHook(() =>
+      useAlertReconciliation({ readAlert }),
+    );
+
+    act(() => result.current.acceptEvents([event(firstId)]));
+    await act(async () => Promise.resolve());
+    act(() => result.current.clearProtectedAlerts());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(readAlert).toHaveBeenCalledOnce();
+
+    unmount();
+
+    const second = renderHook(() => useAlertReconciliation({ readAlert }));
+    act(() => second.result.current.acceptEvents([event(firstId)]));
+    await act(async () => Promise.resolve());
+    expect(readAlert).toHaveBeenCalledTimes(2);
+    second.unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(readAlert).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 
   it("keeps an authorized snapshot visibly stale on 503 and recovers by explicit retry", async () => {
