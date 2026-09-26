@@ -1,3 +1,6 @@
+# syntax note: build context is the repository ROOT (see
+# deploy/compose.openship.yaml and docs/deployment-openship.md). The COPY
+# instructions below reference go.mod, cmd/, contracts/, internal/ at that root.
 FROM golang:1.25-alpine AS build
 
 WORKDIR /src
