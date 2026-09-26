@@ -37,7 +37,7 @@ func (s *DurableStore) MarkAIProcessingStarted(ctx context.Context, reportID str
 		INSERT INTO report_ai_processing (report_id, state, started_at, attempts, updated_at)
 		VALUES ($1, 'RUNNING', $2, 1, $2)
 		ON CONFLICT (report_id) DO UPDATE SET
-			state = 'RUNNING', started_at = EXCLUDED.started_at,
+			state = 'RUNNING', started_at = COALESCE(report_ai_processing.started_at, EXCLUDED.started_at),
 			completed_at = NULL, last_failed_at = NULL, failure_kind = NULL,
 			attempts = report_ai_processing.attempts + 1, updated_at = EXCLUDED.updated_at
 	`, reportID, now.UTC())
@@ -75,7 +75,7 @@ func (s *DurableStore) MarkAIProcessingFailed(ctx context.Context, reportID, sta
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO report_ai_processing (report_id, state, started_at, last_failed_at, failure_kind, attempts, updated_at)
-		VALUES ($1, $2, $3, $3, $4, 1, $3)
+		VALUES ($1, $2, NULL, $3, $4, 1, $3)
 		ON CONFLICT (report_id) DO UPDATE SET
 			state = EXCLUDED.state, completed_at = NULL,
 			last_failed_at = EXCLUDED.last_failed_at, failure_kind = EXCLUDED.failure_kind,

@@ -26,27 +26,19 @@ const (
 	StateUnavailable     StageState = "unavailable/not-yet-measurable"
 )
 
-var orderedStages = []Stage{
-	StageReportPersist,
-	StageOutboxPublish,
-	StageAIProcessing,
-	StageIncidentProcessing,
-	StagePriorityEvaluation,
-	StageAlertCreation,
-	StageDeliveryQueue,
-	StageDeliveryAttempt,
-}
-
 type Observation struct {
 	State          StageState
 	StartedAt      *time.Time
 	CompletedAt    *time.Time
 	LastActivityAt *time.Time
 	FailureKind    string
+	Attempts       int
 }
 
 type DeliveryObservation struct {
 	Observation
+	QueueState         StageState
+	AttemptState       StageState
 	AttemptStartedAt   *time.Time
 	AttemptCompletedAt *time.Time
 	DeliveredAt        *time.Time
@@ -69,13 +61,14 @@ type Input struct {
 }
 
 type StageTiming struct {
-	Name        Stage      `json:"stage"`
-	State       StageState `json:"state"`
-	StartedAt   *time.Time `json:"started_at"`
-	CompletedAt *time.Time `json:"completed_at"`
-	DurationMs  *int64     `json:"duration_ms"`
-	AgeMs       *int64     `json:"age_ms"`
-	FailureKind string     `json:"failure_kind,omitempty"`
+	Name         Stage      `json:"stage"`
+	State        StageState `json:"state"`
+	StartedAt    *time.Time `json:"started_at"`
+	CompletedAt  *time.Time `json:"completed_at"`
+	DurationMs   *int64     `json:"duration_ms"`
+	AgeMs        *int64     `json:"age_ms"`
+	FailureKind  string     `json:"failure_kind,omitempty"`
+	AttemptCount int        `json:"attempt_count,omitempty"`
 }
 
 type Timeline struct {
@@ -100,19 +93,21 @@ type Timeline struct {
 
 func BuildTimeline(input Input) Timeline {
 	stages := []StageTiming{
-		newStage(StageReportPersist, observationForReport(input.ReportSubmittedAt, input.ReportPersistedAt), input.Now),
+		newStage(StageReportPersist, observationForReport(input.ReportPersistedAt), input.Now),
 		newStage(StageOutboxPublish, input.Outbox, input.Now),
 		newStage(StageAIProcessing, input.AI, input.Now),
 		newStage(StageIncidentProcessing, input.Incident, input.Now),
 		newStage(StagePriorityEvaluation, input.Priority, input.Now),
 		newStage(StageAlertCreation, input.Alert, input.Now),
-		newStage(StageDeliveryQueue, Observation{State: input.Delivery.State, StartedAt: input.Delivery.StartedAt, CompletedAt: input.Delivery.AttemptStartedAt, LastActivityAt: input.Delivery.LastActivityAt, FailureKind: input.Delivery.FailureKind}, input.Now),
-		newStage(StageDeliveryAttempt, Observation{State: input.Delivery.State, StartedAt: input.Delivery.AttemptStartedAt, CompletedAt: input.Delivery.AttemptCompletedAt, LastActivityAt: input.Delivery.LastActivityAt, FailureKind: input.Delivery.FailureKind}, input.Now),
+		newStage(StageDeliveryQueue, Observation{State: input.Delivery.QueueState, StartedAt: input.Delivery.StartedAt, CompletedAt: input.Delivery.AttemptStartedAt, LastActivityAt: input.Delivery.LastActivityAt, FailureKind: input.Delivery.FailureKind}, input.Now),
+		newStage(StageDeliveryAttempt, Observation{State: input.Delivery.AttemptState, StartedAt: input.Delivery.AttemptStartedAt, CompletedAt: input.Delivery.AttemptCompletedAt, LastActivityAt: input.Delivery.LastActivityAt, FailureKind: input.Delivery.FailureKind, Attempts: input.Delivery.Attempts}, input.Now),
 	}
 
 	timeline := Timeline{
 		ReportID: input.ReportID, IncidentID: input.IncidentID, AlertID: input.AlertID, DeliveryID: input.DeliveryID,
-		ReportPersistMs:      durationMilliseconds(input.ReportSubmittedAt, input.ReportPersistedAt),
+		// The current report table has no request-start timestamp. Do not infer
+		// API acknowledgement time from two database defaults written together.
+		ReportPersistMs:      nil,
 		OutboxPublishMs:      durationMilliseconds(input.Outbox.StartedAt, input.Outbox.CompletedAt),
 		AIProcessingMs:       durationMilliseconds(input.AI.StartedAt, input.AI.CompletedAt),
 		IncidentProcessingMs: durationMilliseconds(input.Incident.StartedAt, input.Incident.CompletedAt),
@@ -120,12 +115,12 @@ func BuildTimeline(input Input) Timeline {
 		AlertCreationMs:      durationMilliseconds(input.Alert.StartedAt, input.Alert.CompletedAt),
 		DeliveryQueueMs:      durationMilliseconds(input.Delivery.StartedAt, input.Delivery.AttemptStartedAt),
 		DeliveryAttemptMs:    durationMilliseconds(input.Delivery.AttemptStartedAt, input.Delivery.AttemptCompletedAt),
-		ReportToAlertMs:      durationMilliseconds(input.ReportPersistedAt, input.Alert.CompletedAt),
-		ReportToDeliveryMs:   durationMilliseconds(input.ReportPersistedAt, input.Delivery.DeliveredAt),
+		ReportToAlertMs:      durationMilliseconds(input.ReportSubmittedAt, input.Alert.CompletedAt),
+		ReportToDeliveryMs:   durationMilliseconds(input.ReportSubmittedAt, input.Delivery.DeliveredAt),
 		Stages:               stages,
 	}
 	for _, stage := range stages {
-		if stage.State != StateCompleted {
+		if stage.State == StatePending || stage.State == StateFailedRetryable || stage.State == StateFailedTerminal {
 			timeline.CurrentBottleneck = string(stage.Name)
 			break
 		}
@@ -142,11 +137,11 @@ func (timeline Timeline) Stage(name Stage) StageTiming {
 	return StageTiming{Name: name, State: StateUnavailable}
 }
 
-func observationForReport(submittedAt, persistedAt *time.Time) Observation {
+func observationForReport(persistedAt *time.Time) Observation {
 	if persistedAt == nil {
 		return Observation{State: StateUnavailable}
 	}
-	return Observation{State: StateCompleted, StartedAt: submittedAt, CompletedAt: persistedAt}
+	return Observation{State: StateCompleted, CompletedAt: persistedAt}
 }
 
 func newStage(name Stage, observation Observation, now time.Time) StageTiming {
@@ -162,17 +157,17 @@ func newStage(name Stage, observation Observation, now time.Time) StageTiming {
 		}
 	}
 	var age *int64
-	if state != StateCompleted {
+	if state == StatePending {
 		age = durationMilliseconds(observation.StartedAt, &now)
 		if observation.StartedAt == nil {
 			age = durationMilliseconds(observation.LastActivityAt, &now)
 		}
 	}
 	var duration *int64
-	if state == StateCompleted {
+	if observation.CompletedAt != nil && (state == StateCompleted || state == StateFailedRetryable || state == StateFailedTerminal) {
 		duration = durationMilliseconds(observation.StartedAt, observation.CompletedAt)
 	}
-	return StageTiming{Name: name, State: state, StartedAt: observation.StartedAt, CompletedAt: observation.CompletedAt, DurationMs: duration, AgeMs: age, FailureKind: observation.FailureKind}
+	return StageTiming{Name: name, State: state, StartedAt: observation.StartedAt, CompletedAt: observation.CompletedAt, DurationMs: duration, AgeMs: age, FailureKind: observation.FailureKind, AttemptCount: observation.Attempts}
 }
 
 func durationMilliseconds(start, end *time.Time) *int64 {

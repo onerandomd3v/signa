@@ -25,8 +25,8 @@ func TestBuildTimelineCompletedPathKeepsStageDurationsAndPrivacySafeJSON(t *test
 	}
 
 	got := BuildTimeline(input)
-	if got.ReportPersistMs == nil || *got.ReportPersistMs != 100 {
-		t.Fatalf("report persist = %v, want 100ms", got.ReportPersistMs)
+	if got.ReportPersistMs != nil || got.Stage(StageReportPersist).State != StateCompleted {
+		t.Fatalf("report persistence = %v/%s, want completed with unmeasurable duration", got.ReportPersistMs, got.Stage(StageReportPersist).State)
 	}
 	if got.OutboxPublishMs == nil || *got.OutboxPublishMs != 200 {
 		t.Fatalf("outbox publish = %v, want 200ms", got.OutboxPublishMs)
@@ -37,11 +37,11 @@ func TestBuildTimelineCompletedPathKeepsStageDurationsAndPrivacySafeJSON(t *test
 	if got.AlertCreationMs == nil || *got.AlertCreationMs != 300 || got.DeliveryQueueMs == nil || *got.DeliveryQueueMs != 100 || got.DeliveryAttemptMs == nil || *got.DeliveryAttemptMs != 200 {
 		t.Fatalf("downstream durations = %v/%v/%v, want 300/100/200ms", got.AlertCreationMs, got.DeliveryQueueMs, got.DeliveryAttemptMs)
 	}
-	if got.ReportToAlertMs == nil || *got.ReportToAlertMs != 1400 || got.ReportToDeliveryMs == nil || *got.ReportToDeliveryMs != 1900 {
-		t.Fatalf("end-to-end durations = %v/%v, want 1400/1900ms", got.ReportToAlertMs, got.ReportToDeliveryMs)
+	if got.ReportToAlertMs == nil || *got.ReportToAlertMs != 1500 || got.ReportToDeliveryMs == nil || *got.ReportToDeliveryMs != 2000 {
+		t.Fatalf("end-to-end durations = %v/%v, want 1500/2000ms from submitted_at", got.ReportToAlertMs, got.ReportToDeliveryMs)
 	}
-	if got.CurrentBottleneck != string(StagePriorityEvaluation) {
-		t.Fatalf("bottleneck = %q, want %q", got.CurrentBottleneck, StagePriorityEvaluation)
+	if got.CurrentBottleneck != "" {
+		t.Fatalf("bottleneck = %q, want empty because only unavailable stages remain", got.CurrentBottleneck)
 	}
 
 	encoded, err := json.Marshal(got)
@@ -67,7 +67,7 @@ func TestBuildTimelineClassifiesBacklogAndFailuresWithoutZeroSuccess(t *testing.
 		Incident: Observation{State: StatePending},
 		Priority: Observation{State: StateUnavailable},
 		Alert:    Observation{State: StatePending},
-		Delivery: DeliveryObservation{Observation: Observation{State: StateFailedTerminal, FailureKind: "provider_permanent"}},
+		Delivery: DeliveryObservation{Observation: Observation{FailureKind: "provider_permanent"}, QueueState: StateCompleted, AttemptState: StateFailedTerminal},
 	})
 
 	if got.OutboxPublishMs != nil || got.AIProcessingMs != nil || got.ReportToAlertMs != nil || got.ReportToDeliveryMs != nil {
@@ -98,8 +98,56 @@ func TestBuildTimelineClampsOutOfOrderTimes(t *testing.T) {
 			t.Fatalf("stage %s has negative duration %d", stage.Name, *stage.DurationMs)
 		}
 	}
-	if got.ReportPersistMs == nil || *got.ReportPersistMs != 0 || got.OutboxPublishMs == nil || *got.OutboxPublishMs != 0 {
-		t.Fatalf("out-of-order durations = %v/%v, want 0/0", got.ReportPersistMs, got.OutboxPublishMs)
+	if got.ReportPersistMs != nil || got.OutboxPublishMs == nil || *got.OutboxPublishMs != 0 {
+		t.Fatalf("out-of-order durations = %v/%v, want unavailable/0", got.ReportPersistMs, got.OutboxPublishMs)
+	}
+}
+
+func TestBuildTimelineAlertAndDeliveryPendingAndFailureStates(t *testing.T) {
+	now := time.Date(2026, 9, 26, 2, 0, 0, 0, time.UTC)
+	reportPersisted := now.Add(-8 * time.Second)
+	incidentAttached := now.Add(-6 * time.Second)
+	alertCreated := now.Add(-4 * time.Second)
+	deliveryCreated := now.Add(-3 * time.Second)
+	attemptStarted := now.Add(-2 * time.Second)
+	attemptFailed := now.Add(-time.Second)
+	got := BuildTimeline(Input{
+		ReportID:          "report-pending",
+		Now:               now,
+		ReportPersistedAt: &reportPersisted,
+		Incident:          Observation{State: StateCompleted, CompletedAt: &incidentAttached},
+		Priority:          Observation{State: StateUnavailable},
+		Alert:             Observation{State: StateCompleted, CompletedAt: &alertCreated},
+		Delivery: DeliveryObservation{
+			Observation:        Observation{StartedAt: &deliveryCreated, LastActivityAt: &attemptFailed, FailureKind: "transient", Attempts: 2},
+			QueueState:         StateCompleted,
+			AttemptState:       StateFailedRetryable,
+			AttemptStartedAt:   &attemptStarted,
+			AttemptCompletedAt: &attemptFailed,
+		},
+	})
+	if got.Stage(StageAlertCreation).State != StateCompleted || got.AlertCreationMs != nil {
+		t.Fatalf("alert stage = %+v, want completed with unavailable duration", got.Stage(StageAlertCreation))
+	}
+	if got.Stage(StageDeliveryQueue).State != StateCompleted || got.DeliveryQueueMs == nil || *got.DeliveryQueueMs != 1000 {
+		t.Fatalf("delivery queue = %+v, want completed in 1000ms", got.Stage(StageDeliveryQueue))
+	}
+	if got.Stage(StageDeliveryAttempt).State != StateFailedRetryable || got.DeliveryAttemptMs == nil || *got.DeliveryAttemptMs != 1000 || got.Stage(StageDeliveryAttempt).AttemptCount != 2 {
+		t.Fatalf("delivery attempt = %+v, want 1s retryable failure after 2 attempts", got.Stage(StageDeliveryAttempt))
+	}
+	if got.CurrentBottleneck != string(StageDeliveryAttempt) {
+		t.Fatalf("current bottleneck = %q, want delivery attempt", got.CurrentBottleneck)
+	}
+
+	got = BuildTimeline(Input{
+		ReportID: "report-not-reached", Now: now, ReportPersistedAt: &reportPersisted,
+		AI:       Observation{State: StatePending, StartedAt: &reportPersisted},
+		Incident: Observation{State: StateUnavailable},
+		Alert:    Observation{State: StateUnavailable},
+		Delivery: DeliveryObservation{Observation: Observation{StartedAt: &deliveryCreated}, QueueState: StatePending, AttemptState: StateUnavailable},
+	})
+	if got.Stage(StageAIProcessing).State != StatePending || got.Stage(StageDeliveryQueue).State != StatePending || got.Stage(StageDeliveryAttempt).State != StateUnavailable {
+		t.Fatalf("pending/unreached classifications = %s/%s/%s", got.Stage(StageAIProcessing).State, got.Stage(StageDeliveryQueue).State, got.Stage(StageDeliveryAttempt).State)
 	}
 }
 

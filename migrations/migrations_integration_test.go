@@ -173,7 +173,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 			SELECT indexname, indexdef
 			FROM pg_indexes
 			WHERE schemaname = $1
-			  AND tablename IN ('reports', 'outbox_events')
+			  AND tablename IN ('reports', 'outbox_events', 'deliveries')
 		`, testSchema)
 		if err != nil {
 			t.Fatalf("query indexes: %v", err)
@@ -197,6 +197,8 @@ func TestReportAndOutboxMigration(t *testing.T) {
 			"reports_incident_id_idx",
 			"reports_idempotency_key_unique_idx",
 			"outbox_events_unpublished_idx",
+			"outbox_events_aggregate_event_idx",
+			"deliveries_alert_created_idx",
 		} {
 			if _, ok := indexes[name]; !ok {
 				t.Errorf("missing index %q", name)
