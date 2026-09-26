@@ -239,7 +239,7 @@ func newLatencyTestPool(t *testing.T, ctx context.Context) (*pgxpool.Pool, func(
 	testURL := *parsed
 	testURL.Path = "/" + name
 	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	goBinary := filepath.Join(runtime.GOROOT(), "bin", "go")
 	if runtime.GOOS == "windows" {
 		goBinary += ".exe"

@@ -217,6 +217,12 @@ func TestReportAndOutboxMigration(t *testing.T) {
 		if definition := strings.ToLower(indexes["outbox_events_unpublished_idx"]); !strings.Contains(definition, "created_at, id") || !strings.Contains(definition, "published_at is null") {
 			t.Errorf("unpublished outbox index definition = %q, want creation ordering and unpublished predicate", definition)
 		}
+		if definition := strings.ToLower(indexes["outbox_events_aggregate_event_idx"]); !strings.Contains(definition, "aggregate_type, aggregate_id, event_type, created_at, id") {
+			t.Errorf("outbox correlation index definition = %q, want aggregate/event correlation ordering", definition)
+		}
+		if definition := strings.ToLower(indexes["deliveries_alert_created_idx"]); !strings.Contains(definition, "alert_id, created_at, id") {
+			t.Errorf("delivery correlation index definition = %q, want alert/creation ordering", definition)
+		}
 		if definition := strings.ToLower(indexes["reports_recent_created_idx"]); !strings.Contains(definition, "created_at desc, id desc") || strings.Contains(definition, " where ") {
 			t.Errorf("recent reports index definition = %q, want an unfiltered (created_at DESC, id DESC) index", definition)
 		}
