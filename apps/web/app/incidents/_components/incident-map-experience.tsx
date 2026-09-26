@@ -20,6 +20,12 @@ import {
   type IncidentFeatureCollection,
 } from "./incident-geojson";
 import { IncidentMapStage } from "./incident-map-stage";
+import {
+  RouteRelevanceExperience,
+  type RouteMapResult,
+  type RouteRelevanceEvaluator,
+} from "./route-relevance";
+import type { RouteLineGeometry } from "./route-geometry";
 
 type LoadState = "loading" | "error" | "ready";
 
@@ -56,16 +62,49 @@ function freshness(value: string | null): string {
   );
 }
 
-export function IncidentMapExperience({
-  mapStyleUrl,
-  loadIncidents = loadPublicIncidents,
-  connectRealtime,
-  readAlert,
-}: {
+function routeDescription(geometry: RouteLineGeometry): string {
+  const [start] = geometry.coordinates;
+  const end = geometry.coordinates[geometry.coordinates.length - 1];
+  return `Route line from approximately ${start[1].toFixed(4)}, ${start[0].toFixed(4)} to ${end[1].toFixed(4)}, ${end[0].toFixed(4)}.`;
+}
+
+function routeMapFallback(
+  mapStyleUrl: string | null,
+  routeResult: RouteMapResult | null,
+) {
+  return (
+    <p
+      className="rounded-lg border border-border bg-card p-4 text-sm leading-6 text-muted-foreground"
+      role="status"
+    >
+      Map unavailable
+      {mapStyleUrl ? " right now" : ": no map style is configured"}. Incident
+      details remain available below.{" "}
+      {routeResult && routeDescription(routeResult.geometry)}
+    </p>
+  );
+}
+
+export type IncidentMapExperienceProps = {
   mapStyleUrl: string | null;
   loadIncidents?: (signal: AbortSignal) => Promise<PublicIncident[]>;
   connectRealtime?: RealtimeConnector;
   readAlert?: AlertReader;
+  evaluateRoute?: RouteRelevanceEvaluator;
+};
+
+function IncidentMapContent({
+  mapStyleUrl,
+  loadIncidents = loadPublicIncidents,
+  connectRealtime,
+  readAlert,
+  routeResult,
+  incidentRevision,
+  onIncidentInvalidation,
+}: IncidentMapExperienceProps & {
+  routeResult: { result: RouteMapResult; revision: number } | null;
+  incidentRevision: number;
+  onIncidentInvalidation: () => void;
 }) {
   const [state, setState] = useState<LoadState>("loading");
   const [incidents, setIncidents] = useState<PublicIncident[]>([]);
@@ -73,10 +112,6 @@ export function IncidentMapExperience({
   const hasLoadedRef = useRef(false);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const featureCollection: IncidentFeatureCollection = useMemo(
-    () => toIncidentFeatureCollection(incidents),
-    [incidents],
-  );
 
   const refresh = useCoalescedRefresh({
     load: loadIncidents,
@@ -87,13 +122,11 @@ export function IncidentMapExperience({
       setState("ready");
     },
     onError: () => {
-      if (hasLoadedRef.current) {
-        setReconciliationFailed(true);
-      } else {
-        setState("error");
-      }
+      if (hasLoadedRef.current) setReconciliationFailed(true);
+      else setState("error");
     },
   });
+
   const alertReconciliation = useAlertReconciliation({ readAlert });
   const acceptAlertEvents = alertReconciliation.acceptEvents;
   const revalidateAlerts = alertReconciliation.revalidateKnown;
@@ -106,10 +139,13 @@ export function IncidentMapExperience({
       incidents: boolean;
       alerts: { alertId: string; incidentId: string }[];
     }) => {
-      if (incidentsChanged) refresh();
+      if (incidentsChanged) {
+        onIncidentInvalidation();
+        refresh();
+      }
       acceptAlertEvents(alerts);
     },
-    [acceptAlertEvents, refresh],
+    [acceptAlertEvents, onIncidentInvalidation, refresh],
   );
   const realtime = useRealtimeUpdates({
     onInvalidation,
@@ -118,81 +154,99 @@ export function IncidentMapExperience({
     connect: connectRealtime,
   });
 
-  let content: ReactNode;
-
-  if (state === "loading") {
-    content = (
-      <div
-        aria-label="Loading incidents"
-        className="h-36 animate-pulse rounded-xl border border-border bg-card motion-reduce:animate-none"
-        role="status"
-      />
+  const routeIsStale =
+    routeResult !== null &&
+    (routeResult.result.isStale === true ||
+      routeResult.revision !== incidentRevision);
+  const displayIncidents = useMemo(() => {
+    const byId = new Map(
+      (routeIsStale ? [] : (routeResult?.result.incidents ?? [])).map(
+        (incident) => [incident.id, incident],
+      ),
     );
-  } else if (state === "error") {
-    content = (
-      <section
-        aria-live="assertive"
-        className="rounded-xl border border-border bg-card p-5"
-        role="alert"
-      >
-        <h2 className="text-lg font-semibold">Couldn’t load incidents</h2>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Try again. Incident data isn’t available.
-        </p>
-        <button
-          className="mt-4 inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-          onClick={() => {
-            setState("loading");
-            refresh();
-          }}
-          type="button"
+    for (const incident of incidents) byId.set(incident.id, incident);
+    return [...byId.values()];
+  }, [incidents, routeIsStale, routeResult]);
+  const featureCollection: IncidentFeatureCollection = useMemo(
+    () => toIncidentFeatureCollection(displayIncidents),
+    [displayIncidents],
+  );
+
+  const routeMapResult = routeResult?.result ?? null;
+  const hasMapContent = routeMapResult !== null || displayIncidents.length > 0;
+  const incidentContent: ReactNode = (
+    <div className="space-y-4">
+      {state === "loading" && !hasMapContent && (
+        <div
+          aria-label="Loading incidents"
+          className="h-36 animate-pulse rounded-xl border border-border bg-card motion-reduce:animate-none"
+          role="status"
+        />
+      )}
+      {state === "error" && (
+        <section
+          aria-live="assertive"
+          className="rounded-xl border border-border bg-card p-5"
+          role="alert"
         >
-          Retry
-        </button>
-      </section>
-    );
-  } else if (incidents.length === 0) {
-    content = (
-      <section
-        className="rounded-xl border border-border bg-card p-5"
-        role="status"
-      >
-        <h2 className="text-lg font-semibold">No active incidents</h2>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          No public incidents are listed right now. This does not mean an area
-          is safe.
-        </p>
-      </section>
-    );
-  } else {
-    content = (
-      <div className="space-y-4">
-        {mapStyleUrl && !mapUnavailable ? (
-          <section
-            aria-label="Incident map"
-            className="overflow-hidden rounded-xl border border-border bg-card p-2 sm:p-3"
-          >
-            <IncidentMapStage
-              featureCollection={featureCollection}
-              onSelect={setSelectedId}
-              onUnavailable={() => setMapUnavailable(true)}
-              selectedId={selectedId}
-              styleUrl={mapStyleUrl}
-            />
-          </section>
-        ) : (
-          <p
-            className="rounded-lg border border-border bg-card p-4 text-sm leading-6 text-muted-foreground"
-            role="status"
-          >
-            Map unavailable
-            {mapStyleUrl ? " right now" : ": no map style is configured"}.
-            Incident details remain available below.
+          <h2 className="text-lg font-semibold">Couldn’t load incidents</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Try again. Incident data isn’t available.
           </p>
-        )}
-
+          <button
+            className="mt-4 inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            onClick={() => {
+              setState("loading");
+              refresh();
+            }}
+            type="button"
+          >
+            Retry
+          </button>
+        </section>
+      )}
+      {hasMapContent && (
+        <>
+          {mapStyleUrl && !mapUnavailable ? (
+            <section
+              aria-label={routeMapResult ? "Route map" : "Incident map"}
+              className="overflow-hidden rounded-xl border border-border bg-card p-2 sm:p-3"
+            >
+              <IncidentMapStage
+                featureCollection={featureCollection}
+                onSelect={setSelectedId}
+                onUnavailable={() => setMapUnavailable(true)}
+                routeGeometry={routeMapResult?.geometry ?? null}
+                selectedId={selectedId}
+                styleUrl={mapStyleUrl}
+              />
+            </section>
+          ) : (
+            routeMapFallback(mapStyleUrl, routeMapResult)
+          )}
+          {routeMapResult && mapStyleUrl && !mapUnavailable && (
+            <p className="text-sm leading-6 text-muted-foreground">
+              {routeIsStale ? "Previously checked route. " : ""}
+              {routeDescription(routeMapResult.geometry)}
+            </p>
+          )}
+        </>
+      )}
+      {state === "ready" && displayIncidents.length === 0 && (
+        <section
+          className="rounded-xl border border-border bg-card p-5"
+          role="status"
+        >
+          <h2 className="text-lg font-semibold">No active incidents</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            No public incidents are listed right now. This does not mean an area
+            is safe.
+          </p>
+        </section>
+      )}
+      {displayIncidents.length > 0 && (
         <ul aria-label="Incidents" className="space-y-3">
-          {incidents.map((incident) => (
+          {displayIncidents.map((incident) => (
             <li key={incident.id}>
               <article
                 className={`rounded-xl border bg-card p-4 shadow-sm sm:p-5 ${selectedId === incident.id ? "border-primary" : "border-border"}`}
@@ -276,13 +330,15 @@ export function IncidentMapExperience({
             </li>
           ))}
         </ul>
+      )}
+      {displayIncidents.length > 0 && (
         <p className="text-sm leading-6 text-muted-foreground">
           Areas are generalized. Confidence is not proof; severity describes
           potential impact.
         </p>
-      </div>
-    );
-  }
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-3">
@@ -291,7 +347,7 @@ export function IncidentMapExperience({
         status={reconciliationFailed ? "degraded" : realtime.status}
         onRetry={refresh}
       />
-      {content}
+      {incidentContent}
       <RealtimeAlertSnapshots
         alerts={alertReconciliation.alerts}
         hasOverflow={alertReconciliation.hasOverflow}
@@ -301,6 +357,49 @@ export function IncidentMapExperience({
   );
 }
 
-export function IncidentMapRoute() {
-  return <IncidentMapExperience mapStyleUrl={getPublicMapStyleUrl()} />;
+export function IncidentMapExperience({
+  evaluateRoute,
+  ...props
+}: IncidentMapExperienceProps) {
+  const incidentRevisionRef = useRef(0);
+  const [incidentRevision, setIncidentRevision] = useState(0);
+  const [routeResult, setRouteResult] = useState<{
+    result: RouteMapResult;
+    revision: number;
+  } | null>(null);
+  const onRouteResultChange = useCallback((result: RouteMapResult | null) => {
+    setRouteResult(
+      result ? { result, revision: incidentRevisionRef.current } : null,
+    );
+  }, []);
+
+  const revisionCallback = useCallback(() => {
+    incidentRevisionRef.current += 1;
+    setIncidentRevision(incidentRevisionRef.current);
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      <RouteRelevanceExperience
+        evaluate={evaluateRoute}
+        incidentRevision={incidentRevision}
+        incidentRevisionRef={incidentRevisionRef}
+        onResultChange={onRouteResultChange}
+      />
+      <IncidentMapContent
+        {...props}
+        incidentRevision={incidentRevision}
+        routeResult={routeResult}
+        onIncidentInvalidation={revisionCallback}
+      />
+    </div>
+  );
+}
+
+export function IncidentMapRoute(
+  props: Omit<IncidentMapExperienceProps, "mapStyleUrl"> = {},
+) {
+  return (
+    <IncidentMapExperience mapStyleUrl={getPublicMapStyleUrl()} {...props} />
+  );
 }

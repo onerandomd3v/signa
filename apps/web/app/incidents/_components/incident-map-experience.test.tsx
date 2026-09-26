@@ -5,12 +5,16 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AlertRead, PublicIncident } from "@/lib/api/generated";
 import type { AlertReadResult } from "@/lib/api/alerts";
 import type { AlertReader } from "./use-alert-reconciliation";
 import type { RealtimeConnector } from "./use-realtime-updates";
+import type { RouteLineGeometry } from "./route-geometry";
+import type { RouteRelevanceResult } from "@/lib/api/route-relevance";
+import type { IncidentFeatureCollection } from "./incident-geojson";
 import { IncidentMapExperience } from "./incident-map-experience";
 
 const idleRealtime: RealtimeConnector = async ({ signal }) => ({
@@ -26,11 +30,19 @@ vi.mock("./incident-map-stage", () => ({
   IncidentMapStage: ({
     onSelect,
     onUnavailable,
+    routeGeometry,
+    featureCollection,
   }: {
     onSelect: (id: string) => void;
     onUnavailable: () => void;
+    routeGeometry: RouteLineGeometry | null;
+    featureCollection: IncidentFeatureCollection;
   }) => (
-    <div>
+    <div
+      data-testid="map-stage"
+      data-route-coordinates={JSON.stringify(routeGeometry?.coordinates ?? [])}
+      data-incident-count={featureCollection.features.length}
+    >
       <button onClick={() => onSelect("incident-1")} type="button">
         Select from map
       </button>
@@ -83,9 +95,109 @@ const pendingAuthorizedAlert: AlertRead = {
   message: "Late protected snapshot must not return.",
 };
 
+const emptyNotRelevantRoute: RouteRelevanceResult = {
+  status: "success",
+  response: {
+    classification: "NOT_RELEVANT",
+    route_geometry: {
+      type: "LineString",
+      coordinates: [
+        [3.3792, 6.5244],
+        [3.3947, 6.4541],
+      ],
+    },
+    incidents: [],
+  },
+};
+
+const routeWithIncident: RouteRelevanceResult = {
+  status: "success",
+  response: {
+    ...emptyNotRelevantRoute.response,
+    classification: "RELEVANT",
+    incidents: [
+      {
+        ...incident,
+        id: "route-only-incident",
+        event_type: "route_only_closure",
+      },
+    ],
+  },
+};
+
+function submitRoute() {
+  const origin = screen.getByRole("group", { name: "Origin" });
+  const destination = screen.getByRole("group", { name: "Destination" });
+  fireEvent.change(within(origin).getByLabelText(/Latitude/), {
+    target: { value: "6.5244" },
+  });
+  fireEvent.change(within(origin).getByLabelText(/Longitude/), {
+    target: { value: "3.3792" },
+  });
+  fireEvent.change(within(destination).getByLabelText(/Latitude/), {
+    target: { value: "6.4541" },
+  });
+  fireEvent.change(within(destination).getByLabelText(/Longitude/), {
+    target: { value: "3.3947" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Check route" }));
+}
+
 afterEach(() => cleanup());
 
 describe("IncidentMapExperience", () => {
+  it("shows an evaluated NOT_RELEVANT route on the map when incident results are empty", async () => {
+    const evaluateRoute = vi.fn(async () => emptyNotRelevantRoute);
+    render(
+      <IncidentMapExperience
+        evaluateRoute={evaluateRoute}
+        loadIncidents={async () => []}
+        mapStyleUrl="https://tiles.example/style.json"
+      />,
+    );
+
+    submitRoute();
+    expect(
+      await screen.findByRole("heading", {
+        name: "No evaluated incident was route-relevant",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "No active incidents" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("map-stage").getAttribute("data-route-coordinates"),
+    ).toBe(
+      JSON.stringify([
+        [3.3792, 6.5244],
+        [3.3947, 6.4541],
+      ]),
+    );
+    expect(
+      screen.getByTestId("map-stage").getAttribute("data-incident-count"),
+    ).toBe("0");
+  });
+
+  it("keeps an accessible route text alternative when the map is unavailable", async () => {
+    render(
+      <IncidentMapExperience
+        evaluateRoute={async () => emptyNotRelevantRoute}
+        loadIncidents={async () => []}
+        mapStyleUrl={null}
+      />,
+    );
+    submitRoute();
+    expect(
+      await screen.findByText(
+        /route line from approximately 6\.5244, 3\.3792/i,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/no map style is configured/i)).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "No active incidents" }),
+    ).toBeTruthy();
+  });
+
   it("keeps a keyboard-accessible details list and selection control alongside the map", async () => {
     render(
       <IncidentMapExperience
@@ -131,6 +243,8 @@ describe("IncidentMapExperience", () => {
     await waitFor(() =>
       expect(screen.getByText(/map unavailable right now/i)).toBeTruthy(),
     );
+    expect(screen.getByRole("link", { name: /view details/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Check a route" })).toBeTruthy();
   });
 
   it("offers retry after an API error", async () => {
@@ -284,6 +398,186 @@ describe("IncidentMapExperience", () => {
     expect(
       await screen.findByText(/realtime updates unavailable/i),
     ).toBeTruthy();
+  });
+
+  it("marks route snapshots stale on incident updates, keeps geometry, and waits for an explicit rerun", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    const refreshedIncidents: Array<(value: PublicIncident[]) => void> = [];
+    const loadIncidents = vi
+      .fn<() => Promise<PublicIncident[]>>()
+      .mockResolvedValueOnce([incident])
+      .mockImplementationOnce(
+        () => new Promise((resolve) => refreshedIncidents.push(resolve)),
+      );
+    const evaluateRoute = vi
+      .fn()
+      .mockResolvedValueOnce(routeWithIncident)
+      .mockResolvedValueOnce(routeWithIncident);
+    const connectRealtime: RealtimeConnector = async (options) => {
+      emit = options.onSseEvent;
+      return idleRealtime(options);
+    };
+
+    render(
+      <IncidentMapExperience
+        connectRealtime={connectRealtime}
+        evaluateRoute={evaluateRoute}
+        loadIncidents={loadIncidents}
+        mapStyleUrl="https://tiles.example/style.json"
+      />,
+    );
+    submitRoute();
+    expect(
+      await screen.findByRole("heading", {
+        name: "A reported incident may affect this route",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Route Only Closure" }),
+    ).toBeTruthy();
+
+    act(() =>
+      emit?.({ event: "incident.updated.v1", id: "route-stale", data: {} }),
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "Route result may be out of date",
+      }),
+    ).toBeTruthy();
+    expect(screen.getByText(/previously checked route/i)).toBeTruthy();
+    expect(evaluateRoute).toHaveBeenCalledOnce();
+    await waitFor(() => expect(refreshedIncidents).toHaveLength(1));
+    act(() => refreshedIncidents[0]([]));
+
+    expect(
+      await screen.findByRole("heading", { name: "No active incidents" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", { name: "Route Only Closure" }),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("map-stage").getAttribute("data-incident-count"),
+    ).toBe("0");
+    expect(
+      screen.getByTestId("map-stage").getAttribute("data-route-coordinates"),
+    ).toBe(
+      JSON.stringify([
+        [3.3792, 6.5244],
+        [3.3947, 6.4541],
+      ]),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Check route again" }));
+    expect(
+      await screen.findByRole("heading", {
+        name: "A reported incident may affect this route",
+      }),
+    ).toBeTruthy();
+    expect(evaluateRoute).toHaveBeenCalledTimes(2);
+    expect(
+      screen.getByRole("heading", { name: "Route Only Closure" }),
+    ).toBeTruthy();
+  });
+
+  it("does not let an in-flight route response overwrite a realtime stale state", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    let resolveRoute: ((value: RouteRelevanceResult) => void) | undefined;
+    const evaluateRoute = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<RouteRelevanceResult>(
+            (resolve) => (resolveRoute = resolve),
+          ),
+      );
+    const connectRealtime: RealtimeConnector = async (options) => {
+      emit = options.onSseEvent;
+      return idleRealtime(options);
+    };
+    render(
+      <IncidentMapExperience
+        connectRealtime={connectRealtime}
+        evaluateRoute={evaluateRoute}
+        loadIncidents={async () => [incident]}
+        mapStyleUrl="https://tiles.example/style.json"
+      />,
+    );
+    submitRoute();
+    await waitFor(() => expect(evaluateRoute).toHaveBeenCalledOnce());
+    act(() =>
+      emit?.({
+        event: "incident.updated.v1",
+        id: "while-route-pending",
+        data: {},
+      }),
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "Route result may be out of date",
+      }),
+    ).toBeTruthy();
+
+    await act(async () => {
+      resolveRoute?.(routeWithIncident);
+    });
+    expect(evaluateRoute).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole("heading", {
+        name: "A reported incident may affect this route",
+      }),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("map-stage").getAttribute("data-route-coordinates"),
+    ).toBe("[]");
+    expect(
+      screen.queryByRole("heading", { name: "Route Only Closure" }),
+    ).toBeNull();
+  });
+
+  it("keeps a successful route visible when public incidents fail and retries only the incident read", async () => {
+    const loadIncidents = vi
+      .fn<() => Promise<PublicIncident[]>>()
+      .mockRejectedValueOnce(new Error("incident endpoint unavailable"))
+      .mockResolvedValueOnce([]);
+    const evaluateRoute = vi.fn(async () => routeWithIncident);
+    render(
+      <IncidentMapExperience
+        evaluateRoute={evaluateRoute}
+        loadIncidents={loadIncidents}
+        mapStyleUrl={null}
+      />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Couldn’t load incidents" }),
+    ).toBeTruthy();
+    submitRoute();
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "A reported incident may affect this route",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Route Only Closure" }),
+    ).toBeTruthy();
+    expect(screen.getByText(/route line from approximately/i)).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", { name: "No active incidents" }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(loadIncidents).toHaveBeenCalledTimes(2));
+    expect(
+      screen.queryByRole("heading", { name: "Couldn’t load incidents" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Route Only Closure" }),
+    ).toBeTruthy();
+    expect(evaluateRoute).toHaveBeenCalledOnce();
   });
 
   it("loads alert snapshots from the API, not the raw SSE event, and retries failures", async () => {

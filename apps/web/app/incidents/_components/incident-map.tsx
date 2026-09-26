@@ -11,22 +11,32 @@ import {
   getIncidentBounds,
   type IncidentFeatureCollection,
 } from "./incident-geojson";
+import {
+  combineBounds,
+  getRouteBounds,
+  toRouteFeatureCollection,
+  type RouteLineGeometry,
+} from "./route-geometry";
 
 setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 
 const SOURCE_ID = "public-incidents";
 const FILL_LAYER_ID = "public-incident-areas";
 const LINE_LAYER_ID = "public-incident-outlines";
+const ROUTE_SOURCE_ID = "selected-route";
+const ROUTE_LAYER_ID = "selected-route-line";
 
 export function IncidentMap({
   styleUrl,
   featureCollection,
+  routeGeometry,
   selectedId,
   onSelect,
   onUnavailable,
 }: {
   styleUrl: string;
   featureCollection: IncidentFeatureCollection;
+  routeGeometry: RouteLineGeometry | null;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onUnavailable: () => void;
@@ -36,14 +46,16 @@ export function IncidentMap({
   const onSelectRef = useRef(onSelect);
   const onUnavailableRef = useRef(onUnavailable);
   const featuresRef = useRef(featureCollection);
+  const routeGeometryRef = useRef(routeGeometry);
   const selectedRef = useRef(selectedId);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
     onUnavailableRef.current = onUnavailable;
     featuresRef.current = featureCollection;
+    routeGeometryRef.current = routeGeometry;
     selectedRef.current = selectedId;
-  }, [featureCollection, onSelect, onUnavailable, selectedId]);
+  }, [featureCollection, onSelect, onUnavailable, routeGeometry, selectedId]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -104,16 +116,29 @@ export function IncidentMap({
               ],
             },
           });
-          const bounds = getIncidentBounds(featuresRef.current);
-          if (bounds) {
-            map.fitBounds(bounds, { padding: 48, maxZoom: 11, duration: 0 });
-          }
           map.addLayer({
             id: LINE_LAYER_ID,
             type: "line",
             source: SOURCE_ID,
             paint: { "line-color": "#176a57", "line-width": 2 },
           });
+          map.addSource(ROUTE_SOURCE_ID, {
+            type: "geojson",
+            data: toRouteFeatureCollection(routeGeometryRef.current) as never,
+          });
+          map.addLayer({
+            id: ROUTE_LAYER_ID,
+            type: "line",
+            source: ROUTE_SOURCE_ID,
+            paint: { "line-color": "#1d4ed8", "line-width": 4 },
+          });
+          const bounds = combineBounds(
+            getIncidentBounds(featuresRef.current),
+            getRouteBounds(routeGeometryRef.current),
+          );
+          if (bounds) {
+            map.fitBounds(bounds, { padding: 48, maxZoom: 11, duration: 0 });
+          }
           map.on("click", FILL_LAYER_ID, (event: MapLayerMouseEvent) => {
             const id = event.features?.[0]?.properties?.id;
             if (typeof id === "string") onSelectRef.current(id);
@@ -156,7 +181,13 @@ export function IncidentMap({
     (map.getSource(SOURCE_ID) as GeoJSONSource).setData(
       featureCollection as never,
     );
-    const bounds = getIncidentBounds(featureCollection);
+    const routeSource = map.getSource(ROUTE_SOURCE_ID) as
+      GeoJSONSource | undefined;
+    routeSource?.setData(toRouteFeatureCollection(routeGeometry) as never);
+    const bounds = combineBounds(
+      getIncidentBounds(featureCollection),
+      getRouteBounds(routeGeometry),
+    );
     if (bounds) map.fitBounds(bounds, { padding: 48, maxZoom: 11 });
     map.setPaintProperty(FILL_LAYER_ID, "fill-opacity", [
       "case",
@@ -164,11 +195,15 @@ export function IncidentMap({
       0.48,
       0.24,
     ]);
-  }, [featureCollection, selectedId]);
+  }, [featureCollection, routeGeometry, selectedId]);
 
   return (
     <div
-      aria-label="Map of public generalized incident areas"
+      aria-label={
+        toRouteFeatureCollection(routeGeometry).features.length > 0
+          ? "Map of public generalized incident areas and selected route"
+          : "Map of public generalized incident areas"
+      }
       className="h-[min(58svh,34rem)] min-h-64 w-full overflow-hidden rounded-lg bg-muted"
       ref={containerRef}
       role="region"
