@@ -81,6 +81,9 @@ func writeResult(ctx context.Context, reader timelineReader, selected options, o
 	if selected.reportID != nil {
 		item, err := reader.TraceReport(ctx, *selected.reportID)
 		if err != nil {
+			if errors.Is(err, latency.ErrReportNotFound) {
+				return errors.New("report was not found")
+			}
 			return errors.New("report trace query failed")
 		}
 		value = item

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -58,6 +59,24 @@ func TestWriteResultUsesBoundedRecentModeAndHidesDatabaseError(t *testing.T) {
 	}
 	if reader.limit != 3 {
 		t.Fatalf("Recent limit = %d, want 3", reader.limit)
+	}
+}
+
+func TestWriteResultReturnsSpecificSafeMessageWhenReportIsMissing(t *testing.T) {
+	id := uuid.New()
+	reader := &fakeReader{err: fmt.Errorf("store lookup: %w", latency.ErrReportNotFound)}
+	err := writeResult(context.Background(), reader, options{reportID: &id}, &bytes.Buffer{})
+	if err == nil || err.Error() != "report was not found" {
+		t.Fatalf("not-found error = %v, want safe operator message", err)
+	}
+}
+
+func TestWriteResultKeepsTraceDatabaseFailuresGeneric(t *testing.T) {
+	id := uuid.New()
+	reader := &fakeReader{err: errors.New("query failed for postgres://user:private-secret@db")}
+	err := writeResult(context.Background(), reader, options{reportID: &id}, &bytes.Buffer{})
+	if err == nil || err.Error() != "report trace query failed" || strings.Contains(err.Error(), "private-secret") {
+		t.Fatalf("trace query error = %v, want generic safe message", err)
 	}
 }
 

@@ -13,16 +13,5 @@ CREATE TABLE report_ai_processing (
     CONSTRAINT report_ai_processing_failure_kind_check CHECK (failure_kind IS NULL OR failure_kind IN ('transient', 'permanent'))
 );
 
--- The diagnostic locates the first report-created event after constraining the
--- report sample. Index its correlation keys so published history is bounded too.
-CREATE INDEX outbox_events_aggregate_event_idx
-    ON outbox_events (aggregate_type, aggregate_id, event_type, created_at, id);
-
--- A report trace selects the earliest delivery for a selected alert.
-CREATE INDEX deliveries_alert_created_idx
-    ON deliveries (alert_id, created_at, id);
-
 -- +goose Down
-DROP INDEX IF EXISTS deliveries_alert_created_idx;
-DROP INDEX IF EXISTS outbox_events_aggregate_event_idx;
 DROP TABLE IF EXISTS report_ai_processing;

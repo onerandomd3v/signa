@@ -199,6 +199,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 			"outbox_events_unpublished_idx",
 			"outbox_events_aggregate_event_idx",
 			"deliveries_alert_created_idx",
+			"reports_recent_created_idx",
 		} {
 			if _, ok := indexes[name]; !ok {
 				t.Errorf("missing index %q", name)
@@ -215,6 +216,9 @@ func TestReportAndOutboxMigration(t *testing.T) {
 		}
 		if definition := strings.ToLower(indexes["outbox_events_unpublished_idx"]); !strings.Contains(definition, "created_at, id") || !strings.Contains(definition, "published_at is null") {
 			t.Errorf("unpublished outbox index definition = %q, want creation ordering and unpublished predicate", definition)
+		}
+		if definition := strings.ToLower(indexes["reports_recent_created_idx"]); !strings.Contains(definition, "created_at desc, id desc") || strings.Contains(definition, " where ") {
+			t.Errorf("recent reports index definition = %q, want an unfiltered (created_at DESC, id DESC) index", definition)
 		}
 	})
 
