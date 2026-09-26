@@ -10,8 +10,15 @@
 # go.mod). The dockerfile paths stay relative to that root context.
 #
 # Secrets are NEVER committed. OpenShip injects:
-#   - SIGNA_DB_PASSWORD        (strong Postgres password; also used in the URLs)
+#   - SIGNA_DB_PASSWORD        (strong Postgres password)
 #   - SIGNA_OPENAI_API_KEY     (worker only)
+#
+# IMPORTANT: the database password is passed via the standalone `PGPASSWORD`
+# variable, never embedded inside SIGNA_DATABASE_URL. OpenShip substitutes
+# standalone ${VAR} env values but leaves ${VAR} that is embedded inside a
+# string unsubstituted (it resolves to empty), which would otherwise make the
+# apps connect with an empty password. pgx (api/worker) and goose (migrate)
+# apply PGPASSWORD as the libpq fallback when the URL omits the password.
 #
 # Product-policy values below are the approved DEMO/PILOT set (representative
 # values drawn from the repo's own tests); override per environment in OpenShip.
@@ -54,7 +61,8 @@ services:
       context: ..
       dockerfile: deploy/migrate/Dockerfile
     environment:
-      SIGNA_DATABASE_URL: postgres://signa:${SIGNA_DB_PASSWORD}@postgres:5432/signa?sslmode=disable
+      SIGNA_DATABASE_URL: postgres://signa@postgres:5432/signa?sslmode=disable
+      PGPASSWORD: ${SIGNA_DB_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,7 +74,8 @@ services:
       dockerfile: deploy/api/Dockerfile
     environment:
       SIGNA_API_ADDR: ":8080"
-      SIGNA_DATABASE_URL: postgres://signa:${SIGNA_DB_PASSWORD}@postgres:5432/signa?sslmode=disable
+      SIGNA_DATABASE_URL: postgres://signa@postgres:5432/signa?sslmode=disable
+      PGPASSWORD: ${SIGNA_DB_PASSWORD}
       SIGNA_REDIS_ADDR: redis:6379
       SIGNA_SHUTDOWN_TIMEOUT: 10s
       SIGNA_REPORT_RATE_PER_MINUTE: "6"
@@ -101,7 +110,8 @@ services:
       context: ..
       dockerfile: deploy/worker/Dockerfile
     environment:
-      SIGNA_DATABASE_URL: postgres://signa:${SIGNA_DB_PASSWORD}@postgres:5432/signa?sslmode=disable
+      SIGNA_DATABASE_URL: postgres://signa@postgres:5432/signa?sslmode=disable
+      PGPASSWORD: ${SIGNA_DB_PASSWORD}
       SIGNA_REDIS_ADDR: redis:6379
       # Requires a valid key to stay up (api/golden-path is unaffected if unset).
       SIGNA_OPENAI_API_KEY: ${SIGNA_OPENAI_API_KEY}
