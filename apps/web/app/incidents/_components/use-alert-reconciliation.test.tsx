@@ -224,6 +224,234 @@ describe("useAlertReconciliation", () => {
     vi.useRealTimers();
   });
 
+  it("keeps a transient failure degraded and explicitly retryable without leaving a stranded pending ID", async () => {
+    vi.useFakeTimers();
+    const readAlert = vi
+      .fn<AlertReader>()
+      .mockResolvedValueOnce({ status: "not-found" })
+      .mockResolvedValueOnce({ status: "unavailable" })
+      .mockResolvedValueOnce({
+        status: "authorized",
+        alert: snapshot(firstId, "2026-09-26T10:00:00Z"),
+      });
+    const { result, unmount } = renderHook(() =>
+      useAlertReconciliation({ readAlert }),
+    );
+
+    act(() => result.current.acceptEvents([event(firstId)]));
+    await act(async () => Promise.resolve());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(readAlert).toHaveBeenCalledTimes(2);
+    expect(result.current.alerts[0]?.status).toBe("unavailable");
+
+    act(() => result.current.revalidateKnown());
+    await act(async () => Promise.resolve());
+    expect(readAlert).toHaveBeenCalledTimes(2);
+
+    act(() => result.current.retry(firstId));
+    await act(async () => Promise.resolve());
+    expect(readAlert).toHaveBeenCalledTimes(3);
+    expect(result.current.alerts[0]?.status).toBe("authorized");
+
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("terminally expires a due retry when queue saturation prevents admission", async () => {
+    vi.useFakeTimers();
+    const otherIds = Array.from(
+      { length: 15 },
+      (_, index) =>
+        `550e8400-e29b-41d4-a716-${String(index + 100).padStart(12, "0")}`,
+    );
+    const requests = new Map<
+      string,
+      (value: Awaited<ReturnType<AlertReader>>) => void
+    >();
+    const signals = new Map<string, AbortSignal>();
+    let active = 0;
+    let maxActive = 0;
+    const readAlert = vi.fn<AlertReader>(
+      (alertId, signal) =>
+        new Promise((resolve) => {
+          let settled = false;
+          const finish = (value: Awaited<ReturnType<AlertReader>>) => {
+            if (settled) return;
+            settled = true;
+            active -= 1;
+            resolve(value);
+          };
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          requests.set(alertId, finish);
+          signals.set(alertId, signal);
+          signal.addEventListener(
+            "abort",
+            () => finish({ status: "unavailable" }),
+            { once: true },
+          );
+        }),
+    );
+    const { result, unmount } = renderHook(() =>
+      useAlertReconciliation({ readAlert }),
+    );
+
+    act(() => result.current.acceptEvents([event(firstId)]));
+    await act(async () => Promise.resolve());
+    act(() => requests.get(firstId)?.({ status: "not-found" }));
+    await act(async () => Promise.resolve());
+    expect(vi.getTimerCount()).toBe(1);
+
+    act(() => result.current.acceptEvents(otherIds.map((id) => event(id))));
+    expect(readAlert).toHaveBeenCalledTimes(4);
+    expect(maxActive).toBe(3);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(result.current.hasOverflow).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      requests.get(otherIds[0])?.({ status: "unavailable" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(readAlert).toHaveBeenCalledTimes(5);
+    expect(maxActive).toBe(3);
+
+    act(() => result.current.revalidateKnown());
+    act(() => result.current.acceptEvents([event(firstId)]));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(readAlert.mock.calls.filter(([id]) => id === firstId)).toHaveLength(
+      1,
+    );
+    expect(signals.get(firstId)?.aborted).toBe(false);
+
+    unmount();
+    expect(active).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("expires a pending retry when reconnect cannot enqueue it, then makes no retry when capacity returns", async () => {
+    vi.useFakeTimers();
+    const otherIds = Array.from(
+      { length: 15 },
+      (_, index) =>
+        `550e8400-e29b-41d4-a716-${String(index + 200).padStart(12, "0")}`,
+    );
+    const requests = new Map<
+      string,
+      (value: Awaited<ReturnType<AlertReader>>) => void
+    >();
+    const readAlert = vi.fn<AlertReader>(
+      (alertId, signal) =>
+        new Promise((resolve) => {
+          let settled = false;
+          const finish = (value: Awaited<ReturnType<AlertReader>>) => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+          };
+          requests.set(alertId, finish);
+          signal.addEventListener(
+            "abort",
+            () => finish({ status: "unavailable" }),
+            { once: true },
+          );
+        }),
+    );
+    const { result, unmount } = renderHook(() =>
+      useAlertReconciliation({ readAlert }),
+    );
+
+    act(() => result.current.acceptEvents([event(firstId)]));
+    await act(async () => Promise.resolve());
+    act(() => requests.get(firstId)?.({ status: "not-found" }));
+    await act(async () => Promise.resolve());
+    act(() => result.current.acceptEvents(otherIds.map((id) => event(id))));
+    expect(readAlert).toHaveBeenCalledTimes(4);
+    expect(vi.getTimerCount()).toBe(1);
+
+    act(() => result.current.revalidateKnown());
+    expect(result.current.hasOverflow).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      requests.get(otherIds[0])?.({ status: "unavailable" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(readAlert).toHaveBeenCalledTimes(5);
+    act(() => result.current.revalidateKnown());
+    act(() => result.current.acceptEvents([event(firstId)]));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(readAlert.mock.calls.filter(([id]) => id === firstId)).toHaveLength(
+      1,
+    );
+
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("keeps simultaneous pending-alert retries within the three-read concurrency limit", async () => {
+    vi.useFakeTimers();
+    const ids = [firstId, incidentId, "550e8400-e29b-41d4-a716-446655440002"];
+    const attempts = new Map<string, number>();
+    let active = 0;
+    let maxActive = 0;
+    const readAlert = vi.fn<AlertReader>(
+      (alertId, signal) =>
+        new Promise((resolve) => {
+          let settled = false;
+          const finish = (value: Awaited<ReturnType<AlertReader>>) => {
+            if (settled) return;
+            settled = true;
+            active -= 1;
+            resolve(value);
+          };
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          const attempt = (attempts.get(alertId) ?? 0) + 1;
+          attempts.set(alertId, attempt);
+          if (attempt === 1)
+            queueMicrotask(() => finish({ status: "not-found" }));
+          signal.addEventListener(
+            "abort",
+            () => finish({ status: "unavailable" }),
+            { once: true },
+          );
+        }),
+    );
+    const { result, unmount } = renderHook(() =>
+      useAlertReconciliation({ readAlert }),
+    );
+
+    act(() => result.current.acceptEvents(ids.map((id) => event(id))));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(readAlert).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(readAlert).toHaveBeenCalledTimes(6);
+    expect(maxActive).toBeLessThanOrEqual(3);
+    expect(maxActive).toBe(3);
+
+    unmount();
+    expect(active).toBe(0);
+    vi.useRealTimers();
+  });
+
   it("cancels pending visibility timers on authentication loss and unmount", async () => {
     vi.useFakeTimers();
     const readAlert = vi

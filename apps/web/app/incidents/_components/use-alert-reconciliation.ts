@@ -7,6 +7,8 @@ import type { RealtimeAlertReference } from "./use-realtime-updates";
 
 const MAX_VISIBLE_ALERTS = 3;
 const MAX_REMEMBERED_ALERTS = 128;
+// Keep replay suppression bounded independently from active pending reads.
+const MAX_TERMINAL_VISIBILITY_MARKERS = 128;
 const MAX_CONCURRENT_ALERT_READS = 3;
 const MAX_QUEUED_ALERT_READS = 12;
 // Event-triggered 404s get three retries after the first read: 1s, 2s, then 4s.
@@ -118,6 +120,7 @@ export function useAlertReconciliation({
       }
     >(),
   );
+  const terminalVisibilityRef = useRef(new Map<string, true>());
   const enqueueRef = useRef<(alertId: string, force?: boolean) => void>(
     () => undefined,
   );
@@ -136,6 +139,7 @@ export function useAlertReconciliation({
     const queuedIdSet = queuedIdSetRef.current;
     const pendingVisibility = pendingVisibilityRef.current;
     const eventAlertIds = eventAlertIdsRef.current;
+    const terminalVisibility = terminalVisibilityRef.current;
     return () => {
       mountedRef.current = false;
       for (const controller of requestControllers.values()) {
@@ -149,6 +153,7 @@ export function useAlertReconciliation({
       }
       pendingVisibility.clear();
       eventAlertIds.clear();
+      terminalVisibility.clear();
     };
   }, []);
 
@@ -173,23 +178,50 @@ export function useAlertReconciliation({
     }
     pendingVisibilityRef.current.clear();
     eventAlertIdsRef.current.clear();
+    terminalVisibilityRef.current.clear();
     if (mountedRef.current) setHasOverflow(false);
     publish([]);
   }, [publish]);
 
-  const remember = useCallback((alertId: string) => {
-    rememberedRef.current.delete(alertId);
-    rememberedRef.current.set(alertId, true);
-    while (rememberedRef.current.size > MAX_REMEMBERED_ALERTS) {
-      const oldest = rememberedRef.current.keys().next().value;
+  const markVisibilityTerminal = useCallback((alertId: string) => {
+    const terminalIds = terminalVisibilityRef.current;
+    terminalIds.delete(alertId);
+    terminalIds.set(alertId, true);
+    while (terminalIds.size > MAX_TERMINAL_VISIBILITY_MARKERS) {
+      const oldest = terminalIds.keys().next().value;
       if (oldest === undefined) break;
-      rememberedRef.current.delete(oldest);
-      const pending = pendingVisibilityRef.current.get(oldest);
-      if (pending?.timer !== undefined) clearTimeout(pending.timer);
-      pendingVisibilityRef.current.delete(oldest);
-      eventAlertIdsRef.current.delete(oldest);
+      terminalIds.delete(oldest);
     }
   }, []);
+
+  const finishPendingVisibility = useCallback(
+    (alertId: string, terminal: boolean) => {
+      const pending = pendingVisibilityRef.current.get(alertId);
+      if (pending?.timer !== undefined) clearTimeout(pending.timer);
+      pendingVisibilityRef.current.delete(alertId);
+      if (!eventAlertIdsRef.current.has(alertId)) return;
+      eventAlertIdsRef.current.delete(alertId);
+      if (terminal) markVisibilityTerminal(alertId);
+    },
+    [markVisibilityTerminal],
+  );
+
+  const remember = useCallback(
+    (alertId: string) => {
+      rememberedRef.current.delete(alertId);
+      rememberedRef.current.set(alertId, true);
+      while (rememberedRef.current.size > MAX_REMEMBERED_ALERTS) {
+        const oldest = rememberedRef.current.keys().next().value;
+        if (oldest === undefined) break;
+        rememberedRef.current.delete(oldest);
+        const pending = pendingVisibilityRef.current.get(oldest);
+        if (pending || eventAlertIdsRef.current.has(oldest)) {
+          finishPendingVisibility(oldest, true);
+        }
+      }
+    },
+    [finishPendingVisibility],
+  );
 
   const fetchSnapshot = useCallback(
     async (alertId: string, controller: AbortController) => {
@@ -198,10 +230,8 @@ export function useAlertReconciliation({
         if (!mountedRef.current || controller.signal.aborted) return;
 
         if (result.status === "authorized") {
-          const pending = pendingVisibilityRef.current.get(alertId);
-          if (pending?.timer !== undefined) clearTimeout(pending.timer);
-          pendingVisibilityRef.current.delete(alertId);
-          eventAlertIdsRef.current.delete(alertId);
+          finishPendingVisibility(alertId, false);
+          terminalVisibilityRef.current.delete(alertId);
           if (!isAlertRead(result.alert, alertId)) {
             const existing = alertsRef.current.find(
               (entry) => entry.alertId === alertId,
@@ -263,7 +293,7 @@ export function useAlertReconciliation({
             }, delay);
             pendingVisibilityRef.current.set(alertId, { ...pending, timer });
           } else {
-            pendingVisibilityRef.current.set(alertId, pending);
+            finishPendingVisibility(alertId, true);
           }
           publish(
             alertsRef.current.filter((entry) => entry.alertId !== alertId),
@@ -272,10 +302,10 @@ export function useAlertReconciliation({
         }
 
         if (result.status === "not-found" || result.status === "invalid") {
-          eventAlertIdsRef.current.delete(alertId);
-          const pending = pendingVisibilityRef.current.get(alertId);
-          if (pending?.timer !== undefined) clearTimeout(pending.timer);
-          pendingVisibilityRef.current.delete(alertId);
+          finishPendingVisibility(
+            alertId,
+            eventAlertIdsRef.current.has(alertId),
+          );
           publish(
             alertsRef.current.filter((entry) => entry.alertId !== alertId),
           );
@@ -285,6 +315,7 @@ export function useAlertReconciliation({
           return;
         }
 
+        finishPendingVisibility(alertId, true);
         const existing = alertsRef.current.find(
           (entry) => entry.alertId === alertId,
         );
@@ -302,6 +333,7 @@ export function useAlertReconciliation({
         ]);
       } catch {
         if (!mountedRef.current || controller.signal.aborted) return;
+        finishPendingVisibility(alertId, true);
         const existing = alertsRef.current.find(
           (entry) => entry.alertId === alertId,
         );
@@ -324,7 +356,7 @@ export function useAlertReconciliation({
         drainQueueRef.current();
       }
     },
-    [clearProtectedAlerts, publish],
+    [clearProtectedAlerts, finishPendingVisibility, publish],
   );
 
   const drainQueue = useCallback(() => {
@@ -367,7 +399,10 @@ export function useAlertReconciliation({
       if (queuedIdsRef.current.length >= MAX_QUEUED_ALERT_READS) {
         remember(alertId);
         const pending = pendingVisibilityRef.current.get(alertId);
-        if (pending?.retryQueued) pending.retryQueued = false;
+        if (pending?.retryQueued) {
+          // Expire this bounded retry rather than leave an unscheduled pending ID.
+          finishPendingVisibility(alertId, true);
+        }
         setHasOverflow(true);
         return;
       }
@@ -377,7 +412,7 @@ export function useAlertReconciliation({
       queuedIdSetRef.current.add(alertId);
       drainQueueRef.current();
     },
-    [remember],
+    [finishPendingVisibility, remember],
   );
 
   useEffect(() => {
@@ -388,6 +423,7 @@ export function useAlertReconciliation({
     (events: RealtimeAlertReference[]) => {
       for (const event of events) {
         if (isUuid(event.alertId) && isUuid(event.incidentId)) {
+          if (terminalVisibilityRef.current.has(event.alertId)) continue;
           const pending = pendingVisibilityRef.current.get(event.alertId);
           if (
             pending &&
@@ -405,6 +441,15 @@ export function useAlertReconciliation({
 
   const retry = useCallback(
     (alertId: string) => {
+      const pending = pendingVisibilityRef.current.get(alertId);
+      if (pending?.timer !== undefined) {
+        clearTimeout(pending.timer);
+        pendingVisibilityRef.current.set(alertId, {
+          ...pending,
+          timer: undefined,
+          retryQueued: true,
+        });
+      }
       if (queuedIdSetRef.current.delete(alertId)) {
         queuedIdsRef.current = queuedIdsRef.current.filter(
           (queuedId) => queuedId !== alertId,
@@ -416,7 +461,11 @@ export function useAlertReconciliation({
   );
 
   const revalidateKnown = useCallback(() => {
-    const knownIds = new Set(alertsRef.current.map((entry) => entry.alertId));
+    const knownIds = new Set(
+      alertsRef.current
+        .map((entry) => entry.alertId)
+        .filter((alertId) => !terminalVisibilityRef.current.has(alertId)),
+    );
     for (const [alertId, pending] of pendingVisibilityRef.current) {
       if (pending.retriesUsed >= ALERT_VISIBILITY_RETRY_DELAYS_MS.length) {
         continue;
