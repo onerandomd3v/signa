@@ -404,7 +404,7 @@ describe("IncidentMapExperience", () => {
     expect(screen.queryByText("Authorized alert snapshot message.")).toBeNull();
   });
 
-  it("does not commit an older list snapshot after a newer invalidation arrives", async () => {
+  it("commits serial snapshots during invalidations and ends with the newest result", async () => {
     let emit:
       | ((event: { event?: string; id?: string; data: unknown }) => void)
       | undefined;
@@ -432,12 +432,76 @@ describe("IncidentMapExperience", () => {
     act(() => pending[0]([stale]));
     await waitFor(() => expect(pending).toHaveLength(2));
     expect(
-      screen.queryByRole("heading", { name: "Stale Snapshot" }),
-    ).toBeNull();
+      await screen.findByRole("heading", { name: "Stale Snapshot" }),
+    ).toBeTruthy();
 
     act(() => pending[1]([fresh]));
     expect(
       await screen.findByRole("heading", { name: "Fresh Snapshot" }),
     ).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", { name: "Stale Snapshot" }),
+    ).toBeNull();
+  });
+
+  it("reports a failed read while another realtime invalidation is queued", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    const updatedIncident: PublicIncident = {
+      ...incident,
+      status: "RESOLVING",
+    };
+    const pending: Array<{
+      resolve: (value: PublicIncident[]) => void;
+      reject: (reason?: unknown) => void;
+    }> = [];
+    const loadIncidents = vi.fn(
+      () =>
+        new Promise<PublicIncident[]>((resolve, reject) => {
+          pending.push({ resolve, reject });
+        }),
+    );
+    const connectRealtime: RealtimeConnector = async (options) => {
+      options.onConnection?.();
+      emit = options.onSseEvent;
+      return idleRealtime(options);
+    };
+
+    render(
+      <IncidentMapExperience
+        connectRealtime={connectRealtime}
+        loadIncidents={loadIncidents}
+        mapStyleUrl={null}
+      />,
+    );
+    await waitFor(() => expect(pending).toHaveLength(1));
+    act(() => pending[0].resolve([incident]));
+    expect(
+      await screen.findByRole("heading", { name: "Road Closure" }),
+    ).toBeTruthy();
+
+    act(() =>
+      emit?.({ event: "incident.updated.v1", id: "cursor-1", data: {} }),
+    );
+    await waitFor(() => expect(pending).toHaveLength(2));
+    act(() =>
+      emit?.({ event: "incident.updated.v1", id: "cursor-2", data: {} }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    act(() => pending[1].reject(new Error("temporary failure")));
+    await waitFor(() => expect(pending).toHaveLength(3));
+    expect(
+      await screen.findByText(/displayed information may be out of date/i),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Road Closure" })).toBeTruthy();
+    expect(screen.getByText("Open")).toBeTruthy();
+
+    act(() => pending[2].resolve([updatedIncident]));
+    expect(await screen.findByText("Resolving")).toBeTruthy();
+    expect(
+      screen.queryByText(/displayed information may be out of date/i),
+    ).toBeNull();
   });
 });

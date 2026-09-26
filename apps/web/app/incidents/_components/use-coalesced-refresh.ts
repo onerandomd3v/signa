@@ -43,16 +43,14 @@ export function useCoalescedRefresh<T>({
             const value = await loadRef.current(controller.signal);
             if (
               lifecycleRef.current === lifecycle &&
-              !controller.signal.aborted &&
-              !pendingRef.current
+              !controller.signal.aborted
             ) {
               successRef.current(value);
             }
           } catch {
             if (
               lifecycleRef.current === lifecycle &&
-              !controller.signal.aborted &&
-              !pendingRef.current
+              !controller.signal.aborted
             ) {
               errorRef.current();
             }
