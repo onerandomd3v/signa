@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/onerandomd3v/signa/internal/observability"
 )
 
 // ErrDurableExtractionDestinationUnresolved is retained for callers compiled
@@ -70,7 +71,9 @@ func (p *Processor) WithMetrics(metrics Metrics) *Processor {
 	return p
 }
 
-func (p *Processor) Process(ctx context.Context, message StreamMessage) error {
+func (p *Processor) Process(ctx context.Context, message StreamMessage) (err error) {
+	ctx, finish := observability.StartStage(ctx, observability.StageAIProcessing)
+	defer func() { finish(err) }()
 	if p == nil || p.reader == nil || p.provider == nil || p.validator == nil || p.observer == nil || p.acker == nil {
 		return fmt.Errorf("extraction processor dependencies are required")
 	}
@@ -105,7 +108,8 @@ func (p *Processor) Process(ctx context.Context, message StreamMessage) error {
 	if err != nil {
 		return fmt.Errorf("load report %s: %w", event.ReportID, err)
 	}
-	started := time.Now()
+	started := time.Now().UTC()
+	p.recordAIProcessingStart(ctx, event.ReportID, started)
 	var output []byte
 	var usage Usage
 	if usageProvider, ok := p.provider.(UsageProvider); ok {
@@ -117,23 +121,57 @@ func (p *Processor) Process(ctx context.Context, message StreamMessage) error {
 	providerDuration := time.Since(started)
 	if err != nil {
 		err = normalizeProviderError(err)
+		p.recordAIProcessingFailure(ctx, event.ReportID, failureKind(err), time.Now().UTC())
 		p.observeMetric(metricFor(p.providerName(), "provider_failure", failureKind(err), providerDuration, usage))
 		return fmt.Errorf("extract report %s: %w", event.ReportID, err)
 	}
 	validated, err := p.validator.Validate(output)
 	if err != nil {
+		p.recordAIProcessingFailure(ctx, event.ReportID, FailurePermanent, time.Now().UTC())
 		p.observeMetric(metricFor(p.providerName(), "malformed_output", FailurePermanent, providerDuration, usage))
 		return fmt.Errorf("%w: validate extraction for report %s: %v", ErrInvalidStructuredOutput, event.ReportID, err)
 	}
 	if err := p.observer.Observe(ctx, event.ReportID, validated); err != nil {
+		p.recordAIProcessingFailure(ctx, event.ReportID, FailureTransient, time.Now().UTC())
 		p.observeMetric(metricFor(p.providerName(), "durable_persistence_failure", FailureTransient, providerDuration, usage))
 		return fmt.Errorf("observe extraction for report %s: %w", event.ReportID, err)
 	}
+	p.recordAIProcessingSuccess(ctx, event.ReportID, time.Now().UTC())
 	p.observeMetric(metricFor(p.providerName(), "success", "", providerDuration, usage))
 	if err := p.acker.Ack(ctx, p.stream, p.group, message.ID); err != nil {
 		return fmt.Errorf("ack extraction message %s: %w", message.ID, err)
 	}
 	return nil
+}
+
+func (p *Processor) processingRecorder() ProcessingStateRecorder {
+	if p == nil {
+		return nil
+	}
+	recorder, _ := p.observer.(ProcessingStateRecorder)
+	return recorder
+}
+
+func (p *Processor) recordAIProcessingStart(ctx context.Context, reportID string, now time.Time) {
+	if recorder := p.processingRecorder(); recorder != nil {
+		_ = recorder.MarkAIProcessingStarted(ctx, reportID, now)
+	}
+}
+
+func (p *Processor) recordAIProcessingSuccess(ctx context.Context, reportID string, now time.Time) {
+	if recorder := p.processingRecorder(); recorder != nil {
+		_ = recorder.MarkAIProcessingSucceeded(ctx, reportID, now)
+	}
+}
+
+func (p *Processor) recordAIProcessingFailure(ctx context.Context, reportID string, kind FailureKind, now time.Time) {
+	if recorder := p.processingRecorder(); recorder != nil {
+		state := "FAILED_TERMINAL"
+		if kind == FailureTransient {
+			state = "FAILED_RETRYABLE"
+		}
+		_ = recorder.MarkAIProcessingFailed(ctx, reportID, state, kind, now)
+	}
 }
 
 func (p *Processor) providerName() string {

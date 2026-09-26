@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestProcessorLoadsExtractsValidatesObservesAndAcknowledges(t *testing.T) {
@@ -111,6 +112,66 @@ func TestProcessorRecordsSafeAIUsageMetric(t *testing.T) {
 	}
 }
 
+func TestProcessorRecordsDurableAIStageStateWithoutChangingAcknowledgement(t *testing.T) {
+	state := &recordingStateObserver{}
+	processor := NewProcessor(
+		&fakeReportReader{rawText: "raw report"},
+		&fakeProvider{result: []byte(validExtractionJSON())},
+		&fakeValidator{result: Extraction{ContractVersion: "signa.ai.report-extraction.v0"}},
+		state,
+		&fakeAcker{}, "signa:report-events", "group-1",
+	)
+
+	if err := processor.Process(context.Background(), StreamMessage{ID: "message-1", Values: map[string]any{
+		"event_id": "event-1", "event_name": ReportCreatedV1, "aggregate_type": "report",
+		"payload": `{"report_id":"11111111-1111-4111-8111-111111111111"}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := state.states, []string{"started", "succeeded"}; !equalStrings(got, want) {
+		t.Fatalf("state transitions = %v, want %v", got, want)
+	}
+	if state.failureKind != "" {
+		t.Fatalf("successful AI state recorded failure kind %q", state.failureKind)
+	}
+}
+
+func TestProcessorRecordsRetryableAndTerminalAIFailuresUsingSafeKinds(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		err       error
+		wantState string
+		wantKind  string
+	}{
+		{name: "retryable provider", err: transientProviderError("extract", errors.New("temporary")), wantState: "FAILED_RETRYABLE", wantKind: string(FailureTransient)},
+		{name: "terminal provider", err: permanentProviderError("extract", errors.New("rejected")), wantState: "FAILED_TERMINAL", wantKind: string(FailurePermanent)},
+		{name: "terminal schema", err: errors.New("schema invalid"), wantState: "FAILED_TERMINAL", wantKind: string(FailurePermanent)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state := &recordingStateObserver{}
+			processor := NewProcessor(
+				&fakeReportReader{rawText: "raw report"},
+				&fakeProvider{result: []byte(validExtractionJSON()), err: test.err},
+				&fakeValidator{result: Extraction{ContractVersion: "signa.ai.report-extraction.v0"}},
+				state,
+				&fakeAcker{}, "signa:report-events", "group-1",
+			)
+			if err := processor.Process(context.Background(), StreamMessage{ID: "message-1", Values: map[string]any{
+				"event_id": "event-1", "event_name": ReportCreatedV1, "aggregate_type": "report",
+				"payload": `{"report_id":"11111111-1111-4111-8111-111111111111"}`,
+			}}); err == nil {
+				t.Fatal("Process() error = nil")
+			}
+			if state.failureState != test.wantState || state.failureKind != test.wantKind {
+				t.Fatalf("failure state = %q/%q, want %q/%q", state.failureState, state.failureKind, test.wantState, test.wantKind)
+			}
+			if state.rawError != "" {
+				t.Fatalf("raw error was persisted: %q", state.rawError)
+			}
+		})
+	}
+}
+
 func TestLoggingObserverSurfacesDurableDestinationBlocker(t *testing.T) {
 	err := (LoggingObserver{}).Observe(context.Background(), "11111111-1111-4111-8111-111111111111", Extraction{ContractVersion: "signa.ai.report-extraction.v0"})
 	if !errors.Is(err, ErrDurableExtractionDestinationUnresolved) {
@@ -168,6 +229,35 @@ type fakeObserver struct {
 	err      error
 }
 
+type recordingStateObserver struct {
+	recordingObserver
+	states       []string
+	failureState string
+	failureKind  string
+	rawError     string
+}
+
+func (o *recordingStateObserver) MarkAIProcessingStarted(context.Context, string, time.Time) error {
+	o.states = append(o.states, "started")
+	return nil
+}
+
+func (o *recordingStateObserver) MarkAIProcessingSucceeded(context.Context, string, time.Time) error {
+	o.states = append(o.states, "succeeded")
+	return nil
+}
+
+func (o *recordingStateObserver) MarkAIProcessingFailed(_ context.Context, _ string, state string, kind FailureKind, _ time.Time) error {
+	o.failureState = state
+	o.failureKind = string(kind)
+	o.states = append(o.states, state)
+	return nil
+}
+
+type recordingObserver struct{}
+
+func (o *recordingObserver) Observe(context.Context, string, Extraction) error { return nil }
+
 func (o *fakeObserver) Observe(_ context.Context, reportID string, result Extraction) error {
 	o.reportID = reportID
 	o.result = result
@@ -183,4 +273,16 @@ func (a *fakeAcker) Ack(_ context.Context, _, _, messageID string) error {
 	a.calls++
 	a.messageID = messageID
 	return nil
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }

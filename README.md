@@ -105,6 +105,13 @@ Run the worker in another terminal:
 go run ./cmd/worker
 ```
 
+Inspect privacy-safe report-to-alert latency stages with the bounded operator command. See [report-to-alert latency diagnostics](docs/observability/report-to-alert-latency.md) for stage semantics, privacy limits, and OpenTelemetry configuration boundaries:
+
+```text
+go run ./cmd/report-trace -report-id <report-uuid>
+go run ./cmd/report-trace -limit 20
+```
+
 Run tests and static checks:
 
 ```text
