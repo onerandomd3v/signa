@@ -247,6 +247,181 @@ describe("RouteRelevanceExperience", () => {
     expect(evaluate.mock.calls[1][0].origin.latitude).toBe(6.6);
   });
 
+  it("keeps the newer request owned when a superseded request completes before invalidation", async () => {
+    const pending: Array<{
+      resolve: (result: RouteRelevanceResult) => void;
+      signal: AbortSignal;
+    }> = [];
+    const evaluate = vi.fn(
+      (_request: Parameters<RouteRelevanceEvaluator>[0], signal: AbortSignal) =>
+        new Promise<RouteRelevanceResult>((resolve) =>
+          pending.push({ resolve, signal }),
+        ),
+    );
+    const onResultChange = vi.fn();
+    const incidentRevisionRef = { current: 0 };
+    const props = {
+      evaluate,
+      incidentRevision: 0,
+      incidentRevisionRef,
+      onResultChange,
+    };
+    const view = render(<RouteRelevanceExperience {...props} />);
+    fillRoute();
+    fireEvent.click(screen.getByRole("button", { name: "Check route" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check route" }));
+    await waitFor(() => expect(pending).toHaveLength(2));
+    expect(pending[0].signal.aborted).toBe(true);
+    expect(pending[1].signal.aborted).toBe(false);
+
+    await act(async () => {
+      pending[0].resolve(success("RELEVANT"));
+    });
+    expect(
+      screen.getByRole("heading", { name: "Checking route" }),
+    ).toBeTruthy();
+
+    act(() => {
+      incidentRevisionRef.current = 1;
+      view.rerender(
+        <RouteRelevanceExperience {...props} incidentRevision={1} />,
+      );
+    });
+    expect(pending[1].signal.aborted).toBe(true);
+    expect(
+      screen.getByRole("heading", { name: "Route result may be out of date" }),
+    ).toBeTruthy();
+
+    await act(async () => {
+      pending[1].resolve(success("RELEVANT"));
+    });
+    expect(
+      screen.getByRole("heading", { name: "Route result may be out of date" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", {
+        name: "A reported incident may affect this route",
+      }),
+    ).toBeNull();
+    expect(onResultChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ incidents: expect.any(Array) }),
+    );
+  });
+
+  it("shows stale recovery when the current response sees a newer incident revision", async () => {
+    let resolveRequest: ((result: RouteRelevanceResult) => void) | undefined;
+    const evaluate = vi.fn(
+      () =>
+        new Promise<RouteRelevanceResult>(
+          (resolve) => (resolveRequest = resolve),
+        ),
+    );
+    const incidentRevisionRef = { current: 0 };
+    const onResultChange = vi.fn();
+    const view = render(
+      <RouteRelevanceExperience
+        evaluate={evaluate}
+        incidentRevision={0}
+        incidentRevisionRef={incidentRevisionRef}
+        onResultChange={onResultChange}
+      />,
+    );
+    fillRoute();
+    fireEvent.click(screen.getByRole("button", { name: "Check route" }));
+    await waitFor(() => expect(evaluate).toHaveBeenCalledOnce());
+
+    incidentRevisionRef.current = 1;
+    await act(async () => {
+      resolveRequest?.(success("RELEVANT"));
+    });
+    view.rerender(
+      <RouteRelevanceExperience
+        evaluate={evaluate}
+        incidentRevision={1}
+        incidentRevisionRef={incidentRevisionRef}
+        onResultChange={onResultChange}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Route result may be out of date" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", {
+        name: "A reported incident may affect this route",
+      }),
+    ).toBeNull();
+    expect(onResultChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ incidents: expect.any(Array) }),
+    );
+  });
+
+  it("clears request ownership on edits and allows a fresh explicit check", async () => {
+    let resolveObsolete: ((result: RouteRelevanceResult) => void) | undefined;
+    let obsoleteSignal: AbortSignal | undefined;
+    const evaluate = vi
+      .fn<RouteRelevanceEvaluator>()
+      .mockImplementationOnce((_request, signal) => {
+        obsoleteSignal = signal;
+        return new Promise((resolve) => (resolveObsolete = resolve));
+      })
+      .mockResolvedValueOnce(success("NOT_RELEVANT"));
+    const incidentRevisionRef = { current: 0 };
+    const baseProps = {
+      evaluate,
+      incidentRevisionRef,
+      onResultChange: vi.fn(),
+    };
+    const view = render(
+      <RouteRelevanceExperience {...baseProps} incidentRevision={0} />,
+    );
+    fillRoute();
+    fireEvent.click(screen.getByRole("button", { name: "Check route" }));
+    await waitFor(() => expect(evaluate).toHaveBeenCalledOnce());
+
+    fireEvent.change(
+      within(screen.getByRole("group", { name: "Origin" })).getByLabelText(
+        /Latitude/,
+      ),
+      { target: { value: "6.6" } },
+    );
+    expect(obsoleteSignal?.aborted).toBe(true);
+    expect(
+      screen.getByRole("heading", { name: "No route checked" }),
+    ).toBeTruthy();
+
+    act(() => {
+      incidentRevisionRef.current = 1;
+      view.rerender(
+        <RouteRelevanceExperience {...baseProps} incidentRevision={1} />,
+      );
+    });
+    expect(
+      screen.getByRole("heading", { name: "No route checked" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Check route again" }),
+    ).toBeNull();
+    expect(
+      within(screen.getByRole("group", { name: "Origin" }))
+        .getByLabelText(/Latitude/)
+        .getAttribute("value"),
+    ).toBe("6.6");
+
+    fireEvent.click(screen.getByRole("button", { name: "Check route" }));
+    await screen.findByText(/does not confirm that the route is safe/i);
+    expect(evaluate).toHaveBeenCalledTimes(2);
+    expect(evaluate.mock.calls[1][0].origin.latitude).toBe(6.6);
+    await act(async () => {
+      resolveObsolete?.(success("RELEVANT"));
+    });
+    expect(
+      screen.queryByRole("heading", {
+        name: "A reported incident may affect this route",
+      }),
+    ).toBeNull();
+  });
+
   it("aborts a pending request when unmounted", async () => {
     let resolveRequest: ((result: RouteRelevanceResult) => void) | undefined;
     let signal: AbortSignal | undefined;

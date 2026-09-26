@@ -40,6 +40,10 @@ export type RouteRelevanceEvaluator = (
 ) => Promise<RouteRelevanceResult>;
 
 type CoordinateInput = { latitude: string; longitude: string };
+type ActiveRouteRequest = {
+  controller: AbortController;
+  submittedRevision: number;
+};
 type RouteFormValues = {
   origin: CoordinateInput;
   destination: CoordinateInput;
@@ -366,14 +370,12 @@ export function RouteRelevanceExperience({
   const [state, setState] = useState<RouteRelevanceState>({
     status: "no-route",
   });
-  const requestControllerRef = useRef<AbortController | null>(null);
-  const requestIdRef = useRef(0);
+  const activeRequestRef = useRef<ActiveRouteRequest | null>(null);
   const runRequestRef = useRef<(request: RouteRelevanceRequest) => void>(
     () => {},
   );
   const latestRequestRef = useRef<RouteRelevanceRequest | null>(null);
   const lastResultRef = useRef<RouteMapResult | null>(null);
-  const requestActiveRef = useRef(false);
   const observedRevisionRef = useRef(incidentRevision);
 
   const publishResult = useCallback(
@@ -386,21 +388,21 @@ export function RouteRelevanceExperience({
 
   useEffect(
     () => () => {
-      requestIdRef.current += 1;
-      requestControllerRef.current?.abort();
-      requestControllerRef.current = null;
+      activeRequestRef.current?.controller.abort();
+      activeRequestRef.current = null;
     },
     [],
   );
 
   const runRequest = useCallback(
     async (request: RouteRelevanceRequest) => {
-      requestControllerRef.current?.abort();
+      activeRequestRef.current?.controller.abort();
       const controller = new AbortController();
-      requestControllerRef.current = controller;
-      const requestId = ++requestIdRef.current;
-      const submittedRevision = getIncidentRevision(currentIncidentRevisionRef);
-      requestActiveRef.current = true;
+      const activeRequest: ActiveRouteRequest = {
+        controller,
+        submittedRevision: getIncidentRevision(currentIncidentRevisionRef),
+      };
+      activeRequestRef.current = activeRequest;
       latestRequestRef.current = request;
       publishResult(null);
       setState({ status: "loading" });
@@ -412,30 +414,31 @@ export function RouteRelevanceExperience({
 
       try {
         const result = await evaluate(request, controller.signal);
-        requestActiveRef.current = false;
-        if (requestControllerRef.current === controller) {
-          requestControllerRef.current = null;
-        }
+        if (activeRequestRef.current !== activeRequest) return;
+        activeRequestRef.current = null;
+        if (controller.signal.aborted) return;
         if (
-          controller.signal.aborted ||
-          requestId !== requestIdRef.current ||
-          submittedRevision !== getIncidentRevision(currentIncidentRevisionRef)
+          activeRequest.submittedRevision !==
+          getIncidentRevision(currentIncidentRevisionRef)
         ) {
+          setState({ status: "stale", onRetry: retryLatest });
+          return;
+        }
+        if (result.status === "aborted") {
+          setState({ status: "stale", onRetry: retryLatest });
           return;
         }
         setStateFromResult(result, retryLatest, setState, publishResult);
       } catch {
-        requestActiveRef.current = false;
-        if (requestControllerRef.current === controller) {
-          requestControllerRef.current = null;
-        }
-        if (
-          !controller.signal.aborted &&
-          requestId === requestIdRef.current &&
-          submittedRevision === getIncidentRevision(currentIncidentRevisionRef)
-        ) {
-          setState({ status: "network-error", onRetry: retryLatest });
-        }
+        if (activeRequestRef.current !== activeRequest) return;
+        activeRequestRef.current = null;
+        if (controller.signal.aborted) return;
+        setState(
+          activeRequest.submittedRevision !==
+            getIncidentRevision(currentIncidentRevisionRef)
+            ? { status: "stale", onRetry: retryLatest }
+            : { status: "network-error", onRetry: retryLatest },
+        );
       }
     },
     [evaluate, currentIncidentRevisionRef, publishResult],
@@ -450,12 +453,11 @@ export function RouteRelevanceExperience({
   useEffect(() => {
     if (observedRevisionRef.current === incidentRevision) return;
     observedRevisionRef.current = incidentRevision;
-    if (!requestActiveRef.current && !lastResultRef.current) return;
+    const activeRequest = activeRequestRef.current;
+    if (!activeRequest && !lastResultRef.current) return;
 
-    requestIdRef.current += 1;
-    requestControllerRef.current?.abort();
-    requestControllerRef.current = null;
-    requestActiveRef.current = false;
+    activeRequest?.controller.abort();
+    activeRequestRef.current = null;
     const previousResult = lastResultRef.current;
     publishResult(
       previousResult
@@ -470,9 +472,8 @@ export function RouteRelevanceExperience({
   }, [incidentRevision, publishResult]);
 
   const clearForEdit = () => {
-    requestIdRef.current += 1;
-    requestControllerRef.current?.abort();
-    requestControllerRef.current = null;
+    activeRequestRef.current?.controller.abort();
+    activeRequestRef.current = null;
     latestRequestRef.current = null;
     publishResult(null);
     setState({ status: "no-route" });
