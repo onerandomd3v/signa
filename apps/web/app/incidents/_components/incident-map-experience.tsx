@@ -97,6 +97,7 @@ export function IncidentMapExperience({
   const alertReconciliation = useAlertReconciliation({ readAlert });
   const acceptAlertEvents = alertReconciliation.acceptEvents;
   const revalidateAlerts = alertReconciliation.revalidateKnown;
+  const clearProtectedAlerts = alertReconciliation.clearProtectedAlerts;
   const onInvalidation = useCallback(
     ({
       incidents: incidentsChanged,
@@ -113,6 +114,7 @@ export function IncidentMapExperience({
   const realtime = useRealtimeUpdates({
     onInvalidation,
     onConnected: revalidateAlerts,
+    onUnauthorized: clearProtectedAlerts,
     connect: connectRealtime,
   });
 

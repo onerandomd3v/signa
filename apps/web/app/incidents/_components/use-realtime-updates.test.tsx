@@ -103,12 +103,64 @@ describe("useRealtimeUpdates", () => {
       options.onSseError?.(new Error("SSE failed: 401 Unauthorized"));
       return completedStream();
     });
+    const onUnauthorized = vi.fn();
+    const sleep = vi.fn(async () => {});
     const { result } = renderHook(() =>
-      useRealtimeUpdates({ onInvalidation: vi.fn(), connect }),
+      useRealtimeUpdates({
+        onInvalidation: vi.fn(),
+        onUnauthorized,
+        connect,
+        sleep,
+      }),
     );
 
     await waitFor(() => expect(result.current.status).toBe("unavailable"));
     expect(connect).toHaveBeenCalledOnce();
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("notifies unauthorized once when both the SSE callback and rejection report 401", async () => {
+    const connect: RealtimeConnector = vi.fn(async (options) => {
+      options.onSseError?.(new Error("SSE failed: 401 Unauthorized"));
+      throw new Error("SSE failed: 401 Unauthorized");
+    });
+    const onUnauthorized = vi.fn();
+    const sleep = vi.fn(async () => {});
+    const { result } = renderHook(() =>
+      useRealtimeUpdates({
+        onInvalidation: vi.fn(),
+        onUnauthorized,
+        connect,
+        sleep,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("unavailable"));
+    expect(connect).toHaveBeenCalledOnce();
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("notifies unauthorized when the connector rejects with 401 without an SSE error callback", async () => {
+    const connect: RealtimeConnector = vi
+      .fn()
+      .mockRejectedValue(new Error("SSE failed: 401 Unauthorized"));
+    const onUnauthorized = vi.fn();
+    const sleep = vi.fn(async () => {});
+    const { result } = renderHook(() =>
+      useRealtimeUpdates({
+        onInvalidation: vi.fn(),
+        onUnauthorized,
+        connect,
+        sleep,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("unavailable"));
+    expect(connect).toHaveBeenCalledOnce();
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it("keeps retrying a 503 with bounded backoff and recovers to connected", async () => {

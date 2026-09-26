@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AlertRead, PublicIncident } from "@/lib/api/generated";
+import type { AlertReadResult } from "@/lib/api/alerts";
 import type { AlertReader } from "./use-alert-reconciliation";
 import type { RealtimeConnector } from "./use-realtime-updates";
 import { IncidentMapExperience } from "./incident-map-experience";
@@ -75,6 +76,11 @@ const authorizedAlert: AlertRead = {
   as_of: "2026-09-26T10:00:00Z",
   created_at: "2026-09-26T10:00:00Z",
   supersedes_alert_id: null,
+};
+const pendingAuthorizedAlert: AlertRead = {
+  ...authorizedAlert,
+  alert_id: "550e8400-e29b-41d4-a716-446655440010",
+  message: "Late protected snapshot must not return.",
 };
 
 afterEach(() => cleanup());
@@ -401,6 +407,87 @@ describe("IncidentMapExperience", () => {
       await screen.findByText(/alert details are unavailable/i),
     ).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Road Closure" })).toBeTruthy();
+    expect(screen.queryByText("Authorized alert snapshot message.")).toBeNull();
+  });
+
+  it("clears authorized snapshots on SSE 401 and ignores pending protected reads", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    let loseAuthentication: (() => void) | undefined;
+    let pendingSignal: AbortSignal | undefined;
+    let resolvePendingRead: ((result: AlertReadResult) => void) | undefined;
+    const pendingRead = new Promise<AlertReadResult>((resolve) => {
+      resolvePendingRead = resolve;
+    });
+    const connectRealtime: RealtimeConnector = async (options) => {
+      options.onConnection?.();
+      emit = options.onSseEvent;
+      loseAuthentication = () =>
+        options.onSseError?.(new Error("SSE failed: 401 Unauthorized"));
+      return idleRealtime(options);
+    };
+    const readAlert: AlertReader = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "authorized", alert: authorizedAlert })
+      .mockImplementationOnce((_alertId, signal) => {
+        pendingSignal = signal;
+        return pendingRead;
+      });
+    render(
+      <IncidentMapExperience
+        connectRealtime={connectRealtime}
+        loadIncidents={async () => [incident]}
+        mapStyleUrl={null}
+        readAlert={readAlert}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Road Closure" }),
+    ).toBeTruthy();
+    act(() =>
+      emit?.({
+        event: "alert.created.v1",
+        id: "map-auth-first-alert",
+        data: {
+          alert_id: authorizedAlert.alert_id,
+          incident_id: authorizedAlert.incident_id,
+        },
+      }),
+    );
+    expect(
+      await screen.findByText("Authorized alert snapshot message."),
+    ).toBeTruthy();
+
+    act(() =>
+      emit?.({
+        event: "alert.created.v1",
+        id: "map-auth-pending-alert",
+        data: {
+          alert_id: pendingAuthorizedAlert.alert_id,
+          incident_id: pendingAuthorizedAlert.incident_id,
+        },
+      }),
+    );
+    await waitFor(() => expect(readAlert).toHaveBeenCalledTimes(2));
+    expect(pendingSignal?.aborted).toBe(false);
+
+    act(() => loseAuthentication?.());
+    await waitFor(() => expect(pendingSignal?.aborted).toBe(true));
+    expect(screen.queryByText("Authorized alert snapshot message.")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Road Closure" })).toBeTruthy();
+
+    await act(async () => {
+      resolvePendingRead?.({
+        status: "authorized",
+        alert: pendingAuthorizedAlert,
+      });
+      await pendingRead;
+    });
+    expect(
+      screen.queryByText("Late protected snapshot must not return."),
+    ).toBeNull();
     expect(screen.queryByText("Authorized alert snapshot message.")).toBeNull();
   });
 

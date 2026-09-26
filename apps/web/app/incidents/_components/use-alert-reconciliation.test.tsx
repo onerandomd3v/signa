@@ -255,6 +255,50 @@ describe("useAlertReconciliation", () => {
     expect(active).toBe(0);
   });
 
+  it("aborts active reads and discards queued reads after SSE authentication loss", async () => {
+    const ids = Array.from(
+      { length: 4 },
+      (_, index) =>
+        `550e8400-e29b-41d4-a716-${String(index + 30).padStart(12, "0")}`,
+    );
+    const signals = new Map<string, AbortSignal>();
+    const settle = new Map<
+      string,
+      (result: Awaited<ReturnType<AlertReader>>) => void
+    >();
+    const readAlert = vi.fn<AlertReader>(
+      (alertId, signal) =>
+        new Promise((resolve) => {
+          signals.set(alertId, signal);
+          settle.set(alertId, resolve);
+        }),
+    );
+    const { result } = renderHook(() => useAlertReconciliation({ readAlert }));
+
+    act(() => result.current.acceptEvents(ids.map((id) => event(id))));
+    await waitFor(() => expect(readAlert).toHaveBeenCalledTimes(3));
+    expect(result.current.hasOverflow).toBe(false);
+
+    act(() => result.current.clearProtectedAlerts());
+    expect(ids.slice(0, 3).every((id) => signals.get(id)?.aborted)).toBe(true);
+    expect(result.current.alerts).toEqual([]);
+
+    act(() => result.current.acceptEvents([event(ids[3])]));
+    expect(readAlert).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      for (const id of ids.slice(0, 3)) {
+        settle.get(id)?.({
+          status: "authorized",
+          alert: snapshot(id, "2026-09-26T10:00:00Z"),
+        });
+      }
+      await Promise.resolve();
+    });
+    expect(result.current.alerts).toEqual([]);
+    expect(readAlert).toHaveBeenCalledTimes(3);
+  });
+
   it("aborts in-flight alert requests on unmount", async () => {
     let requestSignal: AbortSignal | undefined;
     const readAlert = vi.fn<AlertReader>(

@@ -30,6 +30,7 @@ type RealtimeSleeper = (ms: number, signal: AbortSignal) => Promise<void>;
 type UseRealtimeUpdatesOptions = {
   onInvalidation: (invalidations: RealtimeInvalidations) => void;
   onConnected?: () => void;
+  onUnauthorized?: () => void;
   connect?: RealtimeConnector;
   sleep?: RealtimeSleeper;
   coalesceMs?: number;
@@ -96,6 +97,7 @@ export function parseAlertCreatedReference(
 export function useRealtimeUpdates({
   onInvalidation,
   onConnected,
+  onUnauthorized,
   connect = streamAuthenticatedEvents,
   sleep = sleepWithSignal,
   coalesceMs = EVENT_COALESCE_MS,
@@ -105,6 +107,7 @@ export function useRealtimeUpdates({
 } {
   const onInvalidationRef = useRef(onInvalidation);
   const onConnectedRef = useRef(onConnected);
+  const onUnauthorizedRef = useRef(onUnauthorized);
   const connectRef = useRef(connect);
   const sleepRef = useRef(sleep);
   const [status, setStatus] = useState<RealtimeConnectionStatus>("connecting");
@@ -113,9 +116,10 @@ export function useRealtimeUpdates({
   useEffect(() => {
     onInvalidationRef.current = onInvalidation;
     onConnectedRef.current = onConnected;
+    onUnauthorizedRef.current = onUnauthorized;
     connectRef.current = connect;
     sleepRef.current = sleep;
-  }, [connect, onConnected, onInvalidation, sleep]);
+  }, [connect, onConnected, onInvalidation, onUnauthorized, sleep]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -125,6 +129,12 @@ export function useRealtimeUpdates({
     let reconnectDelay = MIN_RECONNECT_DELAY_MS;
     let coalesceTimer: ReturnType<typeof setTimeout> | undefined;
     const pending: RealtimeInvalidations = { incidents: false, alerts: [] };
+
+    const notifyUnauthorized = () => {
+      if (stoppedByAuth || signal.aborted) return;
+      stoppedByAuth = true;
+      onUnauthorizedRef.current?.();
+    };
 
     const flushInvalidations = () => {
       coalesceTimer = undefined;
@@ -196,7 +206,7 @@ export function useRealtimeUpdates({
                 );
               }
               if (statusCode === 401) {
-                stoppedByAuth = true;
+                notifyUnauthorized();
                 attemptController.abort();
               }
             },
@@ -211,7 +221,7 @@ export function useRealtimeUpdates({
         } catch (error) {
           lastError = error;
           const statusCode = getRealtimeHttpStatus(error);
-          if (statusCode === 401) stoppedByAuth = true;
+          if (statusCode === 401) notifyUnauthorized();
           if (!signal.aborted) {
             setStatus(
               statusCode === 401 || statusCode === 503

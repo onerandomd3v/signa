@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AlertRead, PublicIncident } from "@/lib/api/generated";
+import type { AlertReadResult } from "@/lib/api/alerts";
 import { fetchPublicIncident } from "@/lib/api/incidents";
 import type { AlertReader } from "./use-alert-reconciliation";
 import type { RealtimeConnector } from "./use-realtime-updates";
@@ -62,6 +63,11 @@ const authorizedAlert: AlertRead = {
   as_of: "2026-09-26T09:30:00Z",
   created_at: "2026-09-26T09:30:00Z",
   supersedes_alert_id: "550e8400-e29b-41d4-a716-446655440002",
+};
+const pendingAuthorizedAlert: AlertRead = {
+  ...authorizedAlert,
+  alert_id: "550e8400-e29b-41d4-a716-446655440010",
+  message: "Late protected detail snapshot must not return.",
 };
 
 afterEach(() => cleanup());
@@ -322,5 +328,87 @@ describe("IncidentDetailExperience", () => {
     expect(screen.getByText("As of")).toBeTruthy();
     expect(screen.getAllByText("Emerging")).toHaveLength(2);
     expect(readAlert).toHaveBeenCalledTimes(3);
+  });
+
+  it("clears authorized snapshots on SSE 401 and ignores pending protected reads", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    let loseAuthentication: (() => void) | undefined;
+    let pendingSignal: AbortSignal | undefined;
+    let resolvePendingRead: ((result: AlertReadResult) => void) | undefined;
+    const pendingRead = new Promise<AlertReadResult>((resolve) => {
+      resolvePendingRead = resolve;
+    });
+    vi.mocked(fetchPublicIncident).mockResolvedValue({
+      status: "ready",
+      incident: { ...publicIncident, id: detailIncidentId },
+    });
+    const connectRealtime: RealtimeConnector = async (options) => {
+      options.onConnection?.();
+      emit = options.onSseEvent;
+      loseAuthentication = () =>
+        options.onSseError?.(new Error("SSE failed: 401 Unauthorized"));
+      return idleRealtime(options);
+    };
+    const readAlert: AlertReader = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "authorized", alert: authorizedAlert })
+      .mockImplementationOnce((_alertId, signal) => {
+        pendingSignal = signal;
+        return pendingRead;
+      });
+    render(
+      <IncidentDetailExperience
+        connectRealtime={connectRealtime}
+        incidentId={detailIncidentId}
+        readAlert={readAlert}
+      />,
+    );
+
+    expect(await screen.findByText("Emerging")).toBeTruthy();
+    act(() =>
+      emit?.({
+        event: "alert.created.v1",
+        id: "detail-auth-first-alert",
+        data: {
+          alert_id: authorizedAlert.alert_id,
+          incident_id: detailIncidentId,
+        },
+      }),
+    );
+    expect(
+      await screen.findByText("Authorized detail alert snapshot."),
+    ).toBeTruthy();
+
+    act(() =>
+      emit?.({
+        event: "alert.created.v1",
+        id: "detail-auth-pending-alert",
+        data: {
+          alert_id: pendingAuthorizedAlert.alert_id,
+          incident_id: detailIncidentId,
+        },
+      }),
+    );
+    await waitFor(() => expect(readAlert).toHaveBeenCalledTimes(2));
+    expect(pendingSignal?.aborted).toBe(false);
+
+    act(() => loseAuthentication?.());
+    await waitFor(() => expect(pendingSignal?.aborted).toBe(true));
+    expect(screen.queryByText("Authorized detail alert snapshot.")).toBeNull();
+    expect(screen.getByText("Emerging")).toBeTruthy();
+
+    await act(async () => {
+      resolvePendingRead?.({
+        status: "authorized",
+        alert: pendingAuthorizedAlert,
+      });
+      await pendingRead;
+    });
+    expect(
+      screen.queryByText("Late protected detail snapshot must not return."),
+    ).toBeNull();
+    expect(screen.queryByText("Authorized detail alert snapshot.")).toBeNull();
   });
 });

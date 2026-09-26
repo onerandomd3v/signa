@@ -93,6 +93,7 @@ export function useAlertReconciliation({
   acceptEvents: (events: RealtimeAlertReference[]) => void;
   retry: (alertId: string) => void;
   revalidateKnown: () => void;
+  clearProtectedAlerts: () => void;
 } {
   const [alerts, setAlerts] = useState<AlertSnapshotEntry[]>([]);
   const [hasOverflow, setHasOverflow] = useState(false);
@@ -133,6 +134,20 @@ export function useAlertReconciliation({
     alertsRef.current = limited;
     if (mountedRef.current) setAlerts(limited);
   }, []);
+
+  const clearProtectedAlerts = useCallback(() => {
+    authBlockedRef.current = true;
+    authFailureIdRef.current = null;
+    for (const controller of requestControllersRef.current.values()) {
+      controller.abort();
+    }
+    requestControllersRef.current.clear();
+    queuedIdsRef.current = [];
+    queuedIdSetRef.current.clear();
+    rememberedRef.current.clear();
+    if (mountedRef.current) setHasOverflow(false);
+    publish([]);
+  }, [publish]);
 
   const remember = useCallback((alertId: string) => {
     rememberedRef.current.delete(alertId);
@@ -337,5 +352,12 @@ export function useAlertReconciliation({
     for (const alertId of knownIds) enqueue(alertId, true);
   }, [enqueue]);
 
-  return { alerts, hasOverflow, acceptEvents, retry, revalidateKnown };
+  return {
+    alerts,
+    hasOverflow,
+    acceptEvents,
+    retry,
+    revalidateKnown,
+    clearProtectedAlerts,
+  };
 }
