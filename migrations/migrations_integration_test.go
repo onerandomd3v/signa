@@ -64,6 +64,7 @@ func TestReportAndOutboxMigration(t *testing.T) {
 	assertTableExists(t, ctx, connection, testSchema, "incident_reports")
 	assertTableExists(t, ctx, connection, testSchema, "incident_state_history")
 	assertTableExists(t, ctx, connection, testSchema, "report_ai_extractions")
+	assertTableExists(t, ctx, connection, testSchema, "report_ai_processing")
 	assertTableExists(t, ctx, connection, testSchema, "user_locations")
 	assertTableExists(t, ctx, connection, testSchema, "user_location_deletions")
 	assertTableExists(t, ctx, connection, testSchema, "auth_sessions")

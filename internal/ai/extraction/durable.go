@@ -4,10 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ProcessingStateRecorder records safe AI lifecycle state without retaining
+// report content, provider responses, or raw errors.
+type ProcessingStateRecorder interface {
+	MarkAIProcessingStarted(context.Context, string, time.Time) error
+	MarkAIProcessingSucceeded(context.Context, string, time.Time) error
+	MarkAIProcessingFailed(context.Context, string, string, FailureKind, time.Time) error
+}
 
 // DurableStore persists only schema-validated extraction values. The unique
 // report/contract key makes redelivery and concurrent delivery idempotent.
@@ -18,6 +27,64 @@ type DurableStore struct {
 
 func NewDurableStore(pool *pgxpool.Pool, validator ExtractionValidator) *DurableStore {
 	return &DurableStore{pool: pool, validator: validator}
+}
+
+func (s *DurableStore) MarkAIProcessingStarted(ctx context.Context, reportID string, now time.Time) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("durable AI processing database is required")
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO report_ai_processing (report_id, state, started_at, attempts, updated_at)
+		VALUES ($1, 'RUNNING', $2, 1, $2)
+		ON CONFLICT (report_id) DO UPDATE SET
+			state = 'RUNNING', started_at = EXCLUDED.started_at,
+			completed_at = NULL, last_failed_at = NULL, failure_kind = NULL,
+			attempts = report_ai_processing.attempts + 1, updated_at = EXCLUDED.updated_at
+	`, reportID, now.UTC())
+	if err != nil {
+		return fmt.Errorf("record AI processing start: %w", err)
+	}
+	return nil
+}
+
+func (s *DurableStore) MarkAIProcessingSucceeded(ctx context.Context, reportID string, now time.Time) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("durable AI processing database is required")
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE report_ai_processing
+		SET state = 'SUCCEEDED', completed_at = $2, last_failed_at = NULL,
+		    failure_kind = NULL, updated_at = $2
+		WHERE report_id = $1
+	`, reportID, now.UTC())
+	if err != nil {
+		return fmt.Errorf("record AI processing success: %w", err)
+	}
+	return nil
+}
+
+func (s *DurableStore) MarkAIProcessingFailed(ctx context.Context, reportID, state string, kind FailureKind, now time.Time) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("durable AI processing database is required")
+	}
+	if state != "FAILED_RETRYABLE" && state != "FAILED_TERMINAL" {
+		return fmt.Errorf("invalid AI processing failure state %q", state)
+	}
+	if kind != FailureTransient && kind != FailurePermanent {
+		return fmt.Errorf("invalid AI processing failure kind %q", kind)
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO report_ai_processing (report_id, state, started_at, last_failed_at, failure_kind, attempts, updated_at)
+		VALUES ($1, $2, $3, $3, $4, 1, $3)
+		ON CONFLICT (report_id) DO UPDATE SET
+			state = EXCLUDED.state, completed_at = NULL,
+			last_failed_at = EXCLUDED.last_failed_at, failure_kind = EXCLUDED.failure_kind,
+			updated_at = EXCLUDED.updated_at
+	`, reportID, state, now.UTC(), string(kind))
+	if err != nil {
+		return fmt.Errorf("record AI processing failure: %w", err)
+	}
+	return nil
 }
 
 func (s *DurableStore) Find(ctx context.Context, reportID, contractVersion string) (Extraction, bool, error) {
