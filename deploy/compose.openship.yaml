@@ -15,9 +15,19 @@
 # used. This is deliberate: OpenShip's compose env substitution only populates a
 # standalone POSTGRES_PASSWORD and leaves every other ${SIGNA_DB_PASSWORD}
 # reference (the URL, a PGPASSWORD fallback) empty, so password auth could not
-# be made consistent between Postgres and the apps. To restore password auth:
-# set POSTGRES_PASSWORD to a LITERAL value (not a ${VAR}) and give api/worker/
-# migrate the same literal via PGPASSWORD, then re-initialize the pgdata volume.
+# be made consistent between Postgres and the apps.
+#
+# Restoring password auth WITHOUT data loss — do NOT re-initialize the pgdata
+# volume (that would destroy all reports/incidents/sessions/audit state):
+#   1. Set the role password on the running database (trust lets you connect):
+#        psql -U signa -d signa -c "ALTER USER signa PASSWORD '<password>';"
+#   2. Switch the LIVE database off trust without re-init: in the pgdata
+#      volume's pg_hba.conf replace the `trust` method(s) with `scram-sha-256`,
+#      then reload:  psql -c "SELECT pg_reload_conf();"
+#   3. REMOVE `POSTGRES_HOST_AUTH_METHOD: trust` below (leaving it would keep
+#      trusting clients even on a future re-init), and give api/worker/migrate
+#      the same password via a LITERAL `PGPASSWORD` (never a ${VAR} — OpenShip
+#      leaves those empty). Redeploy the app services; no volume wipe needed.
 #
 # Secrets are NEVER committed. OpenShip injects SIGNA_OPENAI_API_KEY (worker).
 #
@@ -32,7 +42,8 @@ services:
       POSTGRES_DB: signa
       POSTGRES_USER: signa
       # Internal-only DB (no published ports); trust auth on the isolated
-      # per-project network. See the DATABASE AUTH note at the top of the file.
+      # per-project network. See the DATABASE AUTH note at the top of the file,
+      # including how to restore password auth without re-initializing the volume.
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - signa_pgdata:/var/lib/postgresql/data
