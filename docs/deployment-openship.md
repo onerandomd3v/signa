@@ -39,11 +39,24 @@ the API and worker services. OpenShip only needs to supply
 or environment-variable interpolation in command arguments is required.
 
 The migration entrypoint requires a non-empty `SIGNA_DATABASE_URL`, then runs
-Goose with the repository's existing version, `v3.27.0`. It exits with Goose's
-status after applying pending migrations. Wait for the job to exit successfully
-before deploying or restarting the API and worker. Do not add migration
-commands to either application service; this prevents the two services from
-racing during startup.
+Goose with the repository's existing version, `v3.27.0`. Because compose and
+OpenShip start-ordering do not guarantee PostgreSQL is already accepting
+connections, the entrypoint retries the idempotent `goose up` until it succeeds
+(already-applied migrations are skipped) or the attempt budget is exhausted,
+then exits with Goose's final status. Two optional variables tune the wait:
+
+- `SIGNA_MIGRATE_MAX_ATTEMPTS` — maximum `goose up` attempts (default `90`).
+- `SIGNA_MIGRATE_RETRY_DELAY` — seconds between attempts (default `2`).
+
+The default budget (`90 x 2s = 180s`) is chosen to exceed the PostgreSQL
+readiness window in `deploy/compose.openship.yaml` (~160s: a 10s start period
+plus 30 health-check retries at a 5s interval), so a database that becomes
+healthy within its own window is never abandoned early; raise the budget for
+slower databases. Wait for the job to exit successfully before deploying or
+restarting the API and worker. Do not add migration commands to either
+application service; this prevents the two services from racing during startup.
+The retry behavior is covered by `deploy/migrate/entrypoint_test.sh` (run in
+CI).
 
 The migration image is built from `deploy/migrate/Dockerfile` with the same
 repository-root context as the application images. It contains only the
