@@ -7,6 +7,8 @@ import type { RealtimeAlertReference } from "./use-realtime-updates";
 
 const MAX_VISIBLE_ALERTS = 3;
 const MAX_REMEMBERED_ALERTS = 128;
+const MAX_CONCURRENT_ALERT_READS = 3;
+const MAX_QUEUED_ALERT_READS = 12;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -87,15 +89,20 @@ export function useAlertReconciliation({
   readAlert = fetchAuthorizedAlert,
 }: UseAlertReconciliationOptions = {}): {
   alerts: AlertSnapshotEntry[];
+  hasOverflow: boolean;
   acceptEvents: (events: RealtimeAlertReference[]) => void;
   retry: (alertId: string) => void;
   revalidateKnown: () => void;
 } {
   const [alerts, setAlerts] = useState<AlertSnapshotEntry[]>([]);
+  const [hasOverflow, setHasOverflow] = useState(false);
   const alertsRef = useRef<AlertSnapshotEntry[]>([]);
   const readerRef = useRef(readAlert);
   const mountedRef = useRef(false);
   const requestControllersRef = useRef(new Map<string, AbortController>());
+  const queuedIdsRef = useRef<string[]>([]);
+  const queuedIdSetRef = useRef(new Set<string>());
+  const drainQueueRef = useRef<() => void>(() => undefined);
   const rememberedRef = useRef(new Map<string, true>());
   const authBlockedRef = useRef(false);
   const authFailureIdRef = useRef<string | null>(null);
@@ -108,12 +115,16 @@ export function useAlertReconciliation({
   useEffect(() => {
     mountedRef.current = true;
     const requestControllers = requestControllersRef.current;
+    const queuedIds = queuedIdsRef.current;
+    const queuedIdSet = queuedIdSetRef.current;
     return () => {
       mountedRef.current = false;
       for (const controller of requestControllers.values()) {
         controller.abort();
       }
       requestControllers.clear();
+      queuedIds.length = 0;
+      queuedIdSet.clear();
     };
   }, []);
 
@@ -133,17 +144,8 @@ export function useAlertReconciliation({
     }
   }, []);
 
-  const reconcile = useCallback(
-    async (alertId: string, force = false) => {
-      if (!isUuid(alertId) || !mountedRef.current) return;
-      if (authBlockedRef.current && !force) return;
-      if (requestControllersRef.current.has(alertId)) return;
-      if (!force && rememberedRef.current.has(alertId)) return;
-
-      remember(alertId);
-      const controller = new AbortController();
-      requestControllersRef.current.set(alertId, controller);
-
+  const fetchSnapshot = useCallback(
+    async (alertId: string, controller: AbortController) => {
       try {
         const result = await readerRef.current(alertId, controller.signal);
         if (!mountedRef.current || controller.signal.aborted) return;
@@ -192,6 +194,9 @@ export function useAlertReconciliation({
           ] of requestControllersRef.current) {
             if (otherId !== alertId) otherController.abort();
           }
+          if (queuedIdsRef.current.length > 0) setHasOverflow(true);
+          queuedIdsRef.current = [];
+          queuedIdSetRef.current.clear();
           publish([
             {
               alertId,
@@ -248,27 +253,79 @@ export function useAlertReconciliation({
         if (requestControllersRef.current.get(alertId) === controller) {
           requestControllersRef.current.delete(alertId);
         }
+        drainQueueRef.current();
       }
     },
-    [publish, remember],
+    [publish],
+  );
+
+  const drainQueue = useCallback(() => {
+    if (!mountedRef.current || authBlockedRef.current) return;
+    while (
+      requestControllersRef.current.size < MAX_CONCURRENT_ALERT_READS &&
+      queuedIdsRef.current.length > 0
+    ) {
+      const alertId = queuedIdsRef.current.shift();
+      if (!alertId) continue;
+      queuedIdSetRef.current.delete(alertId);
+      const controller = new AbortController();
+      requestControllersRef.current.set(alertId, controller);
+      void fetchSnapshot(alertId, controller);
+    }
+  }, [fetchSnapshot]);
+
+  useEffect(() => {
+    drainQueueRef.current = drainQueue;
+  }, [drainQueue]);
+
+  const enqueue = useCallback(
+    (alertId: string, force = false) => {
+      if (!isUuid(alertId) || !mountedRef.current) return;
+      if (authBlockedRef.current && !force) return;
+      if (requestControllersRef.current.has(alertId)) return;
+      if (queuedIdSetRef.current.has(alertId)) return;
+      if (!force && rememberedRef.current.has(alertId)) return;
+      if (force) {
+        authBlockedRef.current = false;
+        authFailureIdRef.current = null;
+        rememberedRef.current.delete(alertId);
+      }
+
+      if (queuedIdsRef.current.length >= MAX_QUEUED_ALERT_READS) {
+        remember(alertId);
+        setHasOverflow(true);
+        return;
+      }
+
+      remember(alertId);
+      queuedIdsRef.current.push(alertId);
+      queuedIdSetRef.current.add(alertId);
+      drainQueueRef.current();
+    },
+    [remember],
   );
 
   const acceptEvents = useCallback(
     (events: RealtimeAlertReference[]) => {
       for (const event of events) {
         if (isUuid(event.alertId) && isUuid(event.incidentId)) {
-          void reconcile(event.alertId);
+          enqueue(event.alertId);
         }
       }
     },
-    [reconcile],
+    [enqueue],
   );
 
   const retry = useCallback(
     (alertId: string) => {
-      void reconcile(alertId, true);
+      if (queuedIdSetRef.current.delete(alertId)) {
+        queuedIdsRef.current = queuedIdsRef.current.filter(
+          (queuedId) => queuedId !== alertId,
+        );
+      }
+      enqueue(alertId, true);
     },
-    [reconcile],
+    [enqueue],
   );
 
   const revalidateKnown = useCallback(() => {
@@ -277,8 +334,8 @@ export function useAlertReconciliation({
       knownIds.add(authFailureIdRef.current);
       authBlockedRef.current = false;
     }
-    for (const alertId of knownIds) void reconcile(alertId, true);
-  }, [reconcile]);
+    for (const alertId of knownIds) enqueue(alertId, true);
+  }, [enqueue]);
 
-  return { alerts, acceptEvents, retry, revalidateKnown };
+  return { alerts, hasOverflow, acceptEvents, retry, revalidateKnown };
 }

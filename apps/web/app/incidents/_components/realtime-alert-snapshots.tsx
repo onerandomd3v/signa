@@ -17,10 +17,12 @@ function label(value: string): string {
 
 export function RealtimeAlertSnapshots({
   alerts,
+  hasOverflow = false,
   onRetry,
   incidentId,
 }: {
   alerts: AlertSnapshotEntry[];
+  hasOverflow?: boolean;
   onRetry: (alertId: string) => void;
   incidentId?: string;
 }) {
@@ -30,7 +32,7 @@ export function RealtimeAlertSnapshots({
       !incidentId ||
       entry.alert.incident_id === incidentId,
   );
-  if (visibleAlerts.length === 0) return null;
+  if (visibleAlerts.length === 0 && !hasOverflow) return null;
 
   return (
     <section
@@ -43,6 +45,16 @@ export function RealtimeAlertSnapshots({
       >
         Alert snapshots
       </h2>
+      {hasOverflow && (
+        <p
+          aria-live="polite"
+          className="rounded-lg border border-border bg-muted p-3 text-sm leading-6"
+          role="status"
+        >
+          Alert updates arrived faster than this view could load them. Some
+          snapshots may be missing; there is no alert history endpoint.
+        </p>
+      )}
       <ul className="space-y-3">
         {visibleAlerts.map((entry) => (
           <li key={entry.alertId}>

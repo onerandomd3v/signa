@@ -148,7 +148,7 @@ describe("useAlertReconciliation", () => {
     unmount();
   });
 
-  it("sorts out-of-order responses by authoritative as-of time and caps retained alerts", async () => {
+  it("bounds concurrent reads while preserving authoritative ordering and capped history", async () => {
     const ids = Array.from(
       { length: 5 },
       (_, index) =>
@@ -169,31 +169,90 @@ describe("useAlertReconciliation", () => {
     );
 
     act(() => result.current.acceptEvents(ids.map((id) => event(id))));
+    await waitFor(() => expect(readAlert).toHaveBeenCalledTimes(3));
+    act(() => {
+      pending.get(ids[2])?.({
+        status: "authorized",
+        alert: snapshot(ids[2], "2026-09-26T10:05:00Z"),
+      });
+    });
+    await waitFor(() => expect(readAlert).toHaveBeenCalledTimes(4));
+    act(() => {
+      pending.get(ids[3])?.({
+        status: "authorized",
+        alert: snapshot(ids[3], "2026-09-26T10:03:00Z"),
+      });
+    });
     await waitFor(() => expect(readAlert).toHaveBeenCalledTimes(5));
     act(() => {
       pending.get(ids[4])?.({
         status: "authorized",
-        alert: snapshot(ids[4], "2026-09-26T10:05:00Z"),
+        alert: snapshot(ids[4], "2026-09-26T10:04:00Z"),
       });
-    });
-    await waitFor(() =>
-      expect(result.current.alerts.length).toBeGreaterThan(0),
-    );
-    act(() => {
-      for (let index = 0; index < 4; index += 1) {
-        pending.get(ids[index])?.({
-          status: "authorized",
-          alert: snapshot(ids[index], `2026-09-26T10:0${index}:00Z`),
-        });
-      }
+      pending.get(ids[0])?.({
+        status: "authorized",
+        alert: snapshot(ids[0], "2026-09-26T10:00:00Z"),
+      });
+      pending.get(ids[1])?.({
+        status: "authorized",
+        alert: snapshot(ids[1], "2026-09-26T10:01:00Z"),
+      });
     });
     await waitFor(() => expect(result.current.alerts).toHaveLength(3));
     const newest = result.current.alerts[0];
     expect(newest?.status).toBe("authorized");
     if (newest?.status === "authorized") {
-      expect(newest.alert.alert_id).toBe(ids[4]);
+      expect(newest.alert.alert_id).toBe(ids[2]);
     }
     unmount();
+  });
+
+  it("caps active and queued reads and exposes a single overload state", async () => {
+    const ids = Array.from(
+      { length: 20 },
+      (_, index) =>
+        `550e8400-e29b-41d4-a716-${String(index + 1).padStart(12, "0")}`,
+    );
+    const settle = new Map<
+      string,
+      (result: Awaited<ReturnType<AlertReader>>) => void
+    >();
+    let active = 0;
+    let maxActive = 0;
+    const readAlert = vi.fn<AlertReader>(
+      (alertId, signal) =>
+        new Promise((resolve) => {
+          let finished = false;
+          const finish = (value: Awaited<ReturnType<AlertReader>>) => {
+            if (finished) return;
+            finished = true;
+            active -= 1;
+            resolve(value);
+          };
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          settle.set(alertId, finish);
+          signal.addEventListener(
+            "abort",
+            () => finish({ status: "unavailable" }),
+            { once: true },
+          );
+        }),
+    );
+    const { result, unmount } = renderHook(() =>
+      useAlertReconciliation({ readAlert }),
+    );
+
+    act(() => result.current.acceptEvents(ids.map((id) => event(id))));
+    await waitFor(() => expect(readAlert).toHaveBeenCalledTimes(3));
+    expect(result.current.hasOverflow).toBe(true);
+    expect(maxActive).toBe(3);
+
+    act(() => settle.get(ids[0])?.({ status: "not-found" }));
+    await waitFor(() => expect(readAlert).toHaveBeenCalledTimes(4));
+    expect(maxActive).toBe(3);
+    unmount();
+    expect(active).toBe(0);
   });
 
   it("aborts in-flight alert requests on unmount", async () => {

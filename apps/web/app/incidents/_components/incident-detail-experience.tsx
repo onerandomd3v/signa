@@ -130,6 +130,7 @@ export function IncidentDetailExperience({
       <IncidentDetail state={detailState} />
       <RealtimeAlertSnapshots
         alerts={alertReconciliation.alerts}
+        hasOverflow={alertReconciliation.hasOverflow}
         incidentId={incidentId}
         onRetry={alertReconciliation.retry}
       />

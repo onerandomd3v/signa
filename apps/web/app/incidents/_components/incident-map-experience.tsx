@@ -292,6 +292,7 @@ export function IncidentMapExperience({
       {content}
       <RealtimeAlertSnapshots
         alerts={alertReconciliation.alerts}
+        hasOverflow={alertReconciliation.hasOverflow}
         onRetry={alertReconciliation.retry}
       />
     </div>

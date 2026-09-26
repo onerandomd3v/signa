@@ -357,6 +357,53 @@ describe("IncidentMapExperience", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps public incidents visible and removes alert data after a 401", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    let reconnect: (() => void) | undefined;
+    const connectRealtime: RealtimeConnector = async (options) => {
+      options.onConnection?.();
+      reconnect = options.onConnection;
+      emit = options.onSseEvent;
+      return idleRealtime(options);
+    };
+    const readAlert: AlertReader = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "authorized", alert: authorizedAlert })
+      .mockResolvedValueOnce({ status: "unauthorized" });
+    render(
+      <IncidentMapExperience
+        connectRealtime={connectRealtime}
+        loadIncidents={async () => [incident]}
+        mapStyleUrl={null}
+        readAlert={readAlert}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Road Closure" });
+    act(() =>
+      emit?.({
+        event: "alert.created.v1",
+        id: "alert-auth-cursor",
+        data: {
+          alert_id: authorizedAlert.alert_id,
+          incident_id: authorizedAlert.incident_id,
+        },
+      }),
+    );
+    expect(
+      await screen.findByText("Authorized alert snapshot message."),
+    ).toBeTruthy();
+
+    act(() => reconnect?.());
+    expect(
+      await screen.findByText(/alert details are unavailable/i),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Road Closure" })).toBeTruthy();
+    expect(screen.queryByText("Authorized alert snapshot message.")).toBeNull();
+  });
+
   it("does not commit an older list snapshot after a newer invalidation arrives", async () => {
     let emit:
       | ((event: { event?: string; id?: string; data: unknown }) => void)
