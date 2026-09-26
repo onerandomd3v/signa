@@ -162,7 +162,7 @@ func TestTraceReportClassifiesDeliveryAttemptBacklogRetryAndQuarantine(t *testin
 			if _, err := pool.Exec(ctx, `INSERT INTO deliveries (id, alert_id, user_id, priority, channel, state, idempotency_key, payload, attempts, active_attempt_no, last_attempt_at, created_at, updated_at) VALUES ($1, $2, $3, 'P1', 'TEST', $4, $5, '{}'::jsonb, 1, CASE WHEN $4 = 'IN_FLIGHT' THEN 1 ELSE NULL END, $6, $6, $6)`, deliveryID, alertID, userID, test.deliveryState, uuid.NewString(), created.Add(4*time.Second)); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := pool.Exec(ctx, `INSERT INTO delivery_attempts (delivery_id, attempt_no, operation_key, state, failure_kind, started_at, completed_at) VALUES ($1, 1, 'safe-operation', $2, NULLIF($3, ''), $4, CASE WHEN $2 = 'STARTED' THEN NULL ELSE $4 + interval '1 second' END)`, deliveryID, test.attemptState, test.failureKind, created.Add(5*time.Second)); err != nil {
+			if _, err := pool.Exec(ctx, `INSERT INTO delivery_attempts (delivery_id, attempt_no, operation_key, state, failure_kind, started_at, completed_at) VALUES ($1, 1, 'safe-operation', $2, NULLIF($3, ''), $4, CASE WHEN $2 = 'STARTED' THEN NULL ELSE $5::timestamptz + interval '1 second' END)`, deliveryID, test.attemptState, test.failureKind, created.Add(5*time.Second), created.Add(5*time.Second)); err != nil {
 				t.Fatal(err)
 			}
 
@@ -177,6 +177,43 @@ func TestTraceReportClassifiesDeliveryAttemptBacklogRetryAndQuarantine(t *testin
 				t.Fatalf("safe failure kind = %q, want %q", got.Stage(StageDeliveryAttempt).FailureKind, test.failureKind)
 			}
 		})
+	}
+}
+
+func TestTraceReportClassifiesAlertWithoutDeliveryAsPendingQueue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	pool, cleanup := newLatencyTestPool(t, ctx)
+	defer cleanup()
+	created := time.Date(2026, 9, 26, 3, 0, 0, 0, time.UTC)
+	reportID, incidentID, alertID := uuid.New(), uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO reports (id, raw_text, submitted_at, created_at) VALUES ($1, 'private', $2, $2)`, reportID, created); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO incidents (id, status, confidence_state, created_at, updated_at) VALUES ($1, 'OPEN', 'EMERGING', $2, $2)`, incidentID, created.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO incident_reports (incident_id, report_id, attached_at) VALUES ($1, $2, $3)`, incidentID, reportID, created.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO alerts (id, incident_id, alert_type, confidence_snapshot, severity_snapshot, status_snapshot, priority_snapshot, freshness_snapshot, message, eligibility_policy_version, eligibility_reasons, as_of, idempotency_key, request_fingerprint, created_at) VALUES ($1, $2, 'IMMEDIATE', 'EMERGING', 'HIGH', 'OPEN', 'P1', 'FRESH', 'private', 'test', '[]'::jsonb, $3, $4, 'fingerprint', $3)`, alertID, incidentID, created.Add(3*time.Second), uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := NewStore(pool).TraceReport(ctx, reportID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AlertID == nil || *got.AlertID != alertID.String() || got.DeliveryID != nil {
+		t.Fatalf("alert/delivery correlation = %v/%v, want alert and no delivery", got.AlertID, got.DeliveryID)
+	}
+	queue := got.Stage(StageDeliveryQueue)
+	if queue.State != StatePending {
+		t.Fatalf("delivery queue state = %s, want pending without a delivery", queue.State)
+	}
+	attempt := got.Stage(StageDeliveryAttempt)
+	if attempt.State != StateUnavailable || attempt.AttemptCount != 0 || attempt.DurationMs != nil {
+		t.Fatalf("absent delivery attempt = %+v, want unavailable with zero attempts and no duration", attempt)
 	}
 }
 

@@ -96,7 +96,7 @@ SELECT
 	d.created_at,
 	d.last_attempt_at,
 	d.delivered_at,
-	d.attempts,
+	COALESCE(d.attempts, 0),
 	da.state,
 	da.failure_kind,
 	da.started_at,
