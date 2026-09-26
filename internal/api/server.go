@@ -16,6 +16,7 @@ import (
 	"github.com/onerandomd3v/signa/internal/push"
 	"github.com/onerandomd3v/signa/internal/reports"
 	"github.com/onerandomd3v/signa/internal/routing"
+	"github.com/onerandomd3v/signa/internal/verification"
 )
 
 // NewHandler builds the HTTP handler while keeping the endpoint compatible with net/http.
@@ -47,6 +48,7 @@ type AuthConfig struct {
 	Store          auth.SessionStore
 	Alerts         alerts.AlertReader
 	RouteRelevance RouteRelevanceConfig
+	Verification   verification.Service
 }
 
 type RouteRelevanceConfig struct {
@@ -109,6 +111,9 @@ func NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(logger *slog
 				GlobalBurst:            routeLimiterConfig.GlobalRouteBurst,
 			}, RateLimiterOptions{})
 			router.With(routeRelevanceRequestGuard(cors), principalMiddleware, routeLimiter.Middleware).Post("/v1/route-relevance", routeRelevanceHandler(logger, service).ServeHTTP)
+		}
+		if authConfig.Verification != nil {
+			registerVerificationRoutes(router, principalMiddleware, authConfig.Verification)
 		}
 		if realtimeHandler != nil {
 			router.With(principalMiddleware).Get("/events", realtimeHandler.ServeHTTP)
