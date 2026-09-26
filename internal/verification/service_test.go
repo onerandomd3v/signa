@@ -33,10 +33,7 @@ func (r *testRepository) GetEligible(_ context.Context, _ uuid.UUID, id uuid.UUI
 	}
 	return requestRecord{}, ErrRequestNotFound
 }
-func (r *testRepository) Submit(ctx context.Context, _, _, incidentID uuid.UUID, _ string, _ ResponseInput, _ int16, _ [32]byte, checkPublic publicEligibilityCheck) (Response, bool, error) {
-	if err := checkPublic(ctx, incidentID); err != nil {
-		return Response{}, false, err
-	}
+func (r *testRepository) Submit(_ context.Context, _, _, _ uuid.UUID, _ string, _ ResponseInput, _ int16, _ [32]byte, _ config.PublicIncidentGeometryPolicy) (Response, bool, error) {
 	return r.response, r.created, r.submitErr
 }
 

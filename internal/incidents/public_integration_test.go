@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -114,6 +115,27 @@ func TestPublicIncidentGeometryIntegration(t *testing.T) {
 	}
 
 	store := NewStore(pool)
+	fromPool, err := store.GetPublicIncident(ctx, centerID, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromTx, err := GetPublicIncidentWithQuerier(ctx, tx, centerID, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(fromPool, fromTx) {
+		t.Fatalf("transaction public projection differs: pool=%+v tx=%+v", fromPool, fromTx)
+	}
+	if _, err := GetPublicIncidentWithQuerier(ctx, tx, emptyID, policy); !errors.Is(err, ErrPublicIncidentNotFound) {
+		t.Fatalf("transaction projection miss = %v", err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
 	route := routing.GeoJSONLineString{Type: "LineString", Coordinates: [][]float64{{3.376, 6.5244}, {3.382, 6.5244}}}
 	classification, routeIncidents, err := store.FindPublicRouteRelevance(ctx, route, policy)
 	if err != nil {

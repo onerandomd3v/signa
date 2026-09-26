@@ -24,6 +24,10 @@ import (
 )
 
 func integrationStore(t *testing.T) (context.Context, *pgxpool.Pool, Service, uuid.UUID, uuid.UUID) {
+	return integrationStoreWithMaxConns(t, 6)
+}
+
+func integrationStoreWithMaxConns(t *testing.T, maxConns int32) (context.Context, *pgxpool.Pool, Service, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
@@ -67,8 +71,7 @@ func integrationStore(t *testing.T) (context.Context, *pgxpool.Pool, Service, uu
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Submission holds grant/request locks while PublicIncidentReader uses another connection.
-	poolConfig.MaxConns = 6
+	poolConfig.MaxConns = maxConns
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +87,19 @@ func integrationStore(t *testing.T) (context.Context, *pgxpool.Pool, Service, uu
 		t.Fatal(err)
 	}
 	return ctx, pool, service, userID, incidentID
+}
+
+func TestPostgresSubmitWithOneConnection(t *testing.T) {
+	ctx, pool, service, user, incident := integrationStoreWithMaxConns(t, 1)
+	request := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))
+	conclusion := ConclusionConfirm
+	response, created, err := service.SubmitResponse(ctx, user, request, "one-connection", ResponseInput{Conclusion: &conclusion})
+	if err != nil || !created || response.RequestID != request || response.IncidentID != incident {
+		t.Fatalf("response=%+v created=%v error=%v", response, created, err)
+	}
+	if countResponses(t, ctx, pool, request) != 1 {
+		t.Fatal("response was not persisted")
+	}
 }
 func addRequest(t *testing.T, ctx context.Context, pool *pgxpool.Pool, incidentID uuid.UUID, assigned *uuid.UUID, expires time.Time) uuid.UUID {
 	t.Helper()

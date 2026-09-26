@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/incidents"
 )
 
 type postgresRepository struct{ pool *pgxpool.Pool }
@@ -55,7 +57,7 @@ func (r *postgresRepository) GetEligible(ctx context.Context, userID, requestID 
 	return request, err
 }
 
-func (r *postgresRepository) Submit(ctx context.Context, userID, requestID, expectedIncidentID uuid.UUID, key string, input ResponseInput, version int16, digest [32]byte, checkPublic publicEligibilityCheck) (Response, bool, error) {
+func (r *postgresRepository) Submit(ctx context.Context, userID, requestID, expectedIncidentID uuid.UUID, key string, input ResponseInput, version int16, digest [32]byte, policy config.PublicIncidentGeometryPolicy) (Response, bool, error) {
 	if r.pool == nil {
 		return Response{}, false, ErrUnavailable
 	}
@@ -96,11 +98,15 @@ func (r *postgresRepository) Submit(ctx context.Context, userID, requestID, expe
 	if request.IncidentID != expectedIncidentID {
 		return Response{}, false, ErrRequestNotFound
 	}
-	if checkPublic == nil {
-		return Response{}, false, ErrUnavailable
+	publicIncident, err := incidents.GetPublicIncidentWithQuerier(ctx, tx, request.IncidentID, policy)
+	if errors.Is(err, incidents.ErrPublicIncidentNotFound) {
+		return Response{}, false, ErrRequestNotFound
 	}
-	if err := checkPublic(ctx, request.IncidentID); err != nil {
+	if err != nil {
 		return Response{}, false, err
+	}
+	if publicIncident.ID != request.IncidentID {
+		return Response{}, false, ErrRequestNotFound
 	}
 
 	conclusion := nullableConclusion(input.Conclusion)
