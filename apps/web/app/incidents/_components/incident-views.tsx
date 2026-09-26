@@ -72,8 +72,7 @@ export function RealtimeConnectionStatusMessage({
       )}
       {alertUpdateReceived && (
         <p className="text-xs text-muted-foreground">
-          An alert event was received. Alert details aren’t available in the
-          public API yet.
+          An alert update was received.
         </p>
       )}
     </div>

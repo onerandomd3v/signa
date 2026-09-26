@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { PublicIncident } from "@/lib/api/generated";
 import { fetchPublicIncident } from "@/lib/api/incidents";
+import type { AlertReader } from "./use-alert-reconciliation";
 import { useCoalescedRefresh } from "./use-coalesced-refresh";
 import {
   IncidentDetail,
@@ -10,6 +11,8 @@ import {
   type IncidentDetailState,
   type IncidentView,
 } from "./incident-views";
+import { RealtimeAlertSnapshots } from "./realtime-alert-snapshots";
+import { useAlertReconciliation } from "./use-alert-reconciliation";
 import type { RealtimeConnector } from "./use-realtime-updates";
 import { useRealtimeUpdates } from "./use-realtime-updates";
 
@@ -30,9 +33,11 @@ function toIncidentView(incident: PublicIncident): IncidentView {
 export function IncidentDetailExperience({
   incidentId,
   connectRealtime,
+  readAlert,
 }: {
   incidentId: string;
   connectRealtime?: RealtimeConnector;
+  readAlert?: AlertReader;
 }) {
   const [state, setState] = useState<IncidentDetailState>({
     status: "loading",
@@ -72,8 +77,27 @@ export function IncidentDetailExperience({
       }
     },
   });
+  const alertReconciliation = useAlertReconciliation({ readAlert });
+  const acceptAlertEvents = alertReconciliation.acceptEvents;
+  const revalidateAlerts = alertReconciliation.revalidateKnown;
+  const onInvalidation = useCallback(
+    ({
+      incidents: incidentsChanged,
+      alerts,
+    }: {
+      incidents: boolean;
+      alerts: { alertId: string; incidentId: string }[];
+    }) => {
+      if (incidentsChanged) refresh();
+      acceptAlertEvents(
+        alerts.filter((alert) => alert.incidentId === incidentId),
+      );
+    },
+    [acceptAlertEvents, incidentId, refresh],
+  );
   const realtime = useRealtimeUpdates({
-    onInvalidation: refresh,
+    onInvalidation,
+    onConnected: revalidateAlerts,
     connect: connectRealtime,
   });
 
@@ -104,6 +128,11 @@ export function IncidentDetailExperience({
         onRetry={refresh}
       />
       <IncidentDetail state={detailState} />
+      <RealtimeAlertSnapshots
+        alerts={alertReconciliation.alerts}
+        incidentId={incidentId}
+        onRetry={alertReconciliation.retry}
+      />
     </div>
   );
 }

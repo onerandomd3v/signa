@@ -36,7 +36,12 @@ describe("useRealtimeUpdates", () => {
       options.onSseEvent?.({
         event: "alert.created.v1",
         id: "opaque-3",
-        data: { private: "do not render" },
+        data: {
+          alert_id: "550e8400-e29b-41d4-a716-446655440000",
+          incident_id: "550e8400-e29b-41d4-a716-446655440001",
+          message: "untrusted event message",
+          severity: "untrusted event severity",
+        },
       });
       options.onSseEvent?.({
         event: "future.unsupported.v1",
@@ -52,7 +57,12 @@ describe("useRealtimeUpdates", () => {
     await waitFor(() => expect(onInvalidation).toHaveBeenCalledOnce());
     expect(onInvalidation).toHaveBeenCalledWith({
       incidents: true,
-      alerts: true,
+      alerts: [
+        {
+          alertId: "550e8400-e29b-41d4-a716-446655440000",
+          incidentId: "550e8400-e29b-41d4-a716-446655440001",
+        },
+      ],
     });
     expect(result.current.alertUpdateReceived).toBe(true);
     expect(result.current.status).toBe("live");
@@ -139,15 +149,22 @@ describe("useRealtimeUpdates", () => {
       return waitingStream(options.signal);
     });
     const delays: number[] = [];
+    const onConnected = vi.fn();
     const sleep = vi.fn(async (ms: number) => {
       delays.push(ms);
     });
     const { unmount } = renderHook(() =>
-      useRealtimeUpdates({ onInvalidation: vi.fn(), connect, sleep }),
+      useRealtimeUpdates({
+        onInvalidation: vi.fn(),
+        onConnected,
+        connect,
+        sleep,
+      }),
     );
 
     await waitFor(() => expect(connect).toHaveBeenCalledTimes(5));
     expect(delays).toEqual([1_000, 2_000, 4_000, 1_000]);
+    expect(onConnected).toHaveBeenCalledTimes(2);
     unmount();
   });
 
@@ -201,8 +218,37 @@ describe("useRealtimeUpdates", () => {
     await waitFor(() => expect(onInvalidation).toHaveBeenCalledOnce());
     expect(onInvalidation).toHaveBeenCalledWith({
       incidents: true,
-      alerts: false,
+      alerts: [],
     });
+    unmount();
+  });
+
+  it("rejects invalid alert identifiers and incomplete metadata", async () => {
+    const connect: RealtimeConnector = vi.fn(async (options) => {
+      options.onSseEvent?.({
+        event: "alert.created.v1",
+        data: { alert_id: "not-a-uuid", incident_id: "also-invalid" },
+      });
+      options.onSseEvent?.({
+        event: "alert.created.v1",
+        data: { alert_id: "550e8400-e29b-41d4-a716-446655440000" },
+      });
+      options.onSseEvent?.({
+        event: "alert.updated.v1",
+        data: {
+          alert_id: "550e8400-e29b-41d4-a716-446655440000",
+          incident_id: "550e8400-e29b-41d4-a716-446655440001",
+        },
+      });
+      return waitingStream(options.signal);
+    });
+    const onInvalidation = vi.fn();
+    const { unmount } = renderHook(() =>
+      useRealtimeUpdates({ onInvalidation, connect, coalesceMs: 0 }),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(onInvalidation).not.toHaveBeenCalled();
     unmount();
   });
 });

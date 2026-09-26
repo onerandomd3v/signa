@@ -7,7 +7,8 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PublicIncident } from "@/lib/api/generated";
+import type { AlertRead, PublicIncident } from "@/lib/api/generated";
+import type { AlertReader } from "./use-alert-reconciliation";
 import type { RealtimeConnector } from "./use-realtime-updates";
 import { IncidentMapExperience } from "./incident-map-experience";
 
@@ -59,6 +60,21 @@ const incident: PublicIncident = {
   started_at: null,
   last_signal_at: "2026-09-25T08:30:00Z",
   updated_at: "2026-09-25T08:30:00Z",
+};
+
+const authorizedAlert: AlertRead = {
+  alert_id: "550e8400-e29b-41d4-a716-446655440000",
+  incident_id: "550e8400-e29b-41d4-a716-446655440001",
+  alert_type: "IMMEDIATE",
+  confidence_snapshot: "CORROBORATED",
+  severity_snapshot: "HIGH",
+  status_snapshot: "OPEN",
+  priority_snapshot: "P1",
+  freshness_snapshot: "FRESH",
+  message: "Authorized alert snapshot message.",
+  as_of: "2026-09-26T10:00:00Z",
+  created_at: "2026-09-26T10:00:00Z",
+  supersedes_alert_id: null,
 };
 
 afterEach(() => cleanup());
@@ -264,38 +280,81 @@ describe("IncidentMapExperience", () => {
     ).toBeTruthy();
   });
 
-  it("does not render alert payload content and explains the missing alert read API", async () => {
+  it("loads alert snapshots from the API, not the raw SSE event, and retries failures", async () => {
+    let reconnect: (() => void) | undefined;
     let emit:
       | ((event: { event?: string; id?: string; data: unknown }) => void)
       | undefined;
     const connectRealtime: RealtimeConnector = async (options) => {
       options.onConnection?.();
+      reconnect = options.onConnection;
       emit = options.onSseEvent;
       return idleRealtime(options);
     };
+    const readAlert: AlertReader = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "unavailable" })
+      .mockResolvedValueOnce({ status: "authorized", alert: authorizedAlert })
+      .mockResolvedValueOnce({ status: "authorized", alert: authorizedAlert });
     render(
       <IncidentMapExperience
         connectRealtime={connectRealtime}
         loadIncidents={async () => [incident]}
         mapStyleUrl={null}
+        readAlert={readAlert}
       />,
     );
     await screen.findByRole("heading", { name: "Road Closure" });
 
-    act(() =>
+    act(() => {
       emit?.({
         event: "alert.created.v1",
-        id: "alert-cursor",
-        data: { message: "private alert details must not be shown" },
-      }),
-    );
+        id: "opaque-alert-cursor",
+        data: {
+          alert_id: authorizedAlert.alert_id,
+          incident_id: authorizedAlert.incident_id,
+          message: "untrusted event message must not render",
+          severity: "untrusted event severity",
+          priority: "P3",
+        },
+      });
+      for (let index = 0; index < 5; index += 1) {
+        emit?.({
+          event: "alert.created.v1",
+          id: `replay-${index}`,
+          data: {
+            alert_id: authorizedAlert.alert_id,
+            incident_id: authorizedAlert.incident_id,
+          },
+        });
+      }
+    });
 
     expect(
-      await screen.findByText(
-        /alert details aren’t available in the public API yet/i,
-      ),
+      await screen.findByText(/alert details are unavailable/i),
     ).toBeTruthy();
-    expect(screen.queryByText(/private alert details/i)).toBeNull();
+    expect(screen.getByRole("heading", { name: "Road Closure" })).toBeTruthy();
+    expect(readAlert).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/untrusted event message/i)).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry alert details" }),
+    );
+    expect(
+      await screen.findByText("Authorized alert snapshot message."),
+    ).toBeTruthy();
+    expect(screen.getByText("P1")).toBeTruthy();
+    expect(screen.getByText("As of")).toBeTruthy();
+    expect(
+      screen.getByText(/does not confirm current incident conditions/i),
+    ).toBeTruthy();
+    expect(readAlert).toHaveBeenCalledTimes(2);
+
+    act(() => reconnect?.());
+    await waitFor(() => expect(readAlert).toHaveBeenCalledTimes(3));
+    expect(
+      screen.getAllByText("Authorized alert snapshot message."),
+    ).toHaveLength(1);
   });
 
   it("does not commit an older list snapshot after a newer invalidation arrives", async () => {

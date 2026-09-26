@@ -7,8 +7,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PublicIncident } from "@/lib/api/generated";
+import type { AlertRead, PublicIncident } from "@/lib/api/generated";
 import { fetchPublicIncident } from "@/lib/api/incidents";
+import type { AlertReader } from "./use-alert-reconciliation";
 import type { RealtimeConnector } from "./use-realtime-updates";
 import { IncidentDetailExperience } from "./incident-detail-experience";
 
@@ -45,6 +46,22 @@ const publicIncident: PublicIncident = {
   started_at: "2026-09-25T08:00:00Z",
   last_signal_at: "2026-09-25T08:30:00Z",
   updated_at: "2026-09-25T08:30:00Z",
+};
+
+const detailIncidentId = "550e8400-e29b-41d4-a716-446655440001";
+const authorizedAlert: AlertRead = {
+  alert_id: "550e8400-e29b-41d4-a716-446655440000",
+  incident_id: detailIncidentId,
+  alert_type: "NEARBY",
+  confidence_snapshot: "EMERGING",
+  severity_snapshot: "MODERATE",
+  status_snapshot: "RESOLVING",
+  priority_snapshot: "P2",
+  freshness_snapshot: "STALE",
+  message: "Authorized detail alert snapshot.",
+  as_of: "2026-09-26T09:30:00Z",
+  created_at: "2026-09-26T09:30:00Z",
+  supersedes_alert_id: "550e8400-e29b-41d4-a716-446655440002",
 };
 
 afterEach(() => cleanup());
@@ -222,5 +239,88 @@ describe("IncidentDetailExperience", () => {
       await screen.findByText(/realtime updates unavailable/i),
     ).toBeTruthy();
     expect(screen.getByText("Emerging")).toBeTruthy();
+  });
+
+  it("reconciles only related alert events and retries a stale snapshot read", async () => {
+    let emit:
+      | ((event: { event?: string; id?: string; data: unknown }) => void)
+      | undefined;
+    let reconnect: (() => void) | undefined;
+    vi.mocked(fetchPublicIncident).mockResolvedValue({
+      status: "ready",
+      incident: { ...publicIncident, id: detailIncidentId },
+    });
+    const readAlert: AlertReader = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "authorized", alert: authorizedAlert })
+      .mockResolvedValueOnce({ status: "unavailable" })
+      .mockResolvedValueOnce({
+        status: "authorized",
+        alert: {
+          ...authorizedAlert,
+          message: "Recovered authorized snapshot.",
+          as_of: "2026-09-26T10:00:00Z",
+        },
+      });
+    const connectRealtime: RealtimeConnector = async (options) => {
+      options.onConnection?.();
+      reconnect = options.onConnection;
+      emit = options.onSseEvent;
+      return idleRealtime(options);
+    };
+    render(
+      <IncidentDetailExperience
+        connectRealtime={connectRealtime}
+        incidentId={detailIncidentId}
+        readAlert={readAlert}
+      />,
+    );
+
+    expect(await screen.findByText("Emerging")).toBeTruthy();
+    act(() => {
+      emit?.({
+        event: "alert.created.v1",
+        id: "other-alert-cursor",
+        data: {
+          alert_id: "550e8400-e29b-41d4-a716-446655440003",
+          incident_id: "550e8400-e29b-41d4-a716-446655440004",
+        },
+      });
+      emit?.({
+        event: "alert.created.v1",
+        id: "related-alert-cursor",
+        data: {
+          alert_id: authorizedAlert.alert_id,
+          incident_id: detailIncidentId,
+          message: "untrusted message must not render",
+        },
+      });
+    });
+
+    expect(
+      await screen.findByText("Authorized detail alert snapshot."),
+    ).toBeTruthy();
+    expect(screen.getAllByText("Emerging")).toHaveLength(2);
+    expect(readAlert).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/untrusted message/i)).toBeNull();
+
+    act(() => reconnect?.());
+    expect(
+      await screen.findByText(/couldn’t refresh this authorized snapshot/i),
+    ).toBeTruthy();
+    expect(screen.getByText("Authorized detail alert snapshot.")).toBeTruthy();
+    expect(screen.getAllByText("Emerging")).toHaveLength(2);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry alert details" }),
+    );
+    expect(
+      await screen.findByText("Recovered authorized snapshot."),
+    ).toBeTruthy();
+    expect(screen.getByText("Historical snapshot")).toBeTruthy();
+    expect(screen.getByText("P2")).toBeTruthy();
+    expect(screen.getByText("As of")).toBeTruthy();
+    expect(screen.getAllByText("Emerging")).toHaveLength(2);
+    expect(readAlert).toHaveBeenCalledTimes(3);
   });
 });

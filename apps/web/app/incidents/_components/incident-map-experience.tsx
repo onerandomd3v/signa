@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { PublicIncident } from "@/lib/api/generated";
+import type { AlertReader } from "./use-alert-reconciliation";
 import type { RealtimeConnector } from "./use-realtime-updates";
 import {
   fetchPublicIncidents,
@@ -11,6 +12,8 @@ import {
 } from "@/lib/api/incidents";
 import { useCoalescedRefresh } from "./use-coalesced-refresh";
 import { RealtimeConnectionStatusMessage } from "./incident-views";
+import { RealtimeAlertSnapshots } from "./realtime-alert-snapshots";
+import { useAlertReconciliation } from "./use-alert-reconciliation";
 import { useRealtimeUpdates } from "./use-realtime-updates";
 import {
   toIncidentFeatureCollection,
@@ -57,10 +60,12 @@ export function IncidentMapExperience({
   mapStyleUrl,
   loadIncidents = loadPublicIncidents,
   connectRealtime,
+  readAlert,
 }: {
   mapStyleUrl: string | null;
   loadIncidents?: (signal: AbortSignal) => Promise<PublicIncident[]>;
   connectRealtime?: RealtimeConnector;
+  readAlert?: AlertReader;
 }) {
   const [state, setState] = useState<LoadState>("loading");
   const [incidents, setIncidents] = useState<PublicIncident[]>([]);
@@ -89,8 +94,25 @@ export function IncidentMapExperience({
       }
     },
   });
+  const alertReconciliation = useAlertReconciliation({ readAlert });
+  const acceptAlertEvents = alertReconciliation.acceptEvents;
+  const revalidateAlerts = alertReconciliation.revalidateKnown;
+  const onInvalidation = useCallback(
+    ({
+      incidents: incidentsChanged,
+      alerts,
+    }: {
+      incidents: boolean;
+      alerts: { alertId: string; incidentId: string }[];
+    }) => {
+      if (incidentsChanged) refresh();
+      acceptAlertEvents(alerts);
+    },
+    [acceptAlertEvents, refresh],
+  );
   const realtime = useRealtimeUpdates({
-    onInvalidation: refresh,
+    onInvalidation,
+    onConnected: revalidateAlerts,
     connect: connectRealtime,
   });
 
@@ -268,6 +290,10 @@ export function IncidentMapExperience({
         onRetry={refresh}
       />
       {content}
+      <RealtimeAlertSnapshots
+        alerts={alertReconciliation.alerts}
+        onRetry={alertReconciliation.retry}
+      />
     </div>
   );
 }

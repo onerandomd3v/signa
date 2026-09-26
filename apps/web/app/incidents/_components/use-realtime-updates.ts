@@ -13,7 +13,12 @@ export type RealtimeConnectionStatus =
 
 export type RealtimeInvalidations = {
   incidents: boolean;
-  alerts: boolean;
+  alerts: RealtimeAlertReference[];
+};
+
+export type RealtimeAlertReference = {
+  alertId: string;
+  incidentId: string;
 };
 
 export type RealtimeConnector = (
@@ -24,6 +29,7 @@ type RealtimeSleeper = (ms: number, signal: AbortSignal) => Promise<void>;
 
 type UseRealtimeUpdatesOptions = {
   onInvalidation: (invalidations: RealtimeInvalidations) => void;
+  onConnected?: () => void;
   connect?: RealtimeConnector;
   sleep?: RealtimeSleeper;
   coalesceMs?: number;
@@ -32,6 +38,9 @@ type UseRealtimeUpdatesOptions = {
 const MIN_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 15_000;
 const EVENT_COALESCE_MS = 100;
+const MAX_PENDING_ALERT_IDS = 10;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function sleepWithSignal(
   ms: number,
@@ -53,17 +62,40 @@ export function sleepWithSignal(
   });
 }
 
-function eventCategory(
+export function parseAlertCreatedReference(
   event: RealtimeEvent,
-): keyof RealtimeInvalidations | null {
-  if (typeof event.event !== "string") return null;
-  if (event.event.startsWith("incident.")) return "incidents";
-  if (event.event.startsWith("alert.")) return "alerts";
-  return null;
+): RealtimeAlertReference | null {
+  if (event.event !== "alert.created.v1") return null;
+
+  let data = event.data;
+  if (typeof data === "string") {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return null;
+  }
+
+  const alertId = (data as Record<string, unknown>).alert_id;
+  const incidentId = (data as Record<string, unknown>).incident_id;
+  if (
+    typeof alertId !== "string" ||
+    !UUID_PATTERN.test(alertId) ||
+    typeof incidentId !== "string" ||
+    !UUID_PATTERN.test(incidentId)
+  ) {
+    return null;
+  }
+
+  return { alertId, incidentId };
 }
 
 export function useRealtimeUpdates({
   onInvalidation,
+  onConnected,
   connect = streamAuthenticatedEvents,
   sleep = sleepWithSignal,
   coalesceMs = EVENT_COALESCE_MS,
@@ -72,6 +104,7 @@ export function useRealtimeUpdates({
   alertUpdateReceived: boolean;
 } {
   const onInvalidationRef = useRef(onInvalidation);
+  const onConnectedRef = useRef(onConnected);
   const connectRef = useRef(connect);
   const sleepRef = useRef(sleep);
   const [status, setStatus] = useState<RealtimeConnectionStatus>("connecting");
@@ -79,9 +112,10 @@ export function useRealtimeUpdates({
 
   useEffect(() => {
     onInvalidationRef.current = onInvalidation;
+    onConnectedRef.current = onConnected;
     connectRef.current = connect;
     sleepRef.current = sleep;
-  }, [connect, onInvalidation, sleep]);
+  }, [connect, onConnected, onInvalidation, sleep]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -90,24 +124,39 @@ export function useRealtimeUpdates({
     let cursor: string | undefined;
     let reconnectDelay = MIN_RECONNECT_DELAY_MS;
     let coalesceTimer: ReturnType<typeof setTimeout> | undefined;
-    const pending: RealtimeInvalidations = { incidents: false, alerts: false };
+    const pending: RealtimeInvalidations = { incidents: false, alerts: [] };
+
+    const flushInvalidations = () => {
+      coalesceTimer = undefined;
+      if (signal.aborted) return;
+      const invalidations = { ...pending, alerts: [...pending.alerts] };
+      pending.incidents = false;
+      pending.alerts = [];
+      onInvalidationRef.current(invalidations);
+    };
 
     const scheduleInvalidation = (event: RealtimeEvent) => {
-      const category = eventCategory(event);
-      if (!category) return;
-
-      pending[category] = true;
-      if (category === "alerts") setAlertUpdateReceived(true);
+      if (event.event?.startsWith("incident.")) {
+        pending.incidents = true;
+      } else {
+        const alert = parseAlertCreatedReference(event);
+        if (!alert) return;
+        if (
+          !pending.alerts.some(
+            (candidate) => candidate.alertId === alert.alertId,
+          )
+        ) {
+          if (pending.alerts.length >= MAX_PENDING_ALERT_IDS) {
+            if (coalesceTimer !== undefined) clearTimeout(coalesceTimer);
+            flushInvalidations();
+          }
+          pending.alerts.push(alert);
+        }
+        setAlertUpdateReceived(true);
+      }
       if (coalesceTimer !== undefined) return;
 
-      coalesceTimer = setTimeout(() => {
-        coalesceTimer = undefined;
-        if (signal.aborted) return;
-        const invalidations = { ...pending };
-        pending.incidents = false;
-        pending.alerts = false;
-        onInvalidationRef.current(invalidations);
-      }, coalesceMs);
+      coalesceTimer = setTimeout(flushInvalidations, coalesceMs);
     };
 
     const run = async () => {
@@ -124,7 +173,10 @@ export function useRealtimeUpdates({
             onConnection: () => {
               lastError = undefined;
               reconnectDelay = MIN_RECONNECT_DELAY_MS;
-              if (!signal.aborted) setStatus("live");
+              if (!signal.aborted) {
+                setStatus("live");
+                onConnectedRef.current?.();
+              }
             },
             onSseEvent: (event) => {
               if (event.id) cursor = event.id;
