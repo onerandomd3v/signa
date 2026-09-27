@@ -170,6 +170,36 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 	if _, err := connection.Exec(ctx, `INSERT INTO incidents (id, status, confidence_state) VALUES ($1, 'UNDECIDED', 'UNDECIDED'), ($2, 'UNDECIDED', 'UNDECIDED')`, incidentID, otherIncidentID); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("verification request lifetime constraints", func(t *testing.T) {
+		createdAt := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+		for _, tc := range []struct {
+			name        string
+			id          string
+			expiresAt   time.Time
+			cancelledAt any
+			wantReject  bool
+		}{
+			{"expiration equal to creation rejected", "00000000-0000-0000-0000-000000000401", createdAt, nil, true},
+			{"expiration before creation rejected", "00000000-0000-0000-0000-000000000402", createdAt.Add(-time.Second), nil, true},
+			{"expiration after creation accepted", "00000000-0000-0000-0000-000000000403", createdAt.Add(time.Second), nil, false},
+			{"cancellation before creation rejected", "00000000-0000-0000-0000-000000000404", createdAt.Add(time.Hour), createdAt.Add(-time.Second), true},
+			{"cancellation equal to creation accepted", "00000000-0000-0000-0000-000000000405", createdAt.Add(time.Hour), createdAt, false},
+			{"null cancellation accepted", "00000000-0000-0000-0000-000000000406", createdAt.Add(time.Hour), nil, false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := connection.Exec(ctx, `INSERT INTO verification_requests (id, incident_id, created_at, expires_at, cancelled_at) VALUES ($1, $2, $3, $4, $5)`, tc.id, incidentID, createdAt, tc.expiresAt, tc.cancelledAt)
+				if tc.wantReject {
+					if err == nil {
+						t.Fatal("invalid request lifetime accepted")
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("valid request lifetime rejected: %v", err)
+				}
+			})
+		}
+	})
 
 	t.Run("grant and revocation provenance", func(t *testing.T) {
 		bad := []struct {

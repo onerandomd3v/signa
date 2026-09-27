@@ -32,6 +32,8 @@ CREATE TABLE verification_requests (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL,
     cancelled_at TIMESTAMPTZ,
+    CONSTRAINT verification_requests_expires_at_after_created_at_check CHECK (expires_at > created_at),
+    CONSTRAINT verification_requests_cancelled_at_after_created_at_check CHECK (cancelled_at IS NULL OR cancelled_at >= created_at),
     CONSTRAINT verification_requests_id_incident_id_key UNIQUE (id, incident_id)
 );
 
