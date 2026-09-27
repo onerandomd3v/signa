@@ -175,7 +175,7 @@ func TestVerificationRoutesPostgresBoundary(t *testing.T) {
 	pool.Close()
 	policy := config.PublicIncidentGeometryPolicy{Version: config.PublicIncidentGeometryPolicyVersion, GridMeters: 100, MinRadiusMeters: 250, SimplifyMeters: 25}
 	outage := NewHandlerWithMediaAndCORSAndPublicIncidentsAndAuth(nil, DefaultRateLimitConfig(), nil, nil, nil, nil, policy, AuthConfig{
-		Store: sessionStoreForAPITest{secret: "outage-cookie", principal: auth.Principal{UserID: user}},
+		Store:        sessionStoreForAPITest{secret: "outage-cookie", principal: auth.Principal{UserID: user}},
 		Verification: verification.NewService(pool, incidents.NewStore(pool), policy),
 	})
 	assertVerificationError(t, verificationCallWithCookie(outage, "GET", "/v1/verifications/requests", "", "outage-cookie", ""), 503, "verification_unavailable", "verification service is unavailable")
