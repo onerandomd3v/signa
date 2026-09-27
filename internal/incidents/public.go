@@ -35,6 +35,12 @@ type PublicIncidentReader interface {
 	GetPublicIncident(context.Context, uuid.UUID, config.PublicIncidentGeometryPolicy) (PublicIncident, error)
 }
 
+// PublicIncidentQueryer permits the canonical public projection to run on a
+// pool or on an existing transaction without acquiring another connection.
+type PublicIncidentQueryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 // RouteRelevanceReader evaluates a request-scoped route against active
 // incidents while returning only the existing public incident projection.
 type RouteRelevanceReader interface {
@@ -126,10 +132,19 @@ func (s *Store) GetPublicIncident(ctx context.Context, incidentID uuid.UUID, pol
 	if s == nil || s.pool == nil {
 		return PublicIncident{}, fmt.Errorf("incident store database is required")
 	}
+	return GetPublicIncidentWithQuerier(ctx, s.pool, incidentID, policy)
+}
+
+// GetPublicIncidentWithQuerier reads the same privacy-safe projection used by
+// Store.GetPublicIncident, including when queryer is an existing pgx transaction.
+func GetPublicIncidentWithQuerier(ctx context.Context, queryer PublicIncidentQueryer, incidentID uuid.UUID, policy config.PublicIncidentGeometryPolicy) (PublicIncident, error) {
+	if queryer == nil {
+		return PublicIncident{}, fmt.Errorf("public incident queryer is required")
+	}
 	if err := policy.Validate(); err != nil {
 		return PublicIncident{}, fmt.Errorf("invalid public incident geometry policy: %w", err)
 	}
-	row := s.pool.QueryRow(ctx, publicIncidentProjection+` AND id = $4
+	row := queryer.QueryRow(ctx, publicIncidentProjection+` AND id = $4
 `, policy.GridMeters, policy.MinRadiusMeters, policy.SimplifyMeters, incidentID)
 	incident, err := scanPublicIncident(row)
 	if errors.Is(err, pgx.ErrNoRows) {

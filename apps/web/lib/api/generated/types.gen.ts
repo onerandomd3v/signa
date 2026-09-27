@@ -4,6 +4,38 @@ export type ClientOptions = {
     baseUrl: 'http://localhost:8080' | (string & {});
 };
 
+/**
+ * Request metadata and the existing generalized public incident projection only; no reporter, private location, media, delivery, provider, auth, or verifier identity fields.
+ */
+export type VerificationRequestView = {
+    id: string;
+    created_at: string;
+    expires_at: string;
+    incident: PublicIncident;
+    safety_prompt: 'Respond only from what you already safely know or observed. Never approach an incident or unsafe area to verify it.';
+};
+
+export type VerificationResponseInput = ({
+    conclusion: 'CONFIRM' | 'CANNOT_CONFIRM' | 'DISPUTE';
+} | {
+    observation: 'SAW' | 'HEARD';
+}) & {
+    conclusion?: 'CONFIRM' | 'CANNOT_CONFIRM' | 'DISPUTE' | null;
+    observation?: 'SAW' | 'HEARD' | null;
+};
+
+/**
+ * Public acknowledgement of append-only verifier evidence. Verifier identity, idempotency key, and payload fingerprint are omitted.
+ */
+export type VerificationResponse = {
+    id: string;
+    request_id: string;
+    incident_id: string;
+    conclusion: 'CONFIRM' | 'CANNOT_CONFIRM' | 'DISPUTE' | null;
+    observation: 'SAW' | 'HEARD' | null;
+    created_at: string;
+};
+
 export type CurrentSession = {
     /**
      * Canonical user identity resolved by the API session store.
@@ -205,6 +237,8 @@ export type ReportLocation = {
     longitude?: number;
 };
 
+export type VerificationRequestId = string;
+
 export type ReportId = string;
 
 export type IncidentId = string;
@@ -212,6 +246,139 @@ export type IncidentId = string;
 export type SubscriptionId = string;
 
 export type AlertId = string;
+
+export type ListVerificationRequestsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/verifications/requests';
+};
+
+export type ListVerificationRequestsErrors = {
+    /**
+     * Authentication required
+     */
+    401: ErrorResponse;
+    /**
+     * Trusted verifier capability required
+     */
+    403: ErrorResponse;
+    /**
+     * Authentication or verification store unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type ListVerificationRequestsError = ListVerificationRequestsErrors[keyof ListVerificationRequestsErrors];
+
+export type ListVerificationRequestsResponses = {
+    /**
+     * Visible verification requests
+     */
+    200: Array<VerificationRequestView>;
+};
+
+export type ListVerificationRequestsResponse = ListVerificationRequestsResponses[keyof ListVerificationRequestsResponses];
+
+export type GetVerificationRequestData = {
+    body?: never;
+    path: {
+        request_id: string;
+    };
+    query?: never;
+    url: '/v1/verifications/requests/{request_id}';
+};
+
+export type GetVerificationRequestErrors = {
+    /**
+     * Invalid request UUID
+     */
+    400: ErrorResponse;
+    /**
+     * Authentication required
+     */
+    401: ErrorResponse;
+    /**
+     * Trusted verifier capability required
+     */
+    403: ErrorResponse;
+    /**
+     * Request absent, expired, cancelled, assigned elsewhere, or excluded from the public incident projection
+     */
+    404: ErrorResponse;
+    /**
+     * Authentication or verification store unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type GetVerificationRequestError = GetVerificationRequestErrors[keyof GetVerificationRequestErrors];
+
+export type GetVerificationRequestResponses = {
+    /**
+     * Public-only verification request view
+     */
+    200: VerificationRequestView;
+};
+
+export type GetVerificationRequestResponse = GetVerificationRequestResponses[keyof GetVerificationRequestResponses];
+
+export type SubmitVerificationResponseData = {
+    body: VerificationResponseInput;
+    headers: {
+        /**
+         * Trimmed, nonempty key of at most 255 bytes; scoped to this request and authenticated verifier.
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        request_id: string;
+    };
+    query?: never;
+    url: '/v1/verifications/requests/{request_id}/responses';
+};
+
+export type SubmitVerificationResponseErrors = {
+    /**
+     * Invalid body, enum, UUID, or Idempotency-Key
+     */
+    400: ErrorResponse;
+    /**
+     * Authentication required
+     */
+    401: ErrorResponse;
+    /**
+     * Trusted verifier capability required
+     */
+    403: ErrorResponse;
+    /**
+     * Request absent, expired, cancelled, assigned elsewhere, or excluded from the public incident projection
+     */
+    404: ErrorResponse;
+    /**
+     * Key reused with different semantic content
+     */
+    409: ErrorResponse;
+    /**
+     * Authentication or verification store unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type SubmitVerificationResponseError = SubmitVerificationResponseErrors[keyof SubmitVerificationResponseErrors];
+
+export type SubmitVerificationResponseResponses = {
+    /**
+     * Exact idempotent replay of the original response
+     */
+    200: VerificationResponse;
+    /**
+     * New immutable response accepted
+     */
+    201: VerificationResponse;
+};
+
+export type SubmitVerificationResponseResponse = SubmitVerificationResponseResponses[keyof SubmitVerificationResponseResponses];
 
 export type GetHealthData = {
     body?: never;

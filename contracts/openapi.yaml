@@ -7,6 +7,88 @@ servers:
   - url: http://localhost:8080
     description: Local development
 paths:
+  /v1/verifications/requests:
+    get:
+      operationId: listVerificationRequests
+      summary: List visible active verification requests
+      description: Returns at most 100 eligible requests in server-defined order (created_at descending, then id descending). Requests excluded by the public incident projection are omitted. No pagination or client-defined scan is supported.
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: Visible verification requests
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 100
+                items:
+                  $ref: '#/components/schemas/VerificationRequestView'
+        '401': { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: Trusted verifier capability required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: Authentication or verification store unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /v1/verifications/requests/{request_id}:
+    get:
+      operationId: getVerificationRequest
+      summary: Get one visible verification request
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/VerificationRequestID'
+      responses:
+        '200':
+          description: Public-only verification request view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationRequestView'
+        '400': { description: Invalid request UUID, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: Trusted verifier capability required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: 'Request absent, expired, cancelled, assigned elsewhere, or excluded from the public incident projection', content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: Authentication or verification store unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /v1/verifications/requests/{request_id}/responses:
+    post:
+      operationId: submitVerificationResponse
+      summary: Append trusted verifier evidence
+      description: First accepted submission returns 201; exact replay with the same key and semantic content returns 200. This operation does not change incident confidence.
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/VerificationRequestID'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Trimmed, nonempty key of at most 255 bytes; scoped to this request and authenticated verifier.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerificationResponseInput'
+      responses:
+        '201':
+          description: New immutable response accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationResponse'
+        '200':
+          description: Exact idempotent replay of the original response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationResponse'
+        '400': { description: 'Invalid body, enum, UUID, or Idempotency-Key', content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: Trusted verifier capability required, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: 'Request absent, expired, cancelled, assigned elsewhere, or excluded from the public incident projection', content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '409': { description: Key reused with different semantic content, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: Authentication or verification store unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   /healthz:
     get:
       operationId: getHealth
@@ -384,6 +466,13 @@ components:
       name: signa_session
       description: HttpOnly opaque session cookie. The browser supplies it with credentialed API and SSE requests; credentials never appear in URLs.
   parameters:
+    VerificationRequestID:
+      name: request_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     ReportID:
       name: report_id
       in: path
@@ -413,6 +502,54 @@ components:
         type: string
         format: uuid
   schemas:
+    VerificationRequestView:
+      type: object
+      description: Request metadata and the existing generalized public incident projection only; no reporter, private location, media, delivery, provider, auth, or verifier identity fields.
+      additionalProperties: false
+      required: [id, created_at, expires_at, incident, safety_prompt]
+      properties:
+        id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        incident:
+          $ref: '#/components/schemas/PublicIncident'
+        safety_prompt:
+          type: string
+          const: Respond only from what you already safely know or observed. Never approach an incident or unsafe area to verify it.
+    VerificationResponseInput:
+      type: object
+      description: At least one independent dimension must be non-null. Each may be null or omitted independently.
+      additionalProperties: false
+      properties:
+        conclusion:
+          type: [string, 'null']
+          enum: [CONFIRM, CANNOT_CONFIRM, DISPUTE, null]
+        observation:
+          type: [string, 'null']
+          enum: [SAW, HEARD, null]
+      anyOf:
+        - required: [conclusion]
+          properties:
+            conclusion: { type: string, enum: [CONFIRM, CANNOT_CONFIRM, DISPUTE] }
+        - required: [observation]
+          properties:
+            observation: { type: string, enum: [SAW, HEARD] }
+    VerificationResponse:
+      type: object
+      description: Public acknowledgement of append-only verifier evidence. Verifier identity, idempotency key, and payload fingerprint are omitted.
+      additionalProperties: false
+      required: [id, request_id, incident_id, conclusion, observation, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        request_id: { type: string, format: uuid }
+        incident_id: { type: string, format: uuid }
+        conclusion:
+          type: [string, 'null']
+          enum: [CONFIRM, CANNOT_CONFIRM, DISPUTE, null]
+        observation:
+          type: [string, 'null']
+          enum: [SAW, HEARD, null]
+        created_at: { type: string, format: date-time }
     CurrentSession:
       type: object
       required: [user_id]

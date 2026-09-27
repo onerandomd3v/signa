@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, EvaluateRouteRelevanceData, EvaluateRouteRelevanceErrors, EvaluateRouteRelevanceResponses, GetAlertData, GetAlertErrors, GetAlertResponses, GetCurrentSessionData, GetCurrentSessionErrors, GetCurrentSessionResponses, GetHealthData, GetHealthResponses, GetIncidentData, GetIncidentErrors, GetIncidentResponses, ListIncidentsData, ListIncidentsErrors, ListIncidentsResponses, RegisterPushSubscriptionData, RegisterPushSubscriptionErrors, RegisterPushSubscriptionResponses, RevokePushSubscriptionData, RevokePushSubscriptionErrors, RevokePushSubscriptionResponses, StreamRealtimeEventsData, StreamRealtimeEventsErrors, StreamRealtimeEventsResponse, StreamRealtimeEventsResponses } from './types.gen';
+import type { AttachReportMediaData, AttachReportMediaErrors, AttachReportMediaResponses, AuthorizeReportMediaUploadData, AuthorizeReportMediaUploadErrors, AuthorizeReportMediaUploadResponses, CreateReportData, CreateReportErrors, CreateReportResponses, EvaluateRouteRelevanceData, EvaluateRouteRelevanceErrors, EvaluateRouteRelevanceResponses, GetAlertData, GetAlertErrors, GetAlertResponses, GetCurrentSessionData, GetCurrentSessionErrors, GetCurrentSessionResponses, GetHealthData, GetHealthResponses, GetIncidentData, GetIncidentErrors, GetIncidentResponses, GetVerificationRequestData, GetVerificationRequestErrors, GetVerificationRequestResponses, ListIncidentsData, ListIncidentsErrors, ListIncidentsResponses, ListVerificationRequestsData, ListVerificationRequestsErrors, ListVerificationRequestsResponses, RegisterPushSubscriptionData, RegisterPushSubscriptionErrors, RegisterPushSubscriptionResponses, RevokePushSubscriptionData, RevokePushSubscriptionErrors, RevokePushSubscriptionResponses, StreamRealtimeEventsData, StreamRealtimeEventsErrors, StreamRealtimeEventsResponse, StreamRealtimeEventsResponses, SubmitVerificationResponseData, SubmitVerificationResponseErrors, SubmitVerificationResponseResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -17,6 +17,53 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
      */
     meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
+
+/**
+ * List visible active verification requests
+ *
+ * Returns at most 100 eligible requests in server-defined order (created_at descending, then id descending). Requests excluded by the public incident projection are omitted. No pagination or client-defined scan is supported.
+ */
+export const listVerificationRequests = <ThrowOnError extends boolean = false>(options?: Options<ListVerificationRequestsData, ThrowOnError>): RequestResult<ListVerificationRequestsResponses, ListVerificationRequestsErrors, ThrowOnError> => (options?.client ?? client).get<ListVerificationRequestsResponses, ListVerificationRequestsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'signa_session',
+            type: 'apiKey'
+        }],
+    url: '/v1/verifications/requests',
+    ...options
+});
+
+/**
+ * Get one visible verification request
+ */
+export const getVerificationRequest = <ThrowOnError extends boolean = false>(options: Options<GetVerificationRequestData, ThrowOnError>): RequestResult<GetVerificationRequestResponses, GetVerificationRequestErrors, ThrowOnError> => (options.client ?? client).get<GetVerificationRequestResponses, GetVerificationRequestErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'signa_session',
+            type: 'apiKey'
+        }],
+    url: '/v1/verifications/requests/{request_id}',
+    ...options
+});
+
+/**
+ * Append trusted verifier evidence
+ *
+ * First accepted submission returns 201; exact replay with the same key and semantic content returns 200. This operation does not change incident confidence.
+ */
+export const submitVerificationResponse = <ThrowOnError extends boolean = false>(options: Options<SubmitVerificationResponseData, ThrowOnError>): RequestResult<SubmitVerificationResponseResponses, SubmitVerificationResponseErrors, ThrowOnError> => (options.client ?? client).post<SubmitVerificationResponseResponses, SubmitVerificationResponseErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'signa_session',
+            type: 'apiKey'
+        }],
+    url: '/v1/verifications/requests/{request_id}/responses',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Check API health

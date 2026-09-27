@@ -21,6 +21,7 @@ import (
 	"github.com/onerandomd3v/signa/internal/realtime"
 	"github.com/onerandomd3v/signa/internal/reports"
 	"github.com/onerandomd3v/signa/internal/routing"
+	"github.com/onerandomd3v/signa/internal/verification"
 )
 
 func main() {
@@ -92,13 +93,15 @@ func run(parent context.Context, logger *slog.Logger) error {
 	}
 	sseHandler := realtime.NewHandlerWithContext(ctx, realtimeSource, realtime.ScopeAuthorizer{Resolver: realtime.NewPostgresScopeResolver(pool)}, cfg.SSEHeartbeatInterval)
 	sessionStore := auth.NewPostgresStore(pool)
+	publicIncidentStore := incidents.NewStore(pool)
 	server := api.NewServerWithMediaAndCORSAndPublicIncidentsAndAuthAndRealtime(cfg.APIAddr, logger, api.RateLimitConfig{
 		PerClientRatePerMinute: cfg.ReportRatePerMinute,
 		PerClientBurst:         cfg.ReportRateBurst,
 		GlobalRatePerMinute:    cfg.GlobalReportRatePerMinute,
 		GlobalBurst:            cfg.GlobalReportRateBurst,
-	}, cfg.WebAllowedOrigins, pool, storage, incidents.NewStore(pool), publicGeometryPolicy, api.AuthConfig{
-		Store: sessionStore,
+	}, cfg.WebAllowedOrigins, pool, storage, publicIncidentStore, publicGeometryPolicy, api.AuthConfig{
+		Store:        sessionStore,
+		Verification: verification.NewService(pool, publicIncidentStore, publicGeometryPolicy),
 		RouteRelevance: api.RouteRelevanceConfig{
 			Provider: routeProvider,
 			Reader:   incidents.NewStore(pool),
