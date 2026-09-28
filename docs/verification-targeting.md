@@ -8,11 +8,15 @@ recordings. The COD-219 safety prompt remains authoritative.
 ## Durable trigger and eligibility
 
 The worker handles `incident.created.v1` and `incident.report_attached.v1` from
-the durable incident stream. It first completes the existing lifecycle
-processor, then targets requests in a separate PostgreSQL transaction. The
-consumer acknowledges the event only after both steps succeed. Redelivery is
-safe; targeting failures leave the event pending and do not block report
-acceptance.
+the durable incident stream in a dedicated `signa-verification-targeting`
+consumer group. Lifecycle processing continues independently in
+`signa-incident-lifecycle`; enabling targeting does not replace that consumer
+or couple its acknowledgement to targeting. The targeting consumer ignores
+other incident event names and acknowledges them normally. It acknowledges a
+trigger only after targeting commits; malformed supported triggers and
+targeting failures remain pending in the targeting group for retry. This is
+independent from lifecycle acknowledgement, and targeting failures do not
+block report acceptance.
 
 Targeting locks the incident and proceeds only while it is `OPEN` or
 `RESOLVING`, has not expired, and remains eligible for the existing

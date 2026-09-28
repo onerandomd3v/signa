@@ -49,19 +49,28 @@ func TestTargetingProcessorAcceptsDurableIncidentEvents(t *testing.T) {
 	}
 }
 
-func TestTargetingProcessorRejectsUnsupportedOrMalformedEvents(t *testing.T) {
+func TestTargetingProcessorIgnoresNonTriggerEventsAndRejectsMalformedTriggers(t *testing.T) {
+	calls := 0
 	processor := newTargetingProcessor(targetingRepositoryFunc(func(context.Context, uuid.UUID, config.VerificationTargetingPolicy, config.PublicIncidentGeometryPolicy) (int, error) {
-		t.Fatal("target repository should not run")
+		calls++
 		return 0, nil
 	}), testTargetingPolicy(), testPublicGeometryPolicy())
+	for _, name := range []string{incidents.IncidentResolvedV1, incidents.IncidentStatusChangedV1, "incident.future.v1"} {
+		message := incidents.StreamMessage{Values: map[string]any{"event_name": name, "aggregate_type": "incident", "payload": `{"incident_id":"` + uuid.NewString() + `"}`}}
+		if err := processor.Process(context.Background(), message); err != nil {
+			t.Errorf("Process(%s) error = %v, want nil", name, err)
+		}
+	}
 	for _, message := range []incidents.StreamMessage{
-		{Values: map[string]any{"event_name": incidents.IncidentResolvedV1, "aggregate_type": "incident", "payload": `{"incident_id":"` + uuid.NewString() + `"}`}},
 		{Values: map[string]any{"event_name": incidents.IncidentCreatedV1, "aggregate_type": "report", "payload": `{"incident_id":"` + uuid.NewString() + `"}`}},
-		{Values: map[string]any{"event_name": incidents.IncidentCreatedV1, "aggregate_type": "incident", "payload": `{"incident_id":"invalid"}`}},
+		{Values: map[string]any{"event_name": incidents.IncidentReportAttachedV1, "aggregate_type": "incident", "payload": `{"incident_id":"invalid"}`}},
 	} {
 		if err := processor.Process(context.Background(), message); err == nil {
-			t.Fatal("Process() error = nil")
+			t.Fatal("malformed supported trigger Process() error = nil")
 		}
+	}
+	if calls != 0 {
+		t.Fatalf("TargetIncident calls = %d, want 0", calls)
 	}
 }
 
@@ -78,6 +87,66 @@ func TestTargetingProcessorReturnsRepositoryFailureForDurableRetry(t *testing.T)
 	if err := processor.Process(context.Background(), message); err == nil || errors.Is(err, want) || strings.Contains(err.Error(), privateVerifierID) || strings.Contains(err.Error(), "6.52439") {
 		t.Fatalf("Process() must return a sanitized retryable error, got %v", err)
 	}
+}
+
+func TestTargetingConsumerAcknowledgesTriggersAndNonTriggersButLeavesFailuresPending(t *testing.T) {
+	client := &targetingConsumerTestClient{}
+	databaseFailureID := uuid.New()
+	calls := 0
+	processor := newTargetingProcessor(targetingRepositoryFunc(func(_ context.Context, got uuid.UUID, _ config.VerificationTargetingPolicy, _ config.PublicIncidentGeometryPolicy) (int, error) {
+		calls++
+		if got == databaseFailureID {
+			return 0, errors.New("database targeting failed")
+		}
+		return 0, nil
+	}), testTargetingPolicy(), testPublicGeometryPolicy())
+	consumer := NewTargetingConsumer(client, processor, "incident-events", "targeting-group", "worker", time.Second)
+	createdID := uuid.New()
+	attachedID := uuid.New()
+	messages := []incidents.StreamMessage{
+		targetingConsumerMessage("created", incidents.IncidentCreatedV1, createdID.String()),
+		targetingConsumerMessage("attached", incidents.IncidentReportAttachedV1, attachedID.String()),
+		targetingConsumerMessage("resolved", incidents.IncidentResolvedV1, uuid.NewString()),
+		{ID: "malformed", Values: map[string]any{"event_name": incidents.IncidentCreatedV1}},
+		targetingConsumerMessage("database-failure", incidents.IncidentCreatedV1, databaseFailureID.String()),
+	}
+	if err := consumer.process(context.Background(), messages); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"created", "attached", "resolved"} {
+		if client.acks[id] != 1 {
+			t.Errorf("ack[%s] = %d, want 1", id, client.acks[id])
+		}
+	}
+	for _, id := range []string{"malformed", "database-failure"} {
+		if client.acks[id] != 0 {
+			t.Errorf("failed message %s ack count = %d, want 0", id, client.acks[id])
+		}
+	}
+	if calls != 3 {
+		t.Fatalf("TargetIncident calls = %d, want 3 (two triggers and one failed trigger)", calls)
+	}
+}
+
+func targetingConsumerMessage(id, eventName, incidentID string) incidents.StreamMessage {
+	return incidents.StreamMessage{ID: id, Values: map[string]any{
+		"event_name": eventName, "aggregate_type": "incident",
+		"payload": `{"incident_id":"` + incidentID + `"}`,
+	}}
+}
+
+type targetingConsumerTestClient struct{ acks map[string]int }
+
+func (c *targetingConsumerTestClient) EnsureGroup(context.Context, string, string) error { return nil }
+func (c *targetingConsumerTestClient) Read(context.Context, string, string, string, bool, time.Duration) ([]incidents.StreamMessage, error) {
+	return nil, nil
+}
+func (c *targetingConsumerTestClient) Ack(_ context.Context, _, _, id string) error {
+	if c.acks == nil {
+		c.acks = make(map[string]int)
+	}
+	c.acks[id]++
+	return nil
 }
 
 func TestTargetingPolicyFingerprintIsStableAndCoversAllPolicyFields(t *testing.T) {

@@ -144,11 +144,11 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 	})
 
 	t.Run("unique indexes", func(t *testing.T) {
-		var active, idempotency, requestPair, targeting string
+		var active, idempotency, requestPair, targeting, activeTargeting string
 		for _, item := range []struct {
 			name string
 			into *string
-		}{{"user_capability_grants_active_unique_idx", &active}, {"verification_responses_idempotency_key", &idempotency}, {"verification_requests_id_incident_id_key", &requestPair}, {"verification_requests_targeted_idempotency_idx", &targeting}} {
+		}{{"user_capability_grants_active_unique_idx", &active}, {"verification_responses_idempotency_key", &idempotency}, {"verification_requests_id_incident_id_key", &requestPair}, {"verification_requests_targeted_idempotency_idx", &targeting}, {"verification_requests_active_targeting_lookup_idx", &activeTargeting}} {
 			if err := connection.QueryRow(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1`, item.name).Scan(item.into); err != nil {
 				t.Errorf("index %s: %v", item.name, err)
 			}
@@ -164,6 +164,9 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 		}
 		if !strings.Contains(targeting, "UNIQUE") || !strings.Contains(targeting, "(incident_id, assigned_verifier_id, targeting_policy_version, targeting_policy_fingerprint)") || !strings.Contains(targeting, "assigned_verifier_id IS NOT NULL") || !strings.Contains(targeting, "targeting_policy_version IS NOT NULL") || !strings.Contains(targeting, "targeting_policy_fingerprint IS NOT NULL") {
 			t.Errorf("targeting idempotency index: %s", targeting)
+		}
+		if strings.Contains(activeTargeting, "UNIQUE") || !strings.Contains(activeTargeting, "(incident_id, assigned_verifier_id, expires_at)") || !strings.Contains(activeTargeting, "cancelled_at IS NULL") || !strings.Contains(activeTargeting, "assigned_verifier_id IS NOT NULL") {
+			t.Errorf("active targeting lookup index: %s", activeTargeting)
 		}
 	})
 
@@ -301,6 +304,13 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 	if targetingIndex {
 		t.Fatal("targeting idempotency index remains after migration down")
 	}
+	var activeTargetingIndex bool
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_active_targeting_lookup_idx') IS NOT NULL`).Scan(&activeTargetingIndex); err != nil {
+		t.Fatal(err)
+	}
+	if activeTargetingIndex {
+		t.Fatal("active targeting lookup index remains after migration down")
+	}
 	var targetingColumn bool
 	if err := connection.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='verification_requests' AND column_name='targeting_policy_version')`).Scan(&targetingColumn); err != nil {
 		t.Fatal(err)
@@ -314,6 +324,12 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 	}
 	if !targetingIndex {
 		t.Fatal("targeting idempotency index missing after migration reapply")
+	}
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_active_targeting_lookup_idx') IS NOT NULL`).Scan(&activeTargetingIndex); err != nil {
+		t.Fatal(err)
+	}
+	if !activeTargetingIndex {
+		t.Fatal("active targeting lookup index missing after migration reapply")
 	}
 
 	if err := connection.Close(ctx); err != nil {

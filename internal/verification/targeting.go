@@ -43,6 +43,10 @@ func newTargetingProcessor(repo targetingRepository, targetPolicy config.Verific
 // Process is idempotent across redelivery. Errors are returned so the durable
 // consumer leaves the triggering event pending for retry.
 func (p *TargetingProcessor) Process(ctx context.Context, message incidents.StreamMessage) error {
+	name, _ := message.Values["event_name"].(string)
+	if name != incidents.IncidentCreatedV1 && name != incidents.IncidentReportAttachedV1 {
+		return nil
+	}
 	if p == nil || p.repo == nil {
 		return fmt.Errorf("verification targeting dependencies are required")
 	}
@@ -66,10 +70,6 @@ func (p *TargetingProcessor) Process(ctx context.Context, message incidents.Stre
 }
 
 func parseTargetingTrigger(fields map[string]any) (uuid.UUID, error) {
-	name, ok := fields["event_name"].(string)
-	if !ok || (name != incidents.IncidentCreatedV1 && name != incidents.IncidentReportAttachedV1) {
-		return uuid.Nil, fmt.Errorf("unsupported verification targeting event")
-	}
 	aggregate, ok := fields["aggregate_type"].(string)
 	if !ok || aggregate != "incident" {
 		return uuid.Nil, fmt.Errorf("verification targeting event aggregate is invalid")

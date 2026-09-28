@@ -14,7 +14,16 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS verification_requests_targeted_id
       AND targeting_policy_version IS NOT NULL
       AND targeting_policy_fingerprint IS NOT NULL;
 
+-- Keep active-assignment exclusion bounded by incident and verifier while
+-- skipping unassigned and cancelled request history.
+DROP INDEX CONCURRENTLY IF EXISTS verification_requests_active_targeting_lookup_idx;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS verification_requests_active_targeting_lookup_idx
+    ON verification_requests (incident_id, assigned_verifier_id, expires_at)
+    WHERE cancelled_at IS NULL
+      AND assigned_verifier_id IS NOT NULL;
+
 -- +goose Down
+DROP INDEX CONCURRENTLY IF EXISTS verification_requests_active_targeting_lookup_idx;
 DROP INDEX CONCURRENTLY IF EXISTS verification_requests_targeted_idempotency_idx;
 ALTER TABLE verification_requests DROP COLUMN IF EXISTS targeting_policy_fingerprint;
 ALTER TABLE verification_requests DROP COLUMN IF EXISTS targeting_policy_version;
