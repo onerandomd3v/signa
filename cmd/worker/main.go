@@ -21,6 +21,7 @@ import (
 	"github.com/onerandomd3v/signa/internal/outbox"
 	"github.com/onerandomd3v/signa/internal/push"
 	"github.com/onerandomd3v/signa/internal/retention"
+	"github.com/onerandomd3v/signa/internal/verification"
 	"github.com/onerandomd3v/signa/internal/webpush"
 	"github.com/onerandomd3v/signa/internal/worker"
 	goRedis "github.com/redis/go-redis/v9"
@@ -57,6 +58,21 @@ func run(parent context.Context, logger *slog.Logger) error {
 	}
 	if _, err := config.LoadPriorityPolicy(); err != nil {
 		return err
+	}
+	verificationTargetPolicy, verificationTargetingEnabled, verificationTargetPolicyErr := config.LoadVerificationTargetingPolicy()
+	if verificationTargetPolicyErr != nil {
+		logger.Warn("verification targeting disabled because policy configuration is invalid", "error", verificationTargetPolicyErr)
+		verificationTargetingEnabled = false
+	} else if !verificationTargetingEnabled {
+		logger.Warn("verification targeting disabled because explicit targeting policy is not configured")
+	}
+	var verificationPublicPolicy config.PublicIncidentGeometryPolicy
+	if verificationTargetingEnabled {
+		verificationPublicPolicy, verificationTargetPolicyErr = config.LoadPublicIncidentGeometryPolicy()
+		if verificationTargetPolicyErr != nil {
+			logger.Warn("verification targeting disabled because public incident projection policy is unavailable", "error", verificationTargetPolicyErr)
+			verificationTargetingEnabled = false
+		}
 	}
 	retentionPolicy, retentionErr := config.LoadRetentionPolicy()
 	if retentionErr != nil {
@@ -164,6 +180,15 @@ func run(parent context.Context, logger *slog.Logger) error {
 		return err
 	}
 	lifecycleConsumer := incidents.NewLifecycleConsumer(streamClient, lifecycleProcessor, outbox.IncidentEventsStream, "signa-incident-lifecycle", consumerName, cfg.AIPollInterval).WithLogger(logger)
+	if verificationTargetingEnabled {
+		targetingProcessor, err := verification.NewTargetingProcessor(database, verificationTargetPolicy, verificationPublicPolicy)
+		if err != nil {
+			logger.Warn("verification targeting disabled because processor configuration is invalid", "error", err)
+		} else {
+			combinedProcessor := incidentLifecycleTargetingProcessor{lifecycle: lifecycleProcessor, targeting: targetingProcessor}
+			lifecycleConsumer = incidents.NewLifecycleConsumer(streamClient, combinedProcessor, outbox.IncidentEventsStream, "signa-incident-lifecycle", consumerName, cfg.AIPollInterval).WithLogger(logger)
+		}
+	}
 	retentionStore, err := retention.NewStore(database)
 	if err != nil {
 		return err
@@ -198,6 +223,22 @@ func run(parent context.Context, logger *slog.Logger) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+type incidentLifecycleTargetingProcessor struct {
+	lifecycle interface {
+		Process(context.Context, incidents.StreamMessage) error
+	}
+	targeting interface {
+		Process(context.Context, incidents.StreamMessage) error
+	}
+}
+
+func (p incidentLifecycleTargetingProcessor) Process(ctx context.Context, message incidents.StreamMessage) error {
+	if err := p.lifecycle.Process(ctx, message); err != nil {
+		return err
+	}
+	return p.targeting.Process(ctx, message)
 }
 
 func newWebPushDeliveryConsumer(subscriptionStore push.DeliveryStore, deliveryStore delivery.Store, streamClient delivery.StreamClient, cfg config.Config, logger *slog.Logger) (*delivery.Consumer, error) {

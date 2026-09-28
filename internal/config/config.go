@@ -152,6 +152,84 @@ type PublicIncidentGeometryPolicy struct {
 	SimplifyMeters  float64
 }
 
+const (
+	VerificationTargetingPolicyVersion = "signa.verification-targeting.v1"
+	maxVerificationTargetingCandidates = 1000
+)
+
+// VerificationTargetingPolicy defines the explicit operational bounds for
+// passive verifier request creation. An entirely unset policy disables only
+// targeting; a partially supplied policy is invalid and must fail closed.
+type VerificationTargetingPolicy struct {
+	Version         string
+	RadiusMeters    float64
+	LocationMaxAge  time.Duration
+	MaxCandidates   int
+	RequestLifetime time.Duration
+}
+
+func LoadVerificationTargetingPolicy() (VerificationTargetingPolicy, bool, error) {
+	names := []string{
+		"SIGNA_VERIFICATION_TARGETING_RADIUS_METERS",
+		"SIGNA_VERIFICATION_TARGETING_LOCATION_MAX_AGE",
+		"SIGNA_VERIFICATION_TARGETING_MAX_CANDIDATES",
+		"SIGNA_VERIFICATION_TARGETING_REQUEST_LIFETIME",
+	}
+	configured := 0
+	for _, name := range names {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			configured++
+		}
+	}
+	if configured == 0 {
+		return VerificationTargetingPolicy{}, false, nil
+	}
+	if configured != len(names) {
+		return VerificationTargetingPolicy{}, false, fmt.Errorf("all SIGNA_VERIFICATION_TARGETING_* policy values must be configured together")
+	}
+
+	radius, err := requiredPositiveFloat(names[0])
+	if err != nil {
+		return VerificationTargetingPolicy{}, false, err
+	}
+	locationMaxAge, err := requiredDuration(names[1])
+	if err != nil {
+		return VerificationTargetingPolicy{}, false, err
+	}
+	maxCandidates, err := requiredIntRange(names[2], 1, maxVerificationTargetingCandidates)
+	if err != nil {
+		return VerificationTargetingPolicy{}, false, err
+	}
+	requestLifetime, err := requiredDuration(names[3])
+	if err != nil {
+		return VerificationTargetingPolicy{}, false, err
+	}
+	policy := VerificationTargetingPolicy{
+		Version: VerificationTargetingPolicyVersion, RadiusMeters: radius,
+		LocationMaxAge: locationMaxAge, MaxCandidates: maxCandidates, RequestLifetime: requestLifetime,
+	}
+	if err := policy.Validate(); err != nil {
+		return VerificationTargetingPolicy{}, false, err
+	}
+	return policy, true, nil
+}
+
+func (p VerificationTargetingPolicy) Validate() error {
+	if p.Version != VerificationTargetingPolicyVersion {
+		return fmt.Errorf("verification targeting policy version must be %q", VerificationTargetingPolicyVersion)
+	}
+	if math.IsNaN(p.RadiusMeters) || math.IsInf(p.RadiusMeters, 0) || p.RadiusMeters <= 0 {
+		return fmt.Errorf("verification targeting radius must be finite and greater than zero")
+	}
+	if p.LocationMaxAge <= 0 || p.RequestLifetime <= 0 {
+		return fmt.Errorf("verification targeting durations must be greater than zero")
+	}
+	if p.MaxCandidates < 1 || p.MaxCandidates > maxVerificationTargetingCandidates {
+		return fmt.Errorf("verification targeting candidate limit must be between 1 and %d", maxVerificationTargetingCandidates)
+	}
+	return nil
+}
+
 func LoadPublicIncidentGeometryPolicy() (PublicIncidentGeometryPolicy, error) {
 	grid, err := requiredPositiveFloat("SIGNA_PUBLIC_INCIDENT_GRID_METERS")
 	if err != nil {

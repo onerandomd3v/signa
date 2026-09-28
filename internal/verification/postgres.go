@@ -30,7 +30,7 @@ func (r *postgresRepository) ListEligible(ctx context.Context, userID uuid.UUID)
 	if r.pool == nil {
 		return nil, ErrUnavailable
 	}
-	rows, err := r.pool.Query(ctx, `SELECT id,incident_id,created_at,expires_at FROM verification_requests WHERE `+eligibleRequestPredicate+` ORDER BY created_at DESC, id DESC LIMIT 100`, userID)
+	rows, err := r.pool.Query(ctx, `SELECT id,incident_id,created_at,expires_at FROM verification_requests WHERE `+eligibleRequestPredicate+` ORDER BY created_at DESC, id DESC LIMIT $2`, userID, maxRequestListLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (r *postgresRepository) GetEligible(ctx context.Context, userID, requestID 
 	return request, err
 }
 
-func (r *postgresRepository) Submit(ctx context.Context, userID, requestID, expectedIncidentID uuid.UUID, key string, input ResponseInput, version int16, digest [32]byte, policy config.PublicIncidentGeometryPolicy) (Response, bool, error) {
+func (r *postgresRepository) Submit(ctx context.Context, userID, requestID uuid.UUID, key string, input ResponseInput, version int16, digest [32]byte, policy config.PublicIncidentGeometryPolicy) (Response, bool, error) {
 	if r.pool == nil {
 		return Response{}, false, ErrUnavailable
 	}
@@ -66,8 +66,16 @@ func (r *postgresRepository) Submit(ctx context.Context, userID, requestID, expe
 		return Response{}, false, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
+	var grantID uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT id FROM user_capability_grants WHERE user_id=$1 AND capability='trusted_verifier' AND revoked_at IS NULL FOR UPDATE`, userID).Scan(&grantID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Response{}, false, ErrNotTrustedVerifier
+	}
+	if err != nil {
+		return Response{}, false, err
+	}
 	var revokedAt *time.Time
-	err = tx.QueryRow(ctx, `SELECT revoked_at FROM user_capability_grants WHERE user_id=$1 AND capability='trusted_verifier' AND revoked_at IS NULL FOR UPDATE`, userID).Scan(&revokedAt)
+	err = tx.QueryRow(ctx, `SELECT revoked_at FROM user_capability_grants WHERE id=$1`, grantID).Scan(&revokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Response{}, false, ErrNotTrustedVerifier
 	}
@@ -78,6 +86,14 @@ func (r *postgresRepository) Submit(ctx context.Context, userID, requestID, expe
 		return Response{}, false, ErrNotTrustedVerifier
 	}
 
+	var expectedIncidentID uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT incident_id FROM verification_requests WHERE id=$1`, requestID).Scan(&expectedIncidentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Response{}, false, ErrRequestNotFound
+	}
+	if err != nil {
+		return Response{}, false, err
+	}
 	var request requestRecord
 	var assigned *uuid.UUID
 	var cancelledAt *time.Time
@@ -88,14 +104,14 @@ func (r *postgresRepository) Submit(ctx context.Context, userID, requestID, expe
 	if err != nil {
 		return Response{}, false, err
 	}
+	if request.IncidentID != expectedIncidentID {
+		return Response{}, false, ErrRequestNotFound
+	}
 	var now time.Time
 	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 		return Response{}, false, err
 	}
 	if cancelledAt != nil || !request.ExpiresAt.After(now) || (assigned != nil && *assigned != userID) {
-		return Response{}, false, ErrRequestNotFound
-	}
-	if request.IncidentID != expectedIncidentID {
 		return Response{}, false, ErrRequestNotFound
 	}
 	publicIncident, err := incidents.GetPublicIncidentWithQuerier(ctx, tx, request.IncidentID, policy)

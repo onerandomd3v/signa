@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	webpushlib "github.com/SherClockHolmes/webpush-go"
 	"github.com/onerandomd3v/signa/internal/config"
+	"github.com/onerandomd3v/signa/internal/incidents"
 )
 
 func TestNewWebPushDeliveryConsumerLeavesConsumptionDisabledWithoutProviderConfig(t *testing.T) {
@@ -33,5 +36,40 @@ func TestNewWebPushDeliveryConsumerWiresConfiguredProvider(t *testing.T) {
 	consumer, err := newWebPushDeliveryConsumer(nil, nil, nil, config.Config{DeliveryPollInterval: time.Second, DeliveryConsumerGroup: "delivery-test", DeliveryRetryBackoff: time.Second}, nil)
 	if err != nil || consumer == nil {
 		t.Fatalf("consumer/error = %v/%v, want configured consumer", consumer, err)
+	}
+}
+
+type incidentEventProcessorFunc func(context.Context, incidents.StreamMessage) error
+
+func (f incidentEventProcessorFunc) Process(ctx context.Context, message incidents.StreamMessage) error {
+	return f(ctx, message)
+}
+
+func TestIncidentLifecycleTargetingProcessorWaitsForDurableLifecycleSuccess(t *testing.T) {
+	want := errors.New("lifecycle transaction failed")
+	targetingCalls := 0
+	processor := incidentLifecycleTargetingProcessor{
+		lifecycle: incidentEventProcessorFunc(func(context.Context, incidents.StreamMessage) error { return want }),
+		targeting: incidentEventProcessorFunc(func(context.Context, incidents.StreamMessage) error {
+			targetingCalls++
+			return nil
+		}),
+	}
+	if err := processor.Process(context.Background(), incidents.StreamMessage{}); !errors.Is(err, want) {
+		t.Fatalf("Process() error=%v", err)
+	}
+	if targetingCalls != 0 {
+		t.Fatalf("targeting called %d times after lifecycle failure", targetingCalls)
+	}
+}
+
+func TestIncidentLifecycleTargetingProcessorReturnsTargetingFailureForRetry(t *testing.T) {
+	want := errors.New("targeting transaction failed")
+	processor := incidentLifecycleTargetingProcessor{
+		lifecycle: incidentEventProcessorFunc(func(context.Context, incidents.StreamMessage) error { return nil }),
+		targeting: incidentEventProcessorFunc(func(context.Context, incidents.StreamMessage) error { return want }),
+	}
+	if err := processor.Process(context.Background(), incidents.StreamMessage{}); !errors.Is(err, want) {
+		t.Fatalf("Process() error=%v", err)
 	}
 }

@@ -63,7 +63,9 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 			"verification_requests.id":                     {"uuid", "NO"}, "verification_requests.incident_id": {"uuid", "NO"},
 			"verification_requests.assigned_verifier_id": {"uuid", "YES"}, "verification_requests.created_at": {"timestamp with time zone", "NO"},
 			"verification_requests.expires_at": {"timestamp with time zone", "NO"}, "verification_requests.cancelled_at": {"timestamp with time zone", "YES"},
-			"verification_responses.id": {"uuid", "NO"}, "verification_responses.request_id": {"uuid", "NO"},
+			"verification_requests.targeting_policy_version":     {"text", "YES"},
+			"verification_requests.targeting_policy_fingerprint": {"bytea", "YES"},
+			"verification_responses.id":                          {"uuid", "NO"}, "verification_responses.request_id": {"uuid", "NO"},
 			"verification_responses.incident_id": {"uuid", "NO"}, "verification_responses.verifier_id": {"uuid", "NO"},
 			"verification_responses.conclusion": {"text", "YES"}, "verification_responses.observation": {"text", "YES"},
 			"verification_responses.payload_fingerprint_version": {"smallint", "NO"},
@@ -142,11 +144,11 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 	})
 
 	t.Run("unique indexes", func(t *testing.T) {
-		var active, idempotency, requestPair string
+		var active, idempotency, requestPair, targeting string
 		for _, item := range []struct {
 			name string
 			into *string
-		}{{"user_capability_grants_active_unique_idx", &active}, {"verification_responses_idempotency_key", &idempotency}, {"verification_requests_id_incident_id_key", &requestPair}} {
+		}{{"user_capability_grants_active_unique_idx", &active}, {"verification_responses_idempotency_key", &idempotency}, {"verification_requests_id_incident_id_key", &requestPair}, {"verification_requests_targeted_idempotency_idx", &targeting}} {
 			if err := connection.QueryRow(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1`, item.name).Scan(item.into); err != nil {
 				t.Errorf("index %s: %v", item.name, err)
 			}
@@ -159,6 +161,9 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 		}
 		if !strings.Contains(requestPair, "UNIQUE") || !strings.Contains(requestPair, "(id, incident_id)") {
 			t.Errorf("request composite key index: %s", requestPair)
+		}
+		if !strings.Contains(targeting, "UNIQUE") || !strings.Contains(targeting, "(incident_id, assigned_verifier_id, targeting_policy_version, targeting_policy_fingerprint)") || !strings.Contains(targeting, "assigned_verifier_id IS NOT NULL") || !strings.Contains(targeting, "targeting_policy_version IS NOT NULL") || !strings.Contains(targeting, "targeting_policy_fingerprint IS NOT NULL") {
+			t.Errorf("targeting idempotency index: %s", targeting)
 		}
 	})
 
@@ -287,6 +292,29 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 			t.Error("incident with accepted response deleted")
 		}
 	})
+
+	runGooseTo(t, ctx, testURL.String(), "202609270001")
+	var targetingIndex bool
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_targeted_idempotency_idx') IS NOT NULL`).Scan(&targetingIndex); err != nil {
+		t.Fatal(err)
+	}
+	if targetingIndex {
+		t.Fatal("targeting idempotency index remains after migration down")
+	}
+	var targetingColumn bool
+	if err := connection.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='verification_requests' AND column_name='targeting_policy_version')`).Scan(&targetingColumn); err != nil {
+		t.Fatal(err)
+	}
+	if targetingColumn {
+		t.Fatal("targeting policy column remains after migration down")
+	}
+	runGoose(t, ctx, testURL.String(), "up")
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_targeted_idempotency_idx') IS NOT NULL`).Scan(&targetingIndex); err != nil {
+		t.Fatal(err)
+	}
+	if !targetingIndex {
+		t.Fatal("targeting idempotency index missing after migration reapply")
+	}
 
 	if err := connection.Close(ctx); err != nil {
 		t.Fatal(err)

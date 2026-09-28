@@ -17,7 +17,7 @@ type repository interface {
 	ActiveGrant(context.Context, uuid.UUID) (bool, error)
 	ListEligible(context.Context, uuid.UUID) ([]requestRecord, error)
 	GetEligible(context.Context, uuid.UUID, uuid.UUID) (requestRecord, error)
-	Submit(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, ResponseInput, int16, [32]byte, config.PublicIncidentGeometryPolicy) (Response, bool, error)
+	Submit(context.Context, uuid.UUID, uuid.UUID, string, ResponseInput, int16, [32]byte, config.PublicIncidentGeometryPolicy) (Response, bool, error)
 }
 
 type service struct {
@@ -98,8 +98,8 @@ func (s *service) GetRequest(ctx context.Context, verifierID, requestID uuid.UUI
 	return s.view(ctx, request)
 }
 func (s *service) SubmitResponse(ctx context.Context, verifierID, requestID uuid.UUID, key string, input ResponseInput) (Response, bool, error) {
-	if err := s.authorize(ctx, verifierID); err != nil {
-		return Response{}, false, err
+	if s == nil || s.repo == nil {
+		return Response{}, false, ErrUnavailable
 	}
 	if key == "" || strings.TrimSpace(key) != key || len(key) > 255 {
 		return Response{}, false, ErrInvalidResponse
@@ -108,17 +108,7 @@ func (s *service) SubmitResponse(ctx context.Context, verifierID, requestID uuid
 	if err != nil {
 		return Response{}, false, ErrInvalidResponse
 	}
-	request, err := s.repo.GetEligible(ctx, verifierID, requestID)
-	if errors.Is(err, ErrRequestNotFound) {
-		return Response{}, false, ErrRequestNotFound
-	}
-	if err != nil {
-		return Response{}, false, ErrUnavailable
-	}
-	if _, err = s.view(ctx, request); err != nil {
-		return Response{}, false, err
-	}
-	response, created, err := s.repo.Submit(ctx, verifierID, requestID, request.IncidentID, key, input, version, digest, s.policy)
+	response, created, err := s.repo.Submit(ctx, verifierID, requestID, key, input, version, digest, s.policy)
 	if errors.Is(err, ErrNotTrustedVerifier) || errors.Is(err, ErrRequestNotFound) || errors.Is(err, ErrIdempotencyConflict) {
 		return Response{}, false, err
 	}
