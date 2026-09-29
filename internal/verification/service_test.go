@@ -14,11 +14,12 @@ import (
 )
 
 type testRepository struct {
-	active    bool
-	requests  []requestRecord
-	response  Response
-	created   bool
-	submitErr error
+	active      bool
+	requests    []requestRecord
+	response    Response
+	created     bool
+	submitErr   error
+	submitCalls int
 }
 
 func (r *testRepository) ActiveGrant(context.Context, uuid.UUID) (bool, error) { return r.active, nil }
@@ -33,7 +34,8 @@ func (r *testRepository) GetEligible(_ context.Context, _ uuid.UUID, id uuid.UUI
 	}
 	return requestRecord{}, ErrRequestNotFound
 }
-func (r *testRepository) Submit(_ context.Context, _, _, _ uuid.UUID, _ string, _ ResponseInput, _ int16, _ [32]byte, _ config.PublicIncidentGeometryPolicy) (Response, bool, error) {
+func (r *testRepository) Submit(_ context.Context, _, _ uuid.UUID, _ string, _ ResponseInput, _ int16, _ [32]byte, _ config.PublicIncidentGeometryPolicy) (Response, bool, error) {
+	r.submitCalls++
 	return r.response, r.created, r.submitErr
 }
 
@@ -137,6 +139,15 @@ func TestSubmitResponseMapsIdempotencyReplayAndConflict(t *testing.T) {
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestSubmitResponseLeavesAuthorizationAndProjectionChecksToAtomicRepository(t *testing.T) {
+	repo := &testRepository{submitErr: ErrNotTrustedVerifier}
+	conclusion := ConclusionConfirm
+	_, _, err := testService(repo, &testPublicReader{}).SubmitResponse(context.Background(), uuid.New(), uuid.New(), "key", ResponseInput{Conclusion: &conclusion})
+	if !errors.Is(err, ErrNotTrustedVerifier) || repo.submitCalls != 1 {
+		t.Fatalf("submit calls=%d error=%v", repo.submitCalls, err)
+	}
+}
 func TestRequestProjectionMissIsNotFound(t *testing.T) {
 	request := testRequest()
 	repo := &testRepository{active: true, requests: []requestRecord{request}}
@@ -151,11 +162,12 @@ func TestRequestProjectionMissIsNotFound(t *testing.T) {
 		t.Fatalf("detail error=%v", err)
 	}
 	c := ConclusionConfirm
+	repo.submitErr = ErrRequestNotFound // The PostgreSQL submit transaction rechecks the public projection.
 	_, _, err = service.SubmitResponse(context.Background(), uuid.New(), request.ID, "key", ResponseInput{Conclusion: &c})
 	if !errors.Is(err, ErrRequestNotFound) {
 		t.Fatalf("submit error=%v", err)
 	}
-	if public.calls != 3 {
+	if public.calls != 2 {
 		t.Fatalf("public projection calls=%d", public.calls)
 	}
 }

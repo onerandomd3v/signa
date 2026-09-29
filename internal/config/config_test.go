@@ -53,6 +53,46 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadVerificationTargetingPolicyRequiresExplicitCompleteConfiguration(t *testing.T) {
+	for _, name := range []string{
+		"SIGNA_VERIFICATION_TARGETING_RADIUS_METERS",
+		"SIGNA_VERIFICATION_TARGETING_LOCATION_MAX_AGE",
+		"SIGNA_VERIFICATION_TARGETING_MAX_CANDIDATES",
+		"SIGNA_VERIFICATION_TARGETING_REQUEST_LIFETIME",
+	} {
+		t.Setenv(name, "")
+	}
+	_, enabled, err := LoadVerificationTargetingPolicy()
+	if err != nil || enabled {
+		t.Fatalf("unconfigured policy: enabled=%v err=%v", enabled, err)
+	}
+	t.Setenv("SIGNA_VERIFICATION_TARGETING_RADIUS_METERS", "500")
+	t.Setenv("SIGNA_VERIFICATION_TARGETING_LOCATION_MAX_AGE", "10m")
+	t.Setenv("SIGNA_VERIFICATION_TARGETING_MAX_CANDIDATES", "12")
+	t.Setenv("SIGNA_VERIFICATION_TARGETING_REQUEST_LIFETIME", "45m")
+	policy, enabled, err := LoadVerificationTargetingPolicy()
+	if err != nil || !enabled {
+		t.Fatalf("configured policy: enabled=%v err=%v", enabled, err)
+	}
+	if policy.Version != VerificationTargetingPolicyVersion || policy.RadiusMeters != 500 || policy.LocationMaxAge != 10*time.Minute || policy.MaxCandidates != 12 || policy.RequestLifetime != 45*time.Minute {
+		t.Fatalf("policy=%+v", policy)
+	}
+}
+
+func TestLoadVerificationTargetingPolicyRejectsPartialAndInvalidConfiguration(t *testing.T) {
+	t.Setenv("SIGNA_VERIFICATION_TARGETING_RADIUS_METERS", "500")
+	t.Setenv("SIGNA_VERIFICATION_TARGETING_LOCATION_MAX_AGE", "10m")
+	t.Setenv("SIGNA_VERIFICATION_TARGETING_MAX_CANDIDATES", "")
+	t.Setenv("SIGNA_VERIFICATION_TARGETING_REQUEST_LIFETIME", "45m")
+	if _, enabled, err := LoadVerificationTargetingPolicy(); err == nil || enabled {
+		t.Fatalf("partial policy: enabled=%v err=%v", enabled, err)
+	}
+	t.Setenv("SIGNA_VERIFICATION_TARGETING_MAX_CANDIDATES", "1001")
+	if _, enabled, err := LoadVerificationTargetingPolicy(); err == nil || enabled {
+		t.Fatalf("out-of-range policy: enabled=%v err=%v", enabled, err)
+	}
+}
+
 func TestLoadEnvironment(t *testing.T) {
 	t.Setenv("SIGNA_API_ADDR", "127.0.0.1:9090")
 	t.Setenv("SIGNA_DATABASE_URL", "postgres://user:password@localhost:5432/example?sslmode=disable")

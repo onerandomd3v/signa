@@ -21,9 +21,15 @@ import (
 	"github.com/onerandomd3v/signa/internal/outbox"
 	"github.com/onerandomd3v/signa/internal/push"
 	"github.com/onerandomd3v/signa/internal/retention"
+	"github.com/onerandomd3v/signa/internal/verification"
 	"github.com/onerandomd3v/signa/internal/webpush"
 	"github.com/onerandomd3v/signa/internal/worker"
 	goRedis "github.com/redis/go-redis/v9"
+)
+
+const (
+	incidentLifecycleConsumerGroup = "signa-incident-lifecycle"
+	verificationTargetingGroup     = "signa-verification-targeting"
 )
 
 func main() {
@@ -57,6 +63,21 @@ func run(parent context.Context, logger *slog.Logger) error {
 	}
 	if _, err := config.LoadPriorityPolicy(); err != nil {
 		return err
+	}
+	verificationTargetPolicy, verificationTargetingEnabled, verificationTargetPolicyErr := config.LoadVerificationTargetingPolicy()
+	if verificationTargetPolicyErr != nil {
+		logger.Warn("verification targeting disabled because policy configuration is invalid", "error", verificationTargetPolicyErr)
+		verificationTargetingEnabled = false
+	} else if !verificationTargetingEnabled {
+		logger.Warn("verification targeting disabled because explicit targeting policy is not configured")
+	}
+	var verificationPublicPolicy config.PublicIncidentGeometryPolicy
+	if verificationTargetingEnabled {
+		verificationPublicPolicy, verificationTargetPolicyErr = config.LoadPublicIncidentGeometryPolicy()
+		if verificationTargetPolicyErr != nil {
+			logger.Warn("verification targeting disabled because public incident projection policy is unavailable", "error", verificationTargetPolicyErr)
+			verificationTargetingEnabled = false
+		}
 	}
 	retentionPolicy, retentionErr := config.LoadRetentionPolicy()
 	if retentionErr != nil {
@@ -163,7 +184,15 @@ func run(parent context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	lifecycleConsumer := incidents.NewLifecycleConsumer(streamClient, lifecycleProcessor, outbox.IncidentEventsStream, "signa-incident-lifecycle", consumerName, cfg.AIPollInterval).WithLogger(logger)
+	lifecycleConsumer, targetingConsumer := newIncidentEventConsumers(streamClient, lifecycleProcessor, nil, consumerName, cfg.AIPollInterval, logger)
+	if verificationTargetingEnabled {
+		targetingProcessor, err := verification.NewTargetingProcessor(database, verificationTargetPolicy, verificationPublicPolicy)
+		if err != nil {
+			logger.Warn("verification targeting disabled because processor configuration is invalid", "error", err)
+		} else {
+			lifecycleConsumer, targetingConsumer = newIncidentEventConsumers(streamClient, lifecycleProcessor, targetingProcessor, consumerName, cfg.AIPollInterval, logger)
+		}
+	}
 	retentionStore, err := retention.NewStore(database)
 	if err != nil {
 		return err
@@ -178,12 +207,15 @@ func run(parent context.Context, logger *slog.Logger) error {
 		logger.Warn("web push delivery disabled; queued delivery work remains pending", "error", err)
 		deliveryConsumer = nil
 	}
-	errCh := make(chan error, 7)
+	errCh := make(chan error, 9)
 	go func() { errCh <- worker.Run(ctx, logger, cfg.WorkerInterval, publisher) }()
 	go func() { errCh <- consumer.Run(ctx) }()
 	go func() { errCh <- incidentConsumer.Run(ctx) }()
 	go func() { errCh <- evidencePolicyConsumer.Run(ctx) }()
 	go func() { errCh <- lifecycleConsumer.Run(ctx) }()
+	if targetingConsumer != nil {
+		go func() { errCh <- targetingConsumer.Run(ctx) }()
+	}
 	go func() { errCh <- lifecycleProcessor.RunSweep(ctx, lifecyclePolicyConfig.SweepInterval, logger) }()
 	if retentionErr == nil {
 		go func() { errCh <- retentionStore.RunSweep(ctx, retentionPolicy, logger) }()
@@ -198,6 +230,26 @@ func run(parent context.Context, logger *slog.Logger) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func newIncidentEventConsumers(
+	client incidents.StreamClient,
+	lifecycleProcessor interface {
+		Process(context.Context, incidents.StreamMessage) error
+	},
+	targetingProcessor interface {
+		Process(context.Context, incidents.StreamMessage) error
+	},
+	consumerName string,
+	poll time.Duration,
+	logger *slog.Logger,
+) (*incidents.LifecycleConsumer, *verification.TargetingConsumer) {
+	lifecycleConsumer := incidents.NewLifecycleConsumer(client, lifecycleProcessor, outbox.IncidentEventsStream, incidentLifecycleConsumerGroup, consumerName, poll).WithLogger(logger)
+	if targetingProcessor == nil {
+		return lifecycleConsumer, nil
+	}
+	targetingConsumer := verification.NewTargetingConsumer(client, targetingProcessor, outbox.IncidentEventsStream, verificationTargetingGroup, consumerName, poll).WithLogger(logger)
+	return lifecycleConsumer, targetingConsumer
 }
 
 func newWebPushDeliveryConsumer(subscriptionStore push.DeliveryStore, deliveryStore delivery.Store, streamClient delivery.StreamClient, cfg config.Config, logger *slog.Logger) (*delivery.Consumer, error) {

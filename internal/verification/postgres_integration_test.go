@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -143,7 +144,10 @@ func TestPostgresOperationalGrantProvenance(t *testing.T) {
 func TestPostgresRequestAudienceExpiryAndCancellation(t *testing.T) {
 	ctx, pool, service, user, incident := integrationStore(t)
 	valid := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))
-	expired := addRequest(t, ctx, pool, incident, nil, time.Now().Add(-time.Second))
+	expired := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))
+	if _, err := pool.Exec(ctx, `UPDATE verification_requests SET created_at=clock_timestamp()-interval '1 hour', expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, expired); err != nil {
+		t.Fatal(err)
+	}
 	atBoundary := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))
 	if _, err := pool.Exec(ctx, `UPDATE verification_requests SET expires_at=clock_timestamp() WHERE id=$1`, atBoundary); err != nil {
 		t.Fatal(err)
@@ -209,6 +213,153 @@ func TestPostgresListRequestsIsBoundedAndDeterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestPostgresListEligibleUsesAssignedAndUnassignedBranches(t *testing.T) {
+	ctx, pool, _, verifierID, incidentID := integrationStore(t)
+	base := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
+	type expectedRequest struct {
+		id        uuid.UUID
+		createdAt time.Time
+		assigned  bool
+	}
+	expected := make([]expectedRequest, 0, 130)
+	for i := 0; i < 130; i++ {
+		createdAt := base.Add(time.Duration(i/2) * time.Second)
+		var assigned *uuid.UUID
+		isAssigned := i%2 == 1
+		if isAssigned {
+			assigned = &verifierID
+		}
+		id := addRequest(t, ctx, pool, incidentID, assigned, time.Now().Add(time.Hour))
+		if _, err := pool.Exec(ctx, `UPDATE verification_requests SET created_at=$2 WHERE id=$1`, id, createdAt); err != nil {
+			t.Fatal(err)
+		}
+		expected = append(expected, expectedRequest{id: id, createdAt: createdAt, assigned: isAssigned})
+	}
+
+	otherVerifier := uuid.New()
+	other := addRequest(t, ctx, pool, incidentID, &otherVerifier, time.Now().Add(time.Hour))
+	expired := addRequest(t, ctx, pool, incidentID, &verifierID, time.Now().Add(time.Hour))
+	cancelled := addRequest(t, ctx, pool, incidentID, nil, time.Now().Add(time.Hour))
+	atBoundary := addRequest(t, ctx, pool, incidentID, &verifierID, time.Now().Add(time.Hour))
+	for _, id := range []uuid.UUID{other, cancelled, atBoundary} {
+		if _, err := pool.Exec(ctx, `UPDATE verification_requests SET created_at=$2 WHERE id=$1`, id, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `UPDATE verification_requests SET created_at=$2, expires_at=$3 WHERE id=$1`, expired, base.Add(1000*time.Second), time.Now().Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE verification_requests SET cancelled_at=clock_timestamp() WHERE id=$1`, cancelled); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE verification_requests SET expires_at=statement_timestamp() WHERE id=$1`, atBoundary); err != nil {
+		t.Fatal(err)
+	}
+
+	sort.Slice(expected, func(i, j int) bool {
+		if expected[i].createdAt.Equal(expected[j].createdAt) {
+			return expected[i].id.String() > expected[j].id.String()
+		}
+		return expected[i].createdAt.After(expected[j].createdAt)
+	})
+	got, err := (&postgresRepository{pool: pool}).ListEligible(ctx, verifierID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != maxRequestListLimit {
+		t.Fatalf("ListEligible returned %d requests, want %d", len(got), maxRequestListLimit)
+	}
+	assignedCount, unassignedCount := 0, 0
+	for i, request := range got {
+		if request.ID != expected[i].id || !request.CreatedAt.Equal(expected[i].createdAt) {
+			t.Fatalf("request[%d]=(%s,%s), want (%s,%s)", i, request.ID, request.CreatedAt, expected[i].id, expected[i].createdAt)
+		}
+		if expected[i].assigned {
+			assignedCount++
+		} else {
+			unassignedCount++
+		}
+		if request.ID == other || request.ID == expired || request.ID == cancelled || request.ID == atBoundary {
+			t.Fatalf("ineligible request %s was returned", request.ID)
+		}
+	}
+	if assignedCount == 0 || unassignedCount == 0 {
+		t.Fatalf("result branches: assigned=%d unassigned=%d; want both", assignedCount, unassignedCount)
+	}
+}
+
+func TestPostgresListEligibleUsesExpirySelectiveIndexes(t *testing.T) {
+	ctx, pool, _, verifierID, incidentID := integrationStore(t)
+	const expiredHistoryPerBranch = 20000
+	for _, branch := range []struct {
+		assigned *uuid.UUID
+		seed     string
+	}{
+		{assigned: &verifierID, seed: "assigned-expired-history-"},
+		{assigned: nil, seed: "unassigned-expired-history-"},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO verification_requests(id,incident_id,assigned_verifier_id,created_at,expires_at)
+			SELECT md5($1 || n::text)::uuid, $2, $3,
+			       statement_timestamp()-interval '30 days',
+			       statement_timestamp()-interval '29 days'
+			FROM generate_series(1,$4) AS n
+		`, branch.seed, incidentID, branch.assigned, expiredHistoryPerBranch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		addRequest(t, ctx, pool, incidentID, &verifierID, time.Now().Add(time.Hour))
+		addRequest(t, ctx, pool, incidentID, nil, time.Now().Add(time.Hour))
+	}
+	if _, err := pool.Exec(ctx, `ANALYZE verification_requests`); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, branch := range []struct {
+		name, index, query string
+		args               []any
+	}{
+		{
+			name:  "assigned verifier",
+			index: "verification_requests_assigned_list_idx",
+			query: strings.Replace(assignedEligibleBranchQuery, "LIMIT $2", "LIMIT 100", 1),
+			args:  []any{verifierID},
+		},
+		{
+			name:  "unassigned shared inbox",
+			index: "verification_requests_unassigned_list_idx",
+			query: strings.Replace(unassignedEligibleBranchQuery, "LIMIT $2", "LIMIT 100", 1),
+			args:  nil,
+		},
+	} {
+		rows, err := pool.Query(ctx, "EXPLAIN (ANALYZE, BUFFERS) "+branch.query, branch.args...)
+		if err != nil {
+			t.Fatalf("explain %s branch: %v", branch.name, err)
+		}
+		var planLines []string
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			planLines = append(planLines, line)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		rows.Close()
+		plan := strings.Join(planLines, "\n")
+		if !strings.Contains(plan, branch.index) || !strings.Contains(plan, "Index Cond:") || !strings.Contains(plan, "expires_at > statement_timestamp()") {
+			t.Errorf("%s branch did not use expiry-selective index condition:\n%s", branch.name, plan)
+		}
+		t.Logf("EXPLAIN ANALYZE %s branch:\n%s", branch.name, plan)
+	}
+}
+
 func TestPostgresConcurrentIdempotentSubmissions(t *testing.T) {
 	ctx, pool, service, user, incident := integrationStore(t)
 	request := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))

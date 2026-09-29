@@ -63,7 +63,9 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 			"verification_requests.id":                     {"uuid", "NO"}, "verification_requests.incident_id": {"uuid", "NO"},
 			"verification_requests.assigned_verifier_id": {"uuid", "YES"}, "verification_requests.created_at": {"timestamp with time zone", "NO"},
 			"verification_requests.expires_at": {"timestamp with time zone", "NO"}, "verification_requests.cancelled_at": {"timestamp with time zone", "YES"},
-			"verification_responses.id": {"uuid", "NO"}, "verification_responses.request_id": {"uuid", "NO"},
+			"verification_requests.targeting_policy_version":     {"text", "YES"},
+			"verification_requests.targeting_policy_fingerprint": {"bytea", "YES"},
+			"verification_responses.id":                          {"uuid", "NO"}, "verification_responses.request_id": {"uuid", "NO"},
 			"verification_responses.incident_id": {"uuid", "NO"}, "verification_responses.verifier_id": {"uuid", "NO"},
 			"verification_responses.conclusion": {"text", "YES"}, "verification_responses.observation": {"text", "YES"},
 			"verification_responses.payload_fingerprint_version": {"smallint", "NO"},
@@ -142,11 +144,11 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 	})
 
 	t.Run("unique indexes", func(t *testing.T) {
-		var active, idempotency, requestPair string
+		var active, idempotency, requestPair, targeting, activeTargeting, assignedList, unassignedList string
 		for _, item := range []struct {
 			name string
 			into *string
-		}{{"user_capability_grants_active_unique_idx", &active}, {"verification_responses_idempotency_key", &idempotency}, {"verification_requests_id_incident_id_key", &requestPair}} {
+		}{{"user_capability_grants_active_unique_idx", &active}, {"verification_responses_idempotency_key", &idempotency}, {"verification_requests_id_incident_id_key", &requestPair}, {"verification_requests_targeted_idempotency_idx", &targeting}, {"verification_requests_active_targeting_lookup_idx", &activeTargeting}, {"verification_requests_assigned_list_idx", &assignedList}, {"verification_requests_unassigned_list_idx", &unassignedList}} {
 			if err := connection.QueryRow(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1`, item.name).Scan(item.into); err != nil {
 				t.Errorf("index %s: %v", item.name, err)
 			}
@@ -159,6 +161,18 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 		}
 		if !strings.Contains(requestPair, "UNIQUE") || !strings.Contains(requestPair, "(id, incident_id)") {
 			t.Errorf("request composite key index: %s", requestPair)
+		}
+		if !strings.Contains(targeting, "UNIQUE") || !strings.Contains(targeting, "(incident_id, assigned_verifier_id, targeting_policy_version, targeting_policy_fingerprint)") || !strings.Contains(targeting, "assigned_verifier_id IS NOT NULL") || !strings.Contains(targeting, "targeting_policy_version IS NOT NULL") || !strings.Contains(targeting, "targeting_policy_fingerprint IS NOT NULL") {
+			t.Errorf("targeting idempotency index: %s", targeting)
+		}
+		if strings.Contains(activeTargeting, "UNIQUE") || !strings.Contains(activeTargeting, "(incident_id, assigned_verifier_id, expires_at)") || !strings.Contains(activeTargeting, "cancelled_at IS NULL") || !strings.Contains(activeTargeting, "assigned_verifier_id IS NOT NULL") {
+			t.Errorf("active targeting lookup index: %s", activeTargeting)
+		}
+		if !strings.Contains(assignedList, "(assigned_verifier_id, expires_at, created_at DESC, id DESC)") || !strings.Contains(assignedList, "INCLUDE (incident_id)") || !strings.Contains(assignedList, "cancelled_at IS NULL") || !strings.Contains(assignedList, "assigned_verifier_id IS NOT NULL") {
+			t.Errorf("assigned verifier list index: %s", assignedList)
+		}
+		if !strings.Contains(unassignedList, "(expires_at, created_at DESC, id DESC)") || !strings.Contains(unassignedList, "INCLUDE (incident_id)") || !strings.Contains(unassignedList, "cancelled_at IS NULL") || !strings.Contains(unassignedList, "assigned_verifier_id IS NULL") {
+			t.Errorf("unassigned verifier list index: %s", unassignedList)
 		}
 	})
 
@@ -288,10 +302,67 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 		}
 	})
 
+	runGooseTo(t, ctx, testURL.String(), "202609270001")
+	var targetingIndex bool
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_targeted_idempotency_idx') IS NOT NULL`).Scan(&targetingIndex); err != nil {
+		t.Fatal(err)
+	}
+	if targetingIndex {
+		t.Fatal("targeting idempotency index remains after migration down")
+	}
+	var activeTargetingIndex bool
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_active_targeting_lookup_idx') IS NOT NULL`).Scan(&activeTargetingIndex); err != nil {
+		t.Fatal(err)
+	}
+	if activeTargetingIndex {
+		t.Fatal("active targeting lookup index remains after migration down")
+	}
+	var assignedListIndex, unassignedListIndex bool
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_assigned_list_idx') IS NOT NULL`).Scan(&assignedListIndex); err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_unassigned_list_idx') IS NOT NULL`).Scan(&unassignedListIndex); err != nil {
+		t.Fatal(err)
+	}
+	if assignedListIndex || unassignedListIndex {
+		t.Fatalf("verifier list indexes remain after migration down: assigned=%v unassigned=%v", assignedListIndex, unassignedListIndex)
+	}
+	var targetingColumn bool
+	if err := connection.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='verification_requests' AND column_name='targeting_policy_version')`).Scan(&targetingColumn); err != nil {
+		t.Fatal(err)
+	}
+	if targetingColumn {
+		t.Fatal("targeting policy column remains after migration down")
+	}
+	runGoose(t, ctx, testURL.String(), "up")
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_targeted_idempotency_idx') IS NOT NULL`).Scan(&targetingIndex); err != nil {
+		t.Fatal(err)
+	}
+	if !targetingIndex {
+		t.Fatal("targeting idempotency index missing after migration reapply")
+	}
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_active_targeting_lookup_idx') IS NOT NULL`).Scan(&activeTargetingIndex); err != nil {
+		t.Fatal(err)
+	}
+	if !activeTargetingIndex {
+		t.Fatal("active targeting lookup index missing after migration reapply")
+	}
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_assigned_list_idx') IS NOT NULL`).Scan(&assignedListIndex); err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('public.verification_requests_unassigned_list_idx') IS NOT NULL`).Scan(&unassignedListIndex); err != nil {
+		t.Fatal(err)
+	}
+	if !assignedListIndex || !unassignedListIndex {
+		t.Fatalf("verifier list indexes missing after migration reapply: assigned=%v unassigned=%v", assignedListIndex, unassignedListIndex)
+	}
+
 	if err := connection.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	runGoose(t, ctx, testURL.String(), "down")
+	// Remove both COD-220's targeting indexes and COD-219's verification schema;
+	// a single `down` would only undo the latest (NO TRANSACTION) index migration.
+	runGooseTo(t, ctx, testURL.String(), "202609260016")
 	connection, err = pgx.Connect(ctx, testURL.String())
 	if err != nil {
 		t.Fatal(err)
