@@ -185,10 +185,12 @@ export function VerificationDetailExperience({
             <dt className="font-medium text-muted-foreground">Confidence</dt>
             <dd className="mt-1">{displayValue(incident.confidence_state)}</dd>
           </div>
-          <div>
-            <dt className="font-medium text-muted-foreground">Severity</dt>
-            <dd className="mt-1">{displayValue(incident.severity)}</dd>
-          </div>
+          {incident.severity && (
+            <div>
+              <dt className="font-medium text-muted-foreground">Severity</dt>
+              <dd className="mt-1">{displayValue(incident.severity)}</dd>
+            </div>
+          )}
         </dl>
         <p className="mt-4 border-t border-border pt-3 text-sm leading-6 text-muted-foreground">
           Requested{" "}

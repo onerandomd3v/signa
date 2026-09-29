@@ -77,6 +77,21 @@ describe("VerificationDetailExperience", () => {
     expect(screen.getByText(/Expires/)).toBeTruthy();
   });
 
+  it("omits severity when the public incident has no severity", async () => {
+    mocks.fetchVerificationRequest.mockResolvedValue({
+      ok: true,
+      data: {
+        ...verificationRequest,
+        incident: { ...verificationRequest.incident, severity: null },
+      },
+    });
+    render(<VerificationDetailExperience requestId={requestId} />);
+
+    await screen.findByRole("heading", { name: "Road Closure" });
+    expect(screen.queryByText("Severity")).toBeNull();
+    expect(screen.queryByText("Incident update")).toBeNull();
+  });
+
   it("shows a privacy-safe 404 and a safe return path", async () => {
     mocks.fetchVerificationRequest.mockResolvedValue(failure(404));
     render(<VerificationDetailExperience requestId={requestId} />);
@@ -148,6 +163,54 @@ describe("VerificationDetailExperience", () => {
     });
   });
 
+  it("clears only observation and submits the conclusion", async () => {
+    openDetail();
+    const confirm = await screen.findByLabelText("Confirm");
+    const sawIt = screen.getByLabelText("Saw it");
+    fireEvent.click(confirm);
+    fireEvent.click(sawIt);
+    fireEvent.click(screen.getByRole("button", { name: "Clear observation" }));
+
+    expect((confirm as HTMLInputElement).checked).toBe(true);
+    expect((sawIt as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Send response" }));
+    await screen.findByText(/Your response was recorded as evidence/);
+    expect(mocks.sendVerificationResponse.mock.calls[0][1]).toEqual({
+      conclusion: "CONFIRM",
+    });
+  });
+
+  it("clears only conclusion and submits the observation", async () => {
+    openDetail();
+    const dispute = await screen.findByLabelText("Dispute");
+    const heardIt = screen.getByLabelText("Heard it");
+    fireEvent.click(dispute);
+    fireEvent.click(heardIt);
+    fireEvent.click(screen.getByRole("button", { name: "Clear conclusion" }));
+
+    expect((dispute as HTMLInputElement).checked).toBe(false);
+    expect((heardIt as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Send response" }));
+    await screen.findByText(/Your response was recorded as evidence/);
+    expect(mocks.sendVerificationResponse.mock.calls[0][1]).toEqual({
+      observation: "HEARD",
+    });
+  });
+
+  it("blocks submission after both dimensions are cleared", async () => {
+    openDetail();
+    fireEvent.click(await screen.findByLabelText("Confirm"));
+    fireEvent.click(screen.getByLabelText("Saw it"));
+    fireEvent.click(screen.getByRole("button", { name: "Clear conclusion" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear observation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send response" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Choose a conclusion or an observation before submitting.",
+    );
+    expect(mocks.sendVerificationResponse).not.toHaveBeenCalled();
+  });
+
   it("requires at least one response dimension", async () => {
     openDetail();
     const responseHeading = await screen.findByRole("heading", {
@@ -210,6 +273,28 @@ describe("VerificationDetailExperience", () => {
     );
     expect(mocks.sendVerificationResponse.mock.calls[1][1]).toEqual({
       conclusion: "DISPUTE",
+    });
+  });
+
+  it("uses a new key when a dimension is cleared after failure", async () => {
+    openDetail();
+    mocks.sendVerificationResponse
+      .mockResolvedValueOnce(failure(503))
+      .mockResolvedValueOnce(success);
+    fireEvent.click(await screen.findByLabelText("Confirm"));
+    fireEvent.click(screen.getByLabelText("Saw it"));
+    fireEvent.click(screen.getByRole("button", { name: "Send response" }));
+    await screen.findByText(/service is unavailable/i);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear observation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send response" }));
+    await screen.findByText(/Your response was recorded as evidence/);
+
+    expect(mocks.sendVerificationResponse.mock.calls[0][2]).not.toBe(
+      mocks.sendVerificationResponse.mock.calls[1][2],
+    );
+    expect(mocks.sendVerificationResponse.mock.calls[1][1]).toEqual({
+      conclusion: "CONFIRM",
     });
   });
 
@@ -323,5 +408,17 @@ describe("VerificationDetailExperience", () => {
     );
     expect(screen.getByRole("group", { name: /conclusion/i })).toBeTruthy();
     expect(screen.getByRole("group", { name: /observation/i })).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Heard it"));
+    const clearObservation = screen.getByRole("button", {
+      name: "Clear observation",
+    });
+    expect(clearObservation.tagName).toBe("BUTTON");
+    expect(
+      clearObservation.closest("fieldset")?.querySelector("legend")
+        ?.textContent,
+    ).toContain("Observation");
+    act(() => clearObservation.focus());
+    expect(document.activeElement).toBe(clearObservation);
+    expect(clearObservation.className).toContain("focus-visible:outline-2");
   });
 });

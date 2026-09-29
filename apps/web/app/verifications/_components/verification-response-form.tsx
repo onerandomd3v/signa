@@ -144,12 +144,22 @@ export function VerificationResponseForm({
           Conclusion{" "}
           <span className="font-normal text-muted-foreground">(optional)</span>
         </legend>
-        <p
-          className="text-sm leading-6 text-muted-foreground"
-          id={`${prefix}-conclusion-help`}
-        >
-          What conclusion can you share?
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <p
+            className="text-sm leading-6 text-muted-foreground"
+            id={`${prefix}-conclusion-help`}
+          >
+            What conclusion can you share?
+          </p>
+          <button
+            className="min-h-11 rounded-md px-2 text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!conclusion}
+            onClick={() => setConclusion(null)}
+            type="button"
+          >
+            Clear conclusion
+          </button>
+        </div>
         <div className="grid gap-2 sm:grid-cols-3">
           {conclusions.map((option) => {
             const id = radioId(prefix, "conclusion", option.value);
@@ -184,12 +194,22 @@ export function VerificationResponseForm({
           Observation{" "}
           <span className="font-normal text-muted-foreground">(optional)</span>
         </legend>
-        <p
-          className="text-sm leading-6 text-muted-foreground"
-          id={`${prefix}-observation-help`}
-        >
-          What did you observe?
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <p
+            className="text-sm leading-6 text-muted-foreground"
+            id={`${prefix}-observation-help`}
+          >
+            What did you observe?
+          </p>
+          <button
+            className="min-h-11 rounded-md px-2 text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!observation}
+            onClick={() => setObservation(null)}
+            type="button"
+          >
+            Clear observation
+          </button>
+        </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {observations.map((option) => {
             const id = radioId(prefix, "observation", option.value);
