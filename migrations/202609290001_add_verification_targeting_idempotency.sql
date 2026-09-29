@@ -22,19 +22,19 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS verification_requests_active_targeting_l
     WHERE cancelled_at IS NULL
       AND assigned_verifier_id IS NOT NULL;
 
--- Verifier inbox reads use separate assigned and unassigned branches so each
--- branch can follow its own partial index in global creation order.
+-- Verifier inbox reads use expiry-first partial indexes so durable expired
+-- history is excluded by an index range condition before live rows are sorted.
 DROP INDEX CONCURRENTLY IF EXISTS verification_requests_assigned_list_idx;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS verification_requests_assigned_list_idx
-    ON verification_requests (assigned_verifier_id, created_at DESC, id DESC)
-    INCLUDE (incident_id, expires_at)
+    ON verification_requests (assigned_verifier_id, expires_at, created_at DESC, id DESC)
+    INCLUDE (incident_id)
     WHERE cancelled_at IS NULL
       AND assigned_verifier_id IS NOT NULL;
 
 DROP INDEX CONCURRENTLY IF EXISTS verification_requests_unassigned_list_idx;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS verification_requests_unassigned_list_idx
-    ON verification_requests (created_at DESC, id DESC)
-    INCLUDE (incident_id, expires_at)
+    ON verification_requests (expires_at, created_at DESC, id DESC)
+    INCLUDE (incident_id)
     WHERE cancelled_at IS NULL
       AND assigned_verifier_id IS NULL;
 

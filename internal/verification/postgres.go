@@ -26,29 +26,33 @@ func (r *postgresRepository) ActiveGrant(ctx context.Context, userID uuid.UUID) 
 
 const eligibleRequestPredicate = `cancelled_at IS NULL AND expires_at > clock_timestamp() AND (assigned_verifier_id IS NULL OR assigned_verifier_id=$1)`
 
+const assignedEligibleBranchQuery = `SELECT id,incident_id,created_at,expires_at
+	FROM verification_requests
+	WHERE cancelled_at IS NULL
+	  AND expires_at > statement_timestamp()
+	  AND assigned_verifier_id = $1
+	ORDER BY created_at DESC, id DESC
+	LIMIT $2`
+
+const unassignedEligibleBranchQuery = `SELECT id,incident_id,created_at,expires_at
+	FROM verification_requests
+	WHERE cancelled_at IS NULL
+	  AND expires_at > statement_timestamp()
+	  AND assigned_verifier_id IS NULL
+	ORDER BY created_at DESC, id DESC
+	LIMIT $2`
+
+const listEligibleQuery = `(` + assignedEligibleBranchQuery + `)
+	UNION ALL
+	(` + unassignedEligibleBranchQuery + `)
+	ORDER BY created_at DESC, id DESC
+	LIMIT $2`
+
 func (r *postgresRepository) ListEligible(ctx context.Context, userID uuid.UUID) ([]requestRecord, error) {
 	if r.pool == nil {
 		return nil, ErrUnavailable
 	}
-	rows, err := r.pool.Query(ctx, `
-		(SELECT id,incident_id,created_at,expires_at
-		 FROM verification_requests
-		 WHERE cancelled_at IS NULL
-		   AND expires_at > clock_timestamp()
-		   AND assigned_verifier_id = $1
-		 ORDER BY created_at DESC, id DESC
-		 LIMIT $2)
-		UNION ALL
-		(SELECT id,incident_id,created_at,expires_at
-		 FROM verification_requests
-		 WHERE cancelled_at IS NULL
-		   AND expires_at > clock_timestamp()
-		   AND assigned_verifier_id IS NULL
-		 ORDER BY created_at DESC, id DESC
-		 LIMIT $2)
-		ORDER BY created_at DESC, id DESC
-		LIMIT $2
-	`, userID, maxRequestListLimit)
+	rows, err := r.pool.Query(ctx, listEligibleQuery, userID, maxRequestListLimit)
 	if err != nil {
 		return nil, err
 	}

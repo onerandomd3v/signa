@@ -168,10 +168,10 @@ func TestVerificationMigrationCreatesAuditableSchema(t *testing.T) {
 		if strings.Contains(activeTargeting, "UNIQUE") || !strings.Contains(activeTargeting, "(incident_id, assigned_verifier_id, expires_at)") || !strings.Contains(activeTargeting, "cancelled_at IS NULL") || !strings.Contains(activeTargeting, "assigned_verifier_id IS NOT NULL") {
 			t.Errorf("active targeting lookup index: %s", activeTargeting)
 		}
-		if !strings.Contains(assignedList, "(assigned_verifier_id, created_at DESC, id DESC)") || !strings.Contains(assignedList, "INCLUDE (incident_id, expires_at)") || !strings.Contains(assignedList, "cancelled_at IS NULL") || !strings.Contains(assignedList, "assigned_verifier_id IS NOT NULL") {
+		if !strings.Contains(assignedList, "(assigned_verifier_id, expires_at, created_at DESC, id DESC)") || !strings.Contains(assignedList, "INCLUDE (incident_id)") || !strings.Contains(assignedList, "cancelled_at IS NULL") || !strings.Contains(assignedList, "assigned_verifier_id IS NOT NULL") {
 			t.Errorf("assigned verifier list index: %s", assignedList)
 		}
-		if !strings.Contains(unassignedList, "(created_at DESC, id DESC)") || !strings.Contains(unassignedList, "INCLUDE (incident_id, expires_at)") || !strings.Contains(unassignedList, "cancelled_at IS NULL") || !strings.Contains(unassignedList, "assigned_verifier_id IS NULL") {
+		if !strings.Contains(unassignedList, "(expires_at, created_at DESC, id DESC)") || !strings.Contains(unassignedList, "INCLUDE (incident_id)") || !strings.Contains(unassignedList, "cancelled_at IS NULL") || !strings.Contains(unassignedList, "assigned_verifier_id IS NULL") {
 			t.Errorf("unassigned verifier list index: %s", unassignedList)
 		}
 	})

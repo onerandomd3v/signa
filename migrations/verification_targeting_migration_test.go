@@ -37,18 +37,18 @@ func TestVerificationTargetingMigrationUsesConcurrentIdempotentIndexDDL(t *testi
 	}{
 		{
 			name:       "verification_requests_assigned_list_idx",
-			definition: "ON verification_requests (assigned_verifier_id, created_at DESC, id DESC)",
+			definition: "ON verification_requests (assigned_verifier_id, expires_at, created_at DESC, id DESC)",
 			predicate:  "WHERE cancelled_at IS NULL\n      AND assigned_verifier_id IS NOT NULL",
 		},
 		{
 			name:       "verification_requests_unassigned_list_idx",
-			definition: "ON verification_requests (created_at DESC, id DESC)",
+			definition: "ON verification_requests (expires_at, created_at DESC, id DESC)",
 			predicate:  "WHERE cancelled_at IS NULL\n      AND assigned_verifier_id IS NULL",
 		},
 	} {
 		create := "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + index.name
 		drop := "DROP INDEX CONCURRENTLY IF EXISTS " + index.name
-		if !strings.Contains(upDown, create) || !strings.Contains(upDown, index.definition) || !strings.Contains(upDown, "INCLUDE (incident_id, expires_at)") || !strings.Contains(upDown, index.predicate) {
+		if !strings.Contains(upDown, create) || !strings.Contains(upDown, index.definition) || !strings.Contains(upDown, "INCLUDE (incident_id)") || !strings.Contains(upDown, index.predicate) {
 			t.Errorf("Up is missing the expected concurrent definition for %s", index.name)
 		}
 		if !strings.Contains(upDown, drop) || strings.Index(upDown, drop) > strings.Index(upDown, create) {
