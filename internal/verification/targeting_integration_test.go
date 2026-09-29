@@ -89,8 +89,8 @@ func TestPostgresTargetingEligibilityFreshnessDistanceCapAndPrivacy(t *testing.T
 		t.Fatalf("request lifetime=%s, want %s", expiresAt.Sub(createdAt), policy.RequestLifetime)
 	}
 	views, err := verifierService.ListRequests(ctx, nearby[0].userID)
-	if err != nil || len(views) != 2 {
-		t.Fatalf("public views=%d err=%v", len(views), err)
+	if err != nil || len(views) != 1 {
+		t.Fatalf("public views=%d, want only this verifier's assigned request; err=%v", len(views), err)
 	}
 	encoded, err := json.Marshal(views)
 	if err != nil {

@@ -30,7 +30,25 @@ func (r *postgresRepository) ListEligible(ctx context.Context, userID uuid.UUID)
 	if r.pool == nil {
 		return nil, ErrUnavailable
 	}
-	rows, err := r.pool.Query(ctx, `SELECT id,incident_id,created_at,expires_at FROM verification_requests WHERE `+eligibleRequestPredicate+` ORDER BY created_at DESC, id DESC LIMIT $2`, userID, maxRequestListLimit)
+	rows, err := r.pool.Query(ctx, `
+		(SELECT id,incident_id,created_at,expires_at
+		 FROM verification_requests
+		 WHERE cancelled_at IS NULL
+		   AND expires_at > clock_timestamp()
+		   AND assigned_verifier_id = $1
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT $2)
+		UNION ALL
+		(SELECT id,incident_id,created_at,expires_at
+		 FROM verification_requests
+		 WHERE cancelled_at IS NULL
+		   AND expires_at > clock_timestamp()
+		   AND assigned_verifier_id IS NULL
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT $2)
+		ORDER BY created_at DESC, id DESC
+		LIMIT $2
+	`, userID, maxRequestListLimit)
 	if err != nil {
 		return nil, err
 	}

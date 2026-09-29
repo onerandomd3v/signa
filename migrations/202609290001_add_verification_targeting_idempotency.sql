@@ -22,7 +22,25 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS verification_requests_active_targeting_l
     WHERE cancelled_at IS NULL
       AND assigned_verifier_id IS NOT NULL;
 
+-- Verifier inbox reads use separate assigned and unassigned branches so each
+-- branch can follow its own partial index in global creation order.
+DROP INDEX CONCURRENTLY IF EXISTS verification_requests_assigned_list_idx;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS verification_requests_assigned_list_idx
+    ON verification_requests (assigned_verifier_id, created_at DESC, id DESC)
+    INCLUDE (incident_id, expires_at)
+    WHERE cancelled_at IS NULL
+      AND assigned_verifier_id IS NOT NULL;
+
+DROP INDEX CONCURRENTLY IF EXISTS verification_requests_unassigned_list_idx;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS verification_requests_unassigned_list_idx
+    ON verification_requests (created_at DESC, id DESC)
+    INCLUDE (incident_id, expires_at)
+    WHERE cancelled_at IS NULL
+      AND assigned_verifier_id IS NULL;
+
 -- +goose Down
+DROP INDEX CONCURRENTLY IF EXISTS verification_requests_unassigned_list_idx;
+DROP INDEX CONCURRENTLY IF EXISTS verification_requests_assigned_list_idx;
 DROP INDEX CONCURRENTLY IF EXISTS verification_requests_active_targeting_lookup_idx;
 DROP INDEX CONCURRENTLY IF EXISTS verification_requests_targeted_idempotency_idx;
 ALTER TABLE verification_requests DROP COLUMN IF EXISTS targeting_policy_fingerprint;

@@ -143,7 +143,10 @@ func TestPostgresOperationalGrantProvenance(t *testing.T) {
 func TestPostgresRequestAudienceExpiryAndCancellation(t *testing.T) {
 	ctx, pool, service, user, incident := integrationStore(t)
 	valid := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))
-	expired := addRequest(t, ctx, pool, incident, nil, time.Now().Add(-time.Second))
+	expired := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))
+	if _, err := pool.Exec(ctx, `UPDATE verification_requests SET created_at=clock_timestamp()-interval '1 hour', expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, expired); err != nil {
+		t.Fatal(err)
+	}
 	atBoundary := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))
 	if _, err := pool.Exec(ctx, `UPDATE verification_requests SET expires_at=clock_timestamp() WHERE id=$1`, atBoundary); err != nil {
 		t.Fatal(err)
@@ -209,6 +212,78 @@ func TestPostgresListRequestsIsBoundedAndDeterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestPostgresListEligibleUsesAssignedAndUnassignedBranches(t *testing.T) {
+	ctx, pool, _, verifierID, incidentID := integrationStore(t)
+	base := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
+	type expectedRequest struct {
+		id        uuid.UUID
+		createdAt time.Time
+		assigned  bool
+	}
+	expected := make([]expectedRequest, 0, 130)
+	for i := 0; i < 130; i++ {
+		createdAt := base.Add(time.Duration(i/2) * time.Second)
+		var assigned *uuid.UUID
+		isAssigned := i%2 == 1
+		if isAssigned {
+			assigned = &verifierID
+		}
+		id := addRequest(t, ctx, pool, incidentID, assigned, time.Now().Add(time.Hour))
+		if _, err := pool.Exec(ctx, `UPDATE verification_requests SET created_at=$2 WHERE id=$1`, id, createdAt); err != nil {
+			t.Fatal(err)
+		}
+		expected = append(expected, expectedRequest{id: id, createdAt: createdAt, assigned: isAssigned})
+	}
+
+	otherVerifier := uuid.New()
+	other := addRequest(t, ctx, pool, incidentID, &otherVerifier, time.Now().Add(time.Hour))
+	expired := addRequest(t, ctx, pool, incidentID, &verifierID, time.Now().Add(time.Hour))
+	cancelled := addRequest(t, ctx, pool, incidentID, nil, time.Now().Add(time.Hour))
+	for _, id := range []uuid.UUID{other, cancelled} {
+		if _, err := pool.Exec(ctx, `UPDATE verification_requests SET created_at=$2 WHERE id=$1`, id, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `UPDATE verification_requests SET created_at=$2, expires_at=$3 WHERE id=$1`, expired, base.Add(1000*time.Second), time.Now().Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE verification_requests SET cancelled_at=clock_timestamp() WHERE id=$1`, cancelled); err != nil {
+		t.Fatal(err)
+	}
+
+	sort.Slice(expected, func(i, j int) bool {
+		if expected[i].createdAt.Equal(expected[j].createdAt) {
+			return expected[i].id.String() > expected[j].id.String()
+		}
+		return expected[i].createdAt.After(expected[j].createdAt)
+	})
+	got, err := (&postgresRepository{pool: pool}).ListEligible(ctx, verifierID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != maxRequestListLimit {
+		t.Fatalf("ListEligible returned %d requests, want %d", len(got), maxRequestListLimit)
+	}
+	assignedCount, unassignedCount := 0, 0
+	for i, request := range got {
+		if request.ID != expected[i].id || !request.CreatedAt.Equal(expected[i].createdAt) {
+			t.Fatalf("request[%d]=(%s,%s), want (%s,%s)", i, request.ID, request.CreatedAt, expected[i].id, expected[i].createdAt)
+		}
+		if expected[i].assigned {
+			assignedCount++
+		} else {
+			unassignedCount++
+		}
+		if request.ID == other || request.ID == expired || request.ID == cancelled {
+			t.Fatalf("ineligible request %s was returned", request.ID)
+		}
+	}
+	if assignedCount == 0 || unassignedCount == 0 {
+		t.Fatalf("result branches: assigned=%d unassigned=%d; want both", assignedCount, unassignedCount)
+	}
+}
+
 func TestPostgresConcurrentIdempotentSubmissions(t *testing.T) {
 	ctx, pool, service, user, incident := integrationStore(t)
 	request := addRequest(t, ctx, pool, incident, nil, time.Now().Add(time.Hour))
