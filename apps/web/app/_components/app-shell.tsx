@@ -14,7 +14,7 @@ export function AppShell({ children }: AppShellProps) {
       >
         Skip to content
       </a>
-      <header className="mx-auto flex min-h-[4.5rem] w-[calc(100%_-_2rem)] max-w-304 items-center justify-between border-b border-border sm:min-h-[5.5rem] sm:w-[calc(100%_-_3rem)]">
+      <header className="mx-auto flex min-h-[4.5rem] w-[calc(100%_-_2rem)] max-w-304 flex-wrap items-center justify-between gap-y-1 border-b border-border py-2 sm:min-h-[5.5rem] sm:w-[calc(100%_-_3rem)] sm:flex-nowrap sm:py-0">
         <Link
           className="inline-flex items-center gap-2 text-[1.2rem] font-bold tracking-[-0.045em] no-underline focus-visible:rounded-sm sm:gap-3"
           href="/"
@@ -30,13 +30,19 @@ export function AppShell({ children }: AppShellProps) {
         </Link>
         <nav
           aria-label="Main navigation"
-          className="flex items-center gap-0 sm:gap-1"
+          className="flex w-full items-center justify-between gap-0 sm:w-auto sm:gap-1"
         >
           <Link
             className="min-h-10 rounded-md px-1.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:px-3 sm:text-sm"
             href="/incidents"
           >
             Incidents
+          </Link>
+          <Link
+            className="min-h-10 rounded-md px-1.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:px-3 sm:text-sm"
+            href="/verifications"
+          >
+            Verify
           </Link>
           <Link
             className="min-h-10 rounded-md px-1.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:px-3 sm:text-sm"
